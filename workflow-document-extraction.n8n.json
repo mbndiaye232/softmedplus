@@ -1,0 +1,448 @@
+{
+  "name": "Document Extraction - Employee Data",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "extract-document",
+        "responseMode": "responseNode",
+        "options": {
+          "public": true
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Déclenchement manuel",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "document-extraction-webhook"
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "folderId": {
+          "__rl": true,
+          "value": "scans",
+          "mode": "list",
+          "cachedResultName": "scans"
+        },
+        "options": {
+          "fields": "files(id, name, mimeType)"
+        }
+      },
+      "id": "list-drive-files",
+      "name": "Lister fichiers Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [450, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-images-pdfs",
+              "leftValue": "={{ $json.mimeType }}",
+              "rightValue": "application/pdf",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "filter-png",
+              "leftValue": "={{ $json.mimeType }}",
+              "rightValue": "image/png",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "filter-jpg",
+              "leftValue": "={{ $json.mimeType }}",
+              "rightValue": "image/jpeg",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "filter-files",
+      "name": "Filtrer PDF/PNG/JPG",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prendre le premier document disponible\nconst items = $input.all();\n\nif (items.length === 0) {\n  // Aucun document trouvé\n  return {\n    json: {\n      noDocument: true,\n      message: \"Aucun document disponible dans le dossier scans\"\n    }\n  };\n}\n\n// Retourner le premier document\nreturn items[0];"
+      },
+      "id": "take-first-document",
+      "name": "Prendre le premier document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-no-document",
+              "leftValue": "={{ $json.noDocument }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-document-exists",
+      "name": "Vérifier si document existe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{ $json.id }}",
+        "options": {
+          "googleFileConversion": {
+            "conversion": false
+          }
+        }
+      },
+      "id": "download-file",
+      "name": "Télécharger fichier",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1250, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "prepare-base64",
+              "name": "fileBase64",
+              "value": "={{ $binary.data.toString('base64') }}",
+              "type": "string"
+            },
+            {
+              "id": "prepare-mimetype",
+              "name": "fileMimeType",
+              "value": "={{ $json.mimeType }}",
+              "type": "string"
+            },
+            {
+              "id": "prepare-filename",
+              "name": "fileName",
+              "value": "={{ $json.name }}",
+              "type": "string"
+            },
+            {
+              "id": "prepare-fileid",
+              "name": "fileId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "prepare-data",
+      "name": "Préparer données pour OCR",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {
+          "maxTokens": 3000,
+          "temperature": 0.1
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tu es un expert en extraction de données depuis des documents scannés français du Congo. Extrais uniquement les informations demandées avec précision. Les dates sont au format JJ/MM/AAAA (exemple: 15/03/1985). La monnaie est le CFA (sans symbole, juste les chiffres avec espaces pour les milliers, exemple: 3 500 000). Si une information est illisible, partiellement visible, de mauvaise qualité, ou incertaine, fournis une estimation avec un flag d'incertitude et une justification. Les documents peuvent être froissés, inclinés, ou de mauvaise qualité. Certains champs peuvent être manuscrits."
+            },
+            {
+              "role": "user",
+              "content": "Extrais les données suivantes depuis cette image de document du Congo :\n- prénom\n- nom\n- date de naissance (format JJ/MM/AAAA)\n- fonction\n- date d'embauche (format JJ/MM/AAAA)\n- société\n- salaire brut (CFA, chiffres uniquement avec espaces pour milliers, exemple: 3 500 000)\n- impôts (CFA, chiffres uniquement avec espaces pour milliers)\n- cotisations sociales (CFA, chiffres uniquement avec espaces pour milliers)\n- salaire net (CFA, chiffres uniquement avec espaces pour milliers)\n\nRetourne UNIQUEMENT un JSON valide avec cette structure exacte (pas de texte avant/après, pas de markdown) :\n{\n  \"prenom\": {\"value\": \"...\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"nom\": {\"value\": \"...\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"date_naissance\": {\"value\": \"JJ/MM/AAAA ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"fonction\": {\"value\": \"...\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"date_embauche\": {\"value\": \"JJ/MM/AAAA ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"societe\": {\"value\": \"...\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"salaire_brut\": {\"value\": \"chiffres avec espaces ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"impots\": {\"value\": \"chiffres avec espaces ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"cotisations_sociales\": {\"value\": \"chiffres avec espaces ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"},\n  \"salaire_net\": {\"value\": \"chiffres avec espaces ou 'illisible'\", \"confidence\": 0.0-1.0, \"justification\": \"phrase courte\"}\n}\n\nRègles importantes:\n- Pour chaque champ, si la valeur est illisible, utilise \"illisible\" comme value et confidence à 0.0\n- Si la valeur est partiellement lisible mais incertaine, fournis une estimation avec confidence < 0.7 et justification explicite\n- Les dates doivent être au format JJ/MM/AAAA uniquement\n- Les montants CFA doivent être des chiffres avec espaces (pas de virgules, pas de points, pas de symbole CFA)\n- Les justifications doivent être courtes (maximum 1 phrase)"
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "image_url",
+                  "image_url": {
+                    "url": "={{ 'data:' + $json.fileMimeType + ';base64,' + $json.fileBase64 }}"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "id": "extract-data-ai",
+      "name": "Extraction IA avec GPT-4 Vision",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [1650, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "2",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parser la réponse JSON de l'IA\nconst aiResponse = $input.item.json.message.content.text || $input.item.json.message.content[0].text || $input.item.json.message.content;\nlet extractedData;\nlet errors = [];\n\ntry {\n  // Nettoyer la réponse (retirer markdown si présent)\n  let cleanResponse = aiResponse.trim();\n  if (typeof cleanResponse !== 'string') {\n    cleanResponse = JSON.stringify(cleanResponse);\n  }\n  \n  // Retirer markdown code blocks\n  if (cleanResponse.includes('```json')) {\n    cleanResponse = cleanResponse.replace(/```json[\\s\\S]*?```/g, (match) => {\n      return match.replace(/```json/g, '').replace(/```/g, '').trim();\n    });\n  } else if (cleanResponse.includes('```')) {\n    cleanResponse = cleanResponse.replace(/```[\\s\\S]*?```/g, (match) => {\n      return match.replace(/```/g, '').trim();\n    });\n  }\n  \n  // Extraire JSON si c'est dans une chaîne\n  const jsonMatch = cleanResponse.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    cleanResponse = jsonMatch[0];\n  }\n  \n  extractedData = JSON.parse(cleanResponse);\n} catch (error) {\n  errors.push(`Erreur parsing JSON: ${error.message}`);\n  console.error('Erreur parsing:', error);\n  console.error('Réponse reçue:', aiResponse);\n  extractedData = {};\n}\n\n// Liste des champs à extraire\nconst fields = [\n  'prenom', 'nom', 'date_naissance', 'fonction', \n  'date_embauche', 'societe', 'salaire_brut', \n  'impots', 'cotisations_sociales', 'salaire_net'\n];\n\n// Construire la structure de données finale avec value/confidence/justification\nconst formattedData = {};\nconst fileName = $input.first().json.fileName || 'unknown';\nconst fileId = $input.first().json.fileId || null;\n\nfields.forEach(field => {\n  if (extractedData[field] && typeof extractedData[field] === 'object') {\n    const fieldData = extractedData[field];\n    \n    // Vérifier si valeur illisible ou confidence trop faible\n    if (fieldData.value === 'illisible' || fieldData.value === 'Illisible' || \n        fieldData.value === null || fieldData.value === undefined ||\n        (fieldData.confidence !== undefined && fieldData.confidence < 0.3)) {\n      \n      // Déterminer le message d'erreur\n      if (fieldData.value === 'illisible' || fieldData.value === 'Illisible') {\n        errors.push(`${field}: illisible`);\n      } else if (fieldData.confidence < 0.3) {\n        errors.push(`${field}: confidence trop faible (${fieldData.confidence || 0})`);\n      } else {\n        errors.push(`${field}: valeur manquante`);\n      }\n    }\n    \n    // Garder la structure complète (value, confidence, justification)\n    formattedData[field] = {\n      value: fieldData.value || null,\n      confidence: fieldData.confidence !== undefined ? fieldData.confidence : 0.0,\n      justification: fieldData.justification || 'Non fourni'\n    };\n  } else {\n    // Champ non extrait\n    formattedData[field] = {\n      value: null,\n      confidence: 0.0,\n      justification: 'Champ non extrait par l\\'IA'\n    };\n    errors.push(`${field}: champ non extrait`);\n  }\n});\n\n// Déterminer le statut\nconst fieldsWithErrors = errors.length;\nconst totalFields = fields.length;\nlet determineStatus;\n\nif (fieldsWithErrors === 0) {\n  determineStatus = 'extracted';\n} else if (fieldsWithErrors < totalFields / 2) {\n  determineStatus = 'partial';\n} else {\n  determineStatus = 'failed';\n}\n\nreturn {\n  filename: fileName,\n  fileId: fileId,\n  status: determineStatus,\n  data: formattedData,\n  errors: errors\n};"
+      },
+      "id": "format-response",
+      "name": "Formater réponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "fileId": "={{ $json.fileId }}"
+      },
+      "id": "delete-file",
+      "name": "Supprimer fichier traité",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [2050, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "1",
+          "name": "Google Drive account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construire la réponse finale pour un document unique\nconst documentData = $input.item.json;\n\n// La structure data contient déjà value/confidence/justification pour chaque champ\n// C'est exactement ce qui est demandé dans les spécifications\nreturn {\n  status: \"success\",\n  total_documents: 1,\n  documents: [\n    {\n      filename: documentData.filename,\n      status: documentData.status,\n      data: documentData.data, // Structure complète avec value/confidence/justification pour chaque champ\n      errors: documentData.errors || []\n    }\n  ]\n};"
+      },
+      "id": "build-final-response",
+      "name": "Construire réponse finale",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Réponse quand aucun document n'est trouvé\nreturn {\n  status: \"success\",\n  total_documents: 0,\n  documents: [],\n  message: \"Aucun document disponible dans le dossier scans\"\n};"
+      },
+      "id": "no-document-response",
+      "name": "Réponse aucun document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 500]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Répondre au Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2450, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Déclenchement manuel": {
+      "main": [
+        [
+          {
+            "node": "Lister fichiers Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lister fichiers Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Filtrer PDF/PNG/JPG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrer PDF/PNG/JPG": {
+      "main": [
+        [
+          {
+            "node": "Prendre le premier document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prendre le premier document": {
+      "main": [
+        [
+          {
+            "node": "Vérifier si document existe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vérifier si document existe": {
+      "main": [
+        [
+          {
+            "node": "Télécharger fichier",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Réponse aucun document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Télécharger fichier": {
+      "main": [
+        [
+          {
+            "node": "Préparer données pour OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Préparer données pour OCR": {
+      "main": [
+        [
+          {
+            "node": "Extraction IA avec GPT-4 Vision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction IA avec GPT-4 Vision": {
+      "main": [
+        [
+          {
+            "node": "Formater réponse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formater réponse": {
+      "main": [
+        [
+          {
+            "node": "Supprimer fichier traité",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supprimer fichier traité": {
+      "main": [
+        [
+          {
+            "node": "Construire réponse finale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Construire réponse finale": {
+      "main": [
+        [
+          {
+            "node": "Répondre au Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Réponse aucun document": {
+      "main": [
+        [
+          {
+            "node": "Répondre au Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "n8n-instance"
+  },
+  "id": "document-extraction-workflow",
+  "tags": []
+}
