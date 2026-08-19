@@ -2220,10 +2220,6 @@ function renderAuthLayout() {
           <span style="font-weight:700; font-size:1.4rem; color:#ffffff;">Soft<span style="color:var(--primary);">Med</span></span>
         </div>
         <div style="display:flex; align-items:center; gap:20px;">
-          <div class="lang-selector">
-            <span class="lang-btn ${state.currentLang === 'fr' ? 'active' : ''}" onclick="switchLang('fr')">FR</span>
-            <span class="lang-btn ${state.currentLang === 'ar' ? 'active' : ''}" onclick="switchLang('ar')">العربية</span>
-          </div>
           <button class="btn btn-secondary" onclick="openAuthModal('login')">${t('homeCTAConnect')}</button>
           <button class="btn btn-primary" onclick="openAuthModal('signup')">${t('homeCTASignup')}</button>
         </div>
@@ -2444,10 +2440,6 @@ function renderAppLayout() {
           <div class="header-actions">
             <div style="font-size:0.85rem; color:var(--text-muted);">
               <i class="fas fa-clinic-medical"></i> ${state.tenant.name} (Slug: <strong>${state.tenant.slug}</strong>)
-            </div>
-            <div class="lang-selector">
-              <span class="lang-btn ${state.currentLang === 'fr' ? 'active' : ''}" onclick="switchLang('fr')">FR</span>
-              <span class="lang-btn ${state.currentLang === 'ar' ? 'active' : ''}" onclick="switchLang('ar')">العربية</span>
             </div>
           </div>
         </header>
