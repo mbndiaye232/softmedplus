@@ -347,7 +347,7 @@ let state = {
   token: localStorage.getItem('token') || null,
   user: JSON.parse(localStorage.getItem('user')) || null,
   tenant: JSON.parse(localStorage.getItem('tenant')) || null,
-  currentLang: localStorage.getItem('lang') || 'fr',
+  currentLang: 'fr',
   currentTab: 'dashboard',
   
   // Data caches
@@ -2727,5 +2727,7 @@ function initApp() {
 
 // Run app init on load
 window.addEventListener('DOMContentLoaded', () => {
+  localStorage.setItem('lang', 'fr');
+  document.body.removeAttribute('dir');
   initApp();
 });
