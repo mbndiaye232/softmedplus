@@ -477,6 +477,19 @@ async function handleTenantSignup(e) {
   const first_name = document.getElementById('signup-first').value;
   const last_name = document.getElementById('signup-last').value;
 
+  const logo_url = document.getElementById('signup-logo').value;
+  const address = document.getElementById('signup-address').value;
+  
+  const lat = parseFloat(document.getElementById('signup-lat').value);
+  const lng = parseFloat(document.getElementById('signup-lng').value);
+  const gps_coordinates = (!isNaN(lat) && !isNaN(lng)) ? { latitude: lat, longitude: lng } : null;
+
+  const payment_methods = [];
+  if (document.getElementById('signup-pay-wave').checked) payment_methods.push('WAVE');
+  if (document.getElementById('signup-pay-om').checked) payment_methods.push('ORANGE_MONEY');
+  if (document.getElementById('signup-pay-yas').checked) payment_methods.push('YAS');
+  if (document.getElementById('signup-pay-card').checked) payment_methods.push('CARTE_BANCAIRE');
+
   try {
     const response = await fetch('/api/auth/register-tenant', {
       method: 'POST',
@@ -489,7 +502,11 @@ async function handleTenantSignup(e) {
         email,
         password,
         first_name,
-        last_name
+        last_name,
+        logo_url,
+        address,
+        gps_coordinates,
+        payment_methods
       })
     });
 
@@ -2276,7 +2293,7 @@ function renderAuthLayout() {
 
     <!-- Auth Modal Overlay -->
     <div class="modal-overlay" id="auth-modal" style="display:none; justify-content:center; align-items:center;">
-      <div class="modal-container" style="width:450px; max-width:95%; position:relative; animation: modalFadeIn 0.3s ease;">
+      <div class="modal-container" style="width:500px; max-width:95%; max-height:90vh; overflow-y:auto; position:relative; animation: modalFadeIn 0.3s ease;">
         <button class="modal-close" onclick="closeAuthModal()" style="position:absolute; top:15px; right:15px; background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;">&times;</button>
         <div style="text-align:center; margin-bottom:20px; padding-top:15px;">
           <h3 id="auth-modal-title" style="color:var(--text-primary); font-size:1.4rem; margin-bottom:15px;">Se Connecter</h3>
@@ -2325,6 +2342,44 @@ function renderAuthLayout() {
               <input type="text" class="form-control" id="signup-ninea" placeholder="N00189-RC" />
             </div>
           </div>
+          
+          <div class="form-group" style="display:flex; gap:10px;">
+            <div style="flex:1;">
+              <label class="form-label">Adresse Physique</label>
+              <input type="text" class="form-control" id="signup-address" placeholder="12 Rue de Dakar, Fann" />
+            </div>
+            <div style="flex:1;">
+              <label class="form-label">URL du Logo</label>
+              <input type="text" class="form-control" id="signup-logo" placeholder="/logo-espoir.png" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Géolocalisation (Coordonnées GPS)</label>
+            <div style="display:flex; gap:10px;">
+              <input type="number" step="any" class="form-control" id="signup-lat" placeholder="Latitude (ex: 14.6937)" />
+              <input type="number" step="any" class="form-control" id="signup-lng" placeholder="Longitude (ex: -17.4479)" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Moyens de paiement acceptés</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; margin-bottom:15px;">
+              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
+                <input type="checkbox" id="signup-pay-wave" checked /> Wave
+              </label>
+              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
+                <input type="checkbox" id="signup-pay-om" checked /> Orange Money
+              </label>
+              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
+                <input type="checkbox" id="signup-pay-yas" checked /> Yas Pay
+              </label>
+              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
+                <input type="checkbox" id="signup-pay-card" checked /> Carte Bancaire
+              </label>
+            </div>
+          </div>
+
           <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px;">
             <h5 style="margin-bottom:10px; color:var(--text-primary);">Compte Administrateur Principal</h5>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
