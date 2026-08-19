@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: softmed-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: HMAC_SECRET
+        generateValue: true
+      - key: DB_HOST
+        fromDatabase:
+          name: softmed-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: softmed-db
+          property: port
+      - key: DB_USER
+        fromDatabase:
+          name: softmed-db
+          property: database
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: softmed-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: softmed-db
+          property: database
+
+databases:
+  - name: softmed-db
+    plan: free
