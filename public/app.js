@@ -2217,7 +2217,7 @@ function renderAuthLayout() {
             <path d="M46 36 L50 36 L52 28 L55 42 L57 33 L59 36 L63 36" stroke="#4a90e2" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
             <path d="M50 78 L50 86 M46 82 L54 82" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" />
           </svg>
-          <span style="font-weight:700; font-size:1.4rem; color:var(--text-primary);">Soft<span style="color:var(--primary);">Med</span></span>
+          <span style="font-weight:700; font-size:1.4rem; color:#ffffff;">Soft<span style="color:var(--primary);">Med</span></span>
         </div>
         <div style="display:flex; align-items:center; gap:20px;">
           <div class="lang-selector">
