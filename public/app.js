@@ -2577,15 +2577,39 @@ function printInvoiceDocument() {
   `);
   doc.close();
 
-  iframe.contentWindow.focus();
-  setTimeout(() => {
+  const images = doc.images;
+  let loaded = 0;
+  const total = images.length;
+  
+  const triggerPrint = () => {
+    iframe.contentWindow.focus();
     iframe.contentWindow.print();
     setTimeout(() => {
       if (document.body.contains(iframe)) {
         document.body.removeChild(iframe);
       }
-    }, 1500);
-  }, 400);
+    }, 2000);
+  };
+
+  if (total === 0) {
+    setTimeout(triggerPrint, 300);
+  } else {
+    for (let i = 0; i < total; i++) {
+      if (images[i].complete) {
+        loaded++;
+      } else {
+        images[i].onload = images[i].onerror = () => {
+          loaded++;
+          if (loaded >= total) triggerPrint();
+        };
+      }
+    }
+    if (loaded >= total) {
+      setTimeout(triggerPrint, 300);
+    } else {
+      setTimeout(triggerPrint, 1000);
+    }
+  }
 }
 
 function renderInvoicePrintModalContent() {
