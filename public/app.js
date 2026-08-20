@@ -2532,6 +2532,62 @@ function switchPrintMode(mode) {
   renderInvoicePrintModalContent();
 }
 
+function printInvoiceDocument() {
+  const sheet = document.getElementById('invoice-sheet');
+  if (!sheet) return;
+  
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+      <meta charset="UTF-8">
+      <title>SoftMed - Facture ${currentPrintInvoiceData?.invoice?.invoice_number || ''}</title>
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+        @page { size: A4 portrait; margin: 10mm 12mm; }
+        body { 
+          font-family: 'Poppins', Arial, sans-serif; 
+          background: #ffffff !important; 
+          color: #2c3e50 !important; 
+          margin: 0; 
+          padding: 10px; 
+          -webkit-print-color-adjust: exact; 
+          print-color-adjust: exact; 
+        }
+        * { box-sizing: border-box; }
+        .no-print { display: none !important; }
+      </style>
+    </head>
+    <body>
+      ${sheet.outerHTML}
+    </body>
+    </html>
+  `);
+  doc.close();
+
+  iframe.contentWindow.focus();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+    setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    }, 1500);
+  }, 400);
+}
+
 function renderInvoicePrintModalContent() {
   if (!currentPrintInvoiceData) return;
   const { invoice, tenant, lines, payments } = currentPrintInvoiceData;
@@ -2551,16 +2607,19 @@ function renderInvoicePrintModalContent() {
   const statusBadge = invoice.status === 'PAID' ? 'ACQUITTÉE / RÉGLÉE' : (invoice.status === 'PARTIALLY_PAID' ? 'PARTIELLEMENT RÉGLÉE' : 'ÉMISE / EN ATTENTE');
   const statusColor = invoice.status === 'PAID' ? '#27ae60' : (invoice.status === 'PARTIALLY_PAID' ? '#e67e22' : '#e74c3c');
 
-  const stampHtml = tenant.stamp_url ? `
-    <div style="text-align:center;">
-      <img src="${tenant.stamp_url}" style="max-height:85px; max-width:150px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));" alt="Cachet Clinique" onerror="this.style.display='none'" />
-      <div style="font-size:0.75rem; color:#555; margin-top:4px;">Cachet & Signature Officielle</div>
+  const isCustomStamp = tenant.stamp_url && !tenant.stamp_url.includes('stamp-default.png');
+  const stampHtml = isCustomStamp ? `
+    <div style="text-align:center; margin-top:5px;">
+      <img src="${tenant.stamp_url}" style="max-height:105px; max-width:160px; object-fit:contain; filter: contrast(1.1) brightness(0.95); mix-blend-mode: multiply;" alt="Cachet Clinique" />
+      <div style="font-size:0.75rem; color:#475569; font-weight:600; margin-top:2px;">Cachet & Signature Officielle</div>
     </div>
   ` : `
-    <div style="border:2px dashed #2c3e50; border-radius:8px; padding:10px 15px; text-align:center; display:inline-block; transform:rotate(-2deg);">
-      <div style="font-size:0.8rem; font-weight:bold; color:#2c3e50; text-transform:uppercase;">${tenant.name || 'CLINIQUE MÉDICALE'}</div>
-      <div style="font-size:0.65rem; color:#7f8c8d;">CACHET ET SIGNATURE AUTORISÉE</div>
-      <div style="font-size:0.7rem; font-weight:600; color:#27ae60; margin-top:2px;">POUR ACQUIT</div>
+    <div style="width:145px; height:145px; border:3px double #1e40af; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:8px; text-align:center; transform:rotate(-7deg); color:#1e40af; font-family:'Poppins', sans-serif; background:rgba(30,64,175,0.03); box-shadow:0 0 0 2px rgba(30,64,175,0.25); margin:5px auto 0 auto; user-select:none;">
+      <div style="font-size:0.55rem; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; line-height:1.1; max-width:120px;">${(tenant.name || 'CLINIQUE MÉDICALE').toUpperCase()}</div>
+      <div style="font-size:0.45rem; color:#2563eb; margin:2px 0; font-weight:600;">★ SERVICE FINANCIER & CAISSE ★</div>
+      <div style="font-size:0.72rem; font-weight:900; color:#1e40af; border-top:1.5px solid #1e40af; border-bottom:1.5px solid #1e40af; padding:2px 0; width:92%; margin:2px 0; text-transform:uppercase; letter-spacing:1px;">POUR ACQUIT</div>
+      <div style="font-size:0.52rem; font-weight:700; color:#1e3a8a;">${new Date().toLocaleDateString('fr-FR')}</div>
+      <div style="font-size:0.46rem; color:#334155; font-weight:600;">CACHET ET SIGNATURE</div>
     </div>
   `;
 
@@ -2578,7 +2637,7 @@ function renderInvoicePrintModalContent() {
         ` : ''}
       </div>
       <div style="display:flex; gap:10px;">
-        <button class="btn btn-primary btn-sm" onclick="window.print()" style="background:#27ae60; border-color:#27ae60; padding:6px 14px;">
+        <button class="btn btn-primary btn-sm" onclick="printInvoiceDocument()" style="background:#27ae60; border-color:#27ae60; padding:6px 14px;">
           <i class="fas fa-print"></i> Imprimer / Télécharger PDF
         </button>
         <button class="btn btn-secondary btn-sm" onclick="closeInvoicePrintModal()">
