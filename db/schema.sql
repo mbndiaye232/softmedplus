@@ -137,6 +137,33 @@ CREATE TABLE practitioner_specialties (
     CONSTRAINT unique_practitioner_specialty UNIQUE (practitioner_id, specialty_id)
 );
 
+CREATE TABLE medical_departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    code VARCHAR(50) NOT NULL, -- Ex: SERV-CARDIO, SERV-PED, SERV-MEDGEN
+    name VARCHAR(100) NOT NULL, -- Ex: Service de Cardiologie, Service de Pédiatrie
+    specialty_id UUID REFERENCES medical_specialties(id) ON DELETE SET NULL,
+    head_practitioner_id UUID REFERENCES practitioners(id) ON DELETE SET NULL,
+    building_id UUID REFERENCES hospital_buildings(id) ON DELETE SET NULL,
+    location VARCHAR(100),
+    description TEXT,
+    color_code VARCHAR(7) DEFAULT '#4a90e2',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_tenant_department_code UNIQUE (tenant_id, code)
+);
+
+CREATE TABLE practitioner_departments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    practitioner_id UUID NOT NULL REFERENCES practitioners(id) ON DELETE CASCADE,
+    department_id UUID NOT NULL REFERENCES medical_departments(id) ON DELETE CASCADE,
+    role_in_department VARCHAR(100) DEFAULT 'Praticien Titulaire', -- Chef de Service, Praticien Titulaire, Médecin Consultant, Interne
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_practitioner_department UNIQUE (practitioner_id, department_id)
+);
+
 -- ============================================================================
 -- 2. RÉFÉRENTIEL PATIENTS & COUVERTURE ASSURANCE (IPM)
 -- ============================================================================

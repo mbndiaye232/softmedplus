@@ -120,7 +120,13 @@ app.post('/api/specialties', practitionerCtrl.createSpecialty);
 app.put('/api/specialties/:id', practitionerCtrl.updateSpecialty);
 app.delete('/api/specialties/:id', practitionerCtrl.deleteSpecialty);
 
-// 3c. Practitioners & Doctors CRUD (Grades & Multi-Specialties)
+// 3c. Medical Departments / Services Hospitaliers CRUD
+app.get('/api/departments', practitionerCtrl.getDepartments);
+app.post('/api/departments', practitionerCtrl.createDepartment);
+app.put('/api/departments/:id', practitionerCtrl.updateDepartment);
+app.delete('/api/departments/:id', practitionerCtrl.deleteDepartment);
+
+// 3d. Practitioners & Doctors CRUD (Grades, Multi-Specialties & Departments)
 app.get('/api/practitioners', practitionerCtrl.getPractitioners);
 app.post('/api/practitioners', practitionerCtrl.createPractitioner);
 app.put('/api/practitioners/:id', practitionerCtrl.updatePractitioner);

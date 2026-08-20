@@ -794,27 +794,30 @@ async function simulateRecovery(invoiceId, phone) {
 }
 
 // ============================================================================
-// 2. Agenda & scheduling UI (With Practitioners & Specialties CRUD)
+// 2. Agenda & scheduling UI (Praticiens, Services Hospitaliers & Spécialités)
 // ============================================================================
 let activePractitionerId = null;
-let activeAgendaSubTab = 'calendar'; // 'calendar', 'practitioners', 'specialties'
+let activeAgendaSubTab = 'calendar'; // 'calendar', 'practitioners', 'departments', 'specialties'
 let currentAgendaSpecialties = [];
 let currentAgendaPractitioners = [];
+let currentAgendaDepartments = [];
 
 async function renderAgenda(container) {
   const fr = state.currentLang !== 'ar';
 
   // Fetch all related entities in parallel
-  const [patients, services, dbPractitioners, dbSpecialties, rawAppointments] = await Promise.all([
+  const [patients, services, dbPractitioners, dbSpecialties, dbDepartments, rawAppointments] = await Promise.all([
     api.request('/patients').catch(() => []),
     api.request('/medical-services').catch(() => []),
     api.request('/practitioners').catch(() => []),
     api.request('/specialties').catch(() => []),
+    api.request('/departments').catch(() => []),
     api.request('/appointments').catch(() => [])
   ]);
 
   currentAgendaSpecialties = dbSpecialties || [];
   currentAgendaPractitioners = dbPractitioners || [];
+  currentAgendaDepartments = dbDepartments || [];
 
   if (!activePractitionerId && dbPractitioners.length > 0) {
     activePractitionerId = dbPractitioners[0].id;
@@ -830,14 +833,23 @@ async function renderAgenda(container) {
         <button class="btn ${activeAgendaSubTab === 'practitioners' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('practitioners')" style="font-size:0.9rem; padding:7px 18px;">
           <i class="fas fa-user-md"></i> ${fr ? `Praticiens & Médecins (${dbPractitioners.length})` : `الأطباء (${dbPractitioners.length})`}
         </button>
+        <button class="btn ${activeAgendaSubTab === 'departments' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('departments')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-hospital-user"></i> ${fr ? `Services Hospitaliers (${dbDepartments.length})` : `الأقسام (${dbDepartments.length})`}
+        </button>
         <button class="btn ${activeAgendaSubTab === 'specialties' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('specialties')" style="font-size:0.9rem; padding:7px 18px;">
-          <i class="fas fa-stethoscope"></i> ${fr ? `Spécialités Médicales (${dbSpecialties.length})` : `التخصصات الطبية (${dbSpecialties.length})`}
+          <i class="fas fa-stethoscope"></i> ${fr ? `Spécialités Médicales (${dbSpecialties.length})` : `التخصصات (${dbSpecialties.length})`}
         </button>
       </div>
 
       ${activeAgendaSubTab === 'practitioners' ? `
         <button class="btn btn-primary" onclick="openCreatePractitionerModal()" style="font-size:0.85rem;">
           <i class="fas fa-user-plus"></i> ${fr ? 'Nouveau Praticien' : 'طبيب جديد'}
+        </button>
+      ` : ''}
+
+      ${activeAgendaSubTab === 'departments' ? `
+        <button class="btn btn-primary" onclick="openCreateDepartmentModal()" style="font-size:0.85rem;">
+          <i class="fas fa-plus"></i> ${fr ? 'Nouveau Service Hospitalier' : 'قسم جديد'}
         </button>
       ` : ''}
 
@@ -852,8 +864,10 @@ async function renderAgenda(container) {
       ${activeAgendaSubTab === 'calendar' 
         ? renderAgendaCalendarContent(patients, services, dbPractitioners, rawAppointments, fr)
         : activeAgendaSubTab === 'practitioners'
-          ? renderAgendaPractitionersContent(dbPractitioners, dbSpecialties, fr)
-          : renderAgendaSpecialtiesContent(dbSpecialties, fr)
+          ? renderAgendaPractitionersContent(dbPractitioners, dbSpecialties, dbDepartments, fr)
+          : activeAgendaSubTab === 'departments'
+            ? renderAgendaDepartmentsContent(dbDepartments, dbSpecialties, dbPractitioners, fr)
+            : renderAgendaSpecialtiesContent(dbSpecialties, fr)
       }
     </div>
   `;
@@ -900,6 +914,10 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                   : `<span class="badge" style="background:#64748b; color:#fff; font-size:0.68rem; padding:1px 5px;">${prac.specialty_name || 'Généraliste'}</span>`
                 );
 
+            const deptBadges = Array.isArray(prac.departments) && prac.departments.length > 0
+              ? prac.departments.map(d => `<span class="badge" style="background:var(--bg-surface); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.65rem; padding:1px 4px;"><i class="fas fa-hospital-alt" style="color:var(--primary); font-size:0.6rem;"></i> ${d.name}</span>`).join(' ')
+              : '';
+
             return `
               <div class="practitioner-item ${isSelected ? 'active' : ''}" onclick="selectPractitioner('${prac.id}')" style="border-left: 4px solid ${prac.color_code || '#4a90e2'}; margin-bottom:10px;">
                 <span class="color-dot" style="background-color: ${prac.color_code || '#4A90E2'}"></span>
@@ -910,9 +928,10 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                   <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">
                     ${prac.grade || 'Docteur'} • <span class="badge" style="background:${prac.status === 'Interne' ? 'var(--primary)' : '#64748b'}; color:#fff; font-size:0.65rem; padding:0 4px;">${prac.status || 'Interne'}</span>
                   </div>
-                  <div style="display:flex; flex-wrap:wrap; gap:3px;">
+                  <div style="display:flex; flex-wrap:wrap; gap:3px; margin-bottom:3px;">
                     ${specialtyLabels}
                   </div>
+                  ${deptBadges ? `<div style="display:flex; flex-wrap:wrap; gap:2px;">${deptBadges}</div>` : ''}
                 </div>
               </div>
             `;
@@ -1022,9 +1041,9 @@ function selectPractitioner(id) {
 }
 
 // ----------------------------------------------------------------------------
-// B. Practitioners & Doctors Management Subtab (Grades & Multi-Specialties)
+// B. Practitioners & Doctors Management Subtab (Grades, Multi-Specialties & Departments)
 // ----------------------------------------------------------------------------
-function renderAgendaPractitionersContent(practitioners, specialties, fr) {
+function renderAgendaPractitionersContent(practitioners, specialties, departments, fr) {
   const total = practitioners.length;
   const gpCount = practitioners.filter(p => p.is_general_practitioner).length;
   const specialistsCount = practitioners.filter(p => !p.is_general_practitioner && Array.isArray(p.specialties) && p.specialties.length > 0).length;
@@ -1063,8 +1082,9 @@ function renderAgendaPractitionersContent(practitioners, specialties, fr) {
           <thead>
             <tr>
               <th>Praticien</th>
-              <th>Grade & Titre</th>
+              <th>Grade Académique / Titre</th>
               <th>Spécialités</th>
+              <th>Services Hospitaliers</th>
               <th>Statut</th>
               <th>Contact & N° Ordre</th>
               <th>Tarif Consultation</th>
@@ -1075,7 +1095,7 @@ function renderAgendaPractitionersContent(practitioners, specialties, fr) {
           <tbody>
             ${practitioners.length === 0 ? `
               <tr>
-                <td colspan="8" style="text-align:center; padding:35px; color:var(--text-muted);">
+                <td colspan="9" style="text-align:center; padding:35px; color:var(--text-muted);">
                   Aucun praticien enregistré pour cette clinique.
                 </td>
               </tr>
@@ -1087,6 +1107,18 @@ function renderAgendaPractitionersContent(practitioners, specialties, fr) {
                     ? docSpecialties.map(s => `<span class="badge" style="background:${s.color_code || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:3px 8px; border-radius:4px; margin-right:4px; margin-bottom:3px; display:inline-block;">${s.name}</span>`).join('')
                     : `<span class="badge" style="background:#64748b; color:#fff; font-size:0.75rem; padding:3px 8px;">${p.specialty_name || 'Médecine Générale'}</span>`
                   );
+
+              const docDepts = Array.isArray(p.departments) ? p.departments : [];
+              const deptBadges = docDepts.length > 0
+                ? docDepts.map(d => `
+                    <div style="margin-bottom:3px;">
+                      <span class="badge" style="background:${d.color_code || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:3px 7px; border-radius:4px;">
+                        <i class="fas fa-hospital-alt"></i> ${d.name}
+                      </span>
+                      ${d.role_in_department ? `<span style="font-size:0.75rem; color:var(--text-muted); margin-left:4px;">(${d.role_in_department})</span>` : ''}
+                    </div>
+                  `).join('')
+                : '<span style="color:var(--text-muted); font-size:0.8rem;">Non assigné</span>';
 
               let gradeBadgeColor = '#3b82f6';
               if ((p.grade || '').toLowerCase().includes('professeur')) gradeBadgeColor = '#8b5cf6';
@@ -1112,7 +1144,10 @@ function renderAgendaPractitionersContent(practitioners, specialties, fr) {
                     </span>
                   </td>
                   <td>
-                    <div style="max-width:280px;">${specialtyBadges}</div>
+                    <div style="max-width:220px;">${specialtyBadges}</div>
+                  </td>
+                  <td>
+                    <div style="max-width:240px;">${deptBadges}</div>
                   </td>
                   <td>
                     <span class="status-badge ${p.status === 'Interne' ? 'interne' : 'externe'}">
@@ -1154,7 +1189,129 @@ function renderAgendaPractitionersContent(practitioners, specialties, fr) {
 }
 
 // ----------------------------------------------------------------------------
-// C. Medical Specialties Management Subtab (CRUD)
+// C. Medical Departments (Services Hospitaliers) Subtab (CRUD)
+// ----------------------------------------------------------------------------
+function renderAgendaDepartmentsContent(departments, specialties, practitioners, fr) {
+  const total = departments.length;
+  const activeCount = departments.filter(d => d.is_active !== false).length;
+  const headsCount = departments.filter(d => d.head_practitioner_id).length;
+
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Total Services Cliniques</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:5px;">${total}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Services Actifs</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--success); margin-top:5px;">${activeCount}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Chefs de Service Nommés</div>
+        <div style="font-size:1.6rem; font-weight:800; color:#8b5cf6; margin-top:5px;">${headsCount}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-hospital-user"></i> Organigramme des Services Médicaux & Départements</span>
+        <button class="btn btn-primary btn-sm" onclick="openCreateDepartmentModal()">
+          <i class="fas fa-plus"></i> Nouveau Service Hospitalier
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Service Hospitalier</th>
+              <th>Code / Réf</th>
+              <th>Spécialité Principale</th>
+              <th>Chef de Service</th>
+              <th>Praticiens Rattachés</th>
+              <th>Localisation</th>
+              <th>Statut</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${departments.length === 0 ? `
+              <tr>
+                <td colspan="8" style="text-align:center; padding:35px; color:var(--text-muted);">
+                  Aucun service hospitalier enregistré.
+                </td>
+              </tr>
+            ` : departments.map(d => {
+              const deptPracs = Array.isArray(d.practitioners) ? d.practitioners : [];
+              const pracsList = deptPracs.length > 0
+                ? deptPracs.map(p => `
+                    <span class="badge" style="background:var(--bg-surface); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.75rem; padding:2px 6px; margin:2px; display:inline-flex; align-items:center; gap:4px;">
+                      <span class="color-dot" style="background:${p.color_code || '#4a90e2'}; width:8px; height:8px; border-radius:50%;"></span>
+                      ${p.title || 'Dr.'} ${p.last_name} ${p.role_in_department === 'Chef de Service' ? '⭐' : ''}
+                    </span>
+                  `).join('')
+                : '<span style="color:var(--text-muted); font-size:0.8rem;">Aucun praticien</span>';
+
+              return `
+                <tr style="opacity: ${d.is_active ? 1 : 0.6}">
+                  <td>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <span class="color-dot" style="background:${d.color_code || '#4a90e2'}; width:12px; height:12px; border-radius:50%;"></span>
+                      <div>
+                        <strong style="color:var(--text-primary); font-size:0.95rem;">${d.name}</strong>
+                        ${d.description ? `<div style="font-size:0.75rem; color:var(--text-muted);">${d.description}</div>` : ''}
+                      </div>
+                    </div>
+                  </td>
+                  <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${d.code}</code></td>
+                  <td>
+                    ${d.specialty_name ? `
+                      <span class="badge" style="background:${d.specialty_color || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:3px 8px; border-radius:4px; font-weight:600;">
+                        <i class="fas fa-stethoscope"></i> ${d.specialty_name}
+                      </span>
+                    ` : '<span style="color:var(--text-muted); font-size:0.8rem;">Non affiliée</span>'}
+                  </td>
+                  <td>
+                    ${d.head_first_name ? `
+                      <div style="font-size:0.88rem; font-weight:600; color:var(--text-primary);">
+                        <i class="fas fa-star" style="color:#f59e0b; font-size:0.75rem;"></i> ${d.head_title || 'Dr.'} ${d.head_first_name} ${d.head_last_name}
+                      </div>
+                      <div style="font-size:0.72rem; color:var(--text-muted);">${d.head_grade || 'Docteur'}</div>
+                    ` : '<span style="color:var(--text-muted); font-size:0.8rem; font-style:italic;">Non désigné</span>'}
+                  </td>
+                  <td>
+                    <div style="max-width:280px;">${pracsList}</div>
+                  </td>
+                  <td>
+                    <span style="font-size:0.85rem; color:var(--text-primary);">
+                      <i class="fas fa-map-marker-alt" style="color:var(--primary); font-size:0.8rem;"></i> ${d.location || d.building_name || 'Clinique'}
+                    </span>
+                  </td>
+                  <td>
+                    <span class="badge ${d.is_active ? 'badge-success' : 'badge-danger'}" style="background-color:${d.is_active ? 'var(--success)' : 'var(--danger)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">
+                      ${d.is_active ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="openEditDepartmentModal('${d.id}')" style="padding:4px 8px; margin-right:4px;" title="Modifier">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteDepartmentConfirm('${d.id}', '${d.name.replace(/'/g, "\\'")}')" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);" title="Supprimer">
+                      <i class="fas fa-trash-alt"></i>
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// D. Medical Specialties Management Subtab (CRUD)
 // ----------------------------------------------------------------------------
 function renderAgendaSpecialtiesContent(specialties, fr) {
   const total = specialties.length;
@@ -1189,6 +1346,7 @@ function renderAgendaSpecialtiesContent(specialties, fr) {
               <th>Description / Champ d'intervention</th>
               <th>Couleur d'identification</th>
               <th>Praticiens Rattachés</th>
+              <th>Services Cliniques</th>
               <th>Statut</th>
               <th style="text-align:right;">Actions</th>
             </tr>
@@ -1196,7 +1354,7 @@ function renderAgendaSpecialtiesContent(specialties, fr) {
           <tbody>
             ${specialties.length === 0 ? `
               <tr>
-                <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
+                <td colspan="8" style="text-align:center; padding:35px; color:var(--text-muted);">
                   Aucune spécialité médicale enregistrée.
                 </td>
               </tr>
@@ -1207,7 +1365,7 @@ function renderAgendaSpecialtiesContent(specialties, fr) {
                 </td>
                 <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${s.code}</code></td>
                 <td>
-                  <div style="font-size:0.85rem; color:var(--text-muted); max-width:320px;">${s.description || '-'}</div>
+                  <div style="font-size:0.85rem; color:var(--text-muted); max-width:300px;">${s.description || '-'}</div>
                 </td>
                 <td>
                   <span class="badge" style="background:${s.color_code || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:4px 10px; border-radius:12px; font-weight:600;">
@@ -1217,6 +1375,11 @@ function renderAgendaSpecialtiesContent(specialties, fr) {
                 <td>
                   <span class="badge" style="background:var(--bg-surface); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.85rem; font-weight:700;">
                     <i class="fas fa-user-md" style="color:var(--primary);"></i> ${s.practitioners_count || 0}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge" style="background:var(--bg-surface); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.85rem; font-weight:700;">
+                    <i class="fas fa-hospital-alt" style="color:#8b5cf6;"></i> ${s.departments_count || 0}
                   </span>
                 </td>
                 <td>
@@ -1242,7 +1405,148 @@ function renderAgendaSpecialtiesContent(specialties, fr) {
 }
 
 // ----------------------------------------------------------------------------
-// D. Modal Handlers for Specialties
+// E. Modal Handlers for Departments (Services Hospitaliers)
+// ----------------------------------------------------------------------------
+function openCreateDepartmentModal() {
+  const modal = document.getElementById('department-modal');
+  const form = document.getElementById('department-form');
+  if (!modal || !form) return;
+
+  form.reset();
+  document.getElementById('department-form-id').value = '';
+  document.getElementById('department-modal-title').innerText = 'Ajouter un Service Hospitalier';
+  document.getElementById('department-color').value = '#4a90e2';
+  document.getElementById('department-active').checked = true;
+
+  // Populate specialty select
+  const specSelect = document.getElementById('department-specialty-id');
+  if (specSelect) {
+    specSelect.innerHTML = '<option value="">-- Aucune Spécialité liée --</option>' +
+      currentAgendaSpecialties.map(s => `<option value="${s.id}">${s.name} (${s.code})</option>`).join('');
+  }
+
+  // Populate head practitioner select
+  const headSelect = document.getElementById('department-head-id');
+  if (headSelect) {
+    headSelect.innerHTML = '<option value="">-- Sélectionner Chef de Service --</option>' +
+      currentAgendaPractitioners.map(p => `<option value="${p.id}">${p.title || 'Dr.'} ${p.first_name} ${p.last_name} (${p.grade || 'Docteur'})</option>`).join('');
+  }
+
+  // Populate attached practitioners checkboxes
+  renderDepartmentPractitionersCheckboxes([]);
+
+  modal.style.display = 'flex';
+}
+
+function openEditDepartmentModal(id) {
+  const dept = currentAgendaDepartments.find(d => d.id === id);
+  if (!dept) return;
+
+  document.getElementById('department-form-id').value = dept.id;
+  document.getElementById('department-code').value = dept.code || '';
+  document.getElementById('department-name').value = dept.name || '';
+  document.getElementById('department-location').value = dept.location || '';
+  document.getElementById('department-description').value = dept.description || '';
+  document.getElementById('department-color').value = dept.color_code || '#4a90e2';
+  document.getElementById('department-active').checked = dept.is_active !== false;
+
+  const specSelect = document.getElementById('department-specialty-id');
+  if (specSelect) {
+    specSelect.innerHTML = '<option value="">-- Aucune Spécialité liée --</option>' +
+      currentAgendaSpecialties.map(s => `<option value="${s.id}" ${dept.specialty_id === s.id ? 'selected' : ''}>${s.name} (${s.code})</option>`).join('');
+  }
+
+  const headSelect = document.getElementById('department-head-id');
+  if (headSelect) {
+    headSelect.innerHTML = '<option value="">-- Sélectionner Chef de Service --</option>' +
+      currentAgendaPractitioners.map(p => `<option value="${p.id}" ${dept.head_practitioner_id === p.id ? 'selected' : ''}>${p.title || 'Dr.'} ${p.first_name} ${p.last_name} (${p.grade || 'Docteur'})</option>`).join('');
+  }
+
+  const currentPracIds = Array.isArray(dept.practitioner_ids) ? dept.practitioner_ids.filter(Boolean) : [];
+  renderDepartmentPractitionersCheckboxes(currentPracIds);
+
+  document.getElementById('department-modal-title').innerText = `Modifier : ${dept.name}`;
+  document.getElementById('department-modal').style.display = 'flex';
+}
+
+function closeDepartmentModal() {
+  const modal = document.getElementById('department-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function renderDepartmentPractitionersCheckboxes(selectedIds = []) {
+  const container = document.getElementById('department-practitioners-container');
+  if (!container) return;
+
+  const selSet = new Set(selectedIds);
+
+  container.innerHTML = currentAgendaPractitioners.map(p => `
+    <label style="display:flex; align-items:center; gap:8px; background:var(--bg-surface); padding:6px 12px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:0.85rem;">
+      <input type="checkbox" name="department_practitioners" value="${p.id}" ${selSet.has(p.id) ? 'checked' : ''} style="width:16px; height:16px;" />
+      <span class="color-dot" style="background:${p.color_code || '#4a90e2'}; width:10px; height:10px; border-radius:50%;"></span>
+      <span>${p.title || 'Dr.'} ${p.first_name} ${p.last_name} <span style="font-size:0.75rem; color:var(--text-muted);">(${p.grade || 'Docteur'})</span></span>
+    </label>
+  `).join('');
+}
+
+async function submitDepartmentForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('department-form-id').value;
+  const code = document.getElementById('department-code').value.trim();
+  const name = document.getElementById('department-name').value.trim();
+  const specialty_id = document.getElementById('department-specialty-id').value || null;
+  const head_practitioner_id = document.getElementById('department-head-id').value || null;
+  const location = document.getElementById('department-location').value.trim();
+  const description = document.getElementById('department-description').value.trim();
+  const color_code = document.getElementById('department-color').value;
+  const is_active = document.getElementById('department-active').checked;
+
+  const checkedBoxes = document.querySelectorAll('input[name="department_practitioners"]:checked');
+  const practitioner_ids = Array.from(checkedBoxes).map(cb => cb.value);
+
+  const payload = {
+    code,
+    name,
+    specialty_id,
+    head_practitioner_id,
+    location,
+    description,
+    color_code,
+    is_active,
+    practitioner_ids
+  };
+
+  try {
+    if (id) {
+      await api.request(`/departments/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      showToast('Service hospitalier mis à jour avec succès!');
+    } else {
+      await api.request('/departments', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      showToast('Nouveau service hospitalier créé avec succès!');
+    }
+    closeDepartmentModal();
+    navigate('agenda');
+  } catch (err) {}
+}
+
+async function deleteDepartmentConfirm(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer le service "${name}" ?`)) return;
+
+  try {
+    const res = await api.request(`/departments/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Service supprimé !');
+    navigate('agenda');
+  } catch (err) {}
+}
+
+// ----------------------------------------------------------------------------
+// F. Modal Handlers for Specialties
 // ----------------------------------------------------------------------------
 function openCreateSpecialtyModal() {
   const modal = document.getElementById('specialty-modal');
@@ -1318,7 +1622,7 @@ async function deleteSpecialtyConfirm(id, name) {
 }
 
 // ----------------------------------------------------------------------------
-// E. Modal Handlers for Practitioners
+// G. Modal Handlers for Practitioners
 // ----------------------------------------------------------------------------
 function openCreatePractitionerModal() {
   const modal = document.getElementById('practitioner-modal');
@@ -1334,6 +1638,7 @@ function openCreatePractitionerModal() {
   document.getElementById('practitioner-active').checked = true;
 
   renderSpecialtiesCheckboxes([]);
+  renderPractitionerDepartmentsCheckboxes([]);
   toggleGPFields();
 
   modal.style.display = 'flex';
@@ -1359,6 +1664,10 @@ function openEditPractitionerModal(id) {
 
   const currentSpecIds = Array.isArray(prac.specialty_ids) ? prac.specialty_ids.filter(Boolean) : [];
   renderSpecialtiesCheckboxes(currentSpecIds);
+
+  const currentDeptIds = Array.isArray(prac.department_ids) ? prac.department_ids.filter(Boolean) : [];
+  renderPractitionerDepartmentsCheckboxes(currentDeptIds);
+
   toggleGPFields();
 
   document.getElementById('practitioner-modal-title').innerText = `Modifier : ${prac.title || 'Dr.'} ${prac.first_name} ${prac.last_name}`;
@@ -1381,6 +1690,21 @@ function renderSpecialtiesCheckboxes(selectedIds = []) {
       <input type="checkbox" name="practitioner_specialties" value="${s.id}" ${selSet.has(s.id) ? 'checked' : ''} style="width:16px; height:16px;" />
       <span class="color-dot" style="background:${s.color_code || '#4a90e2'}; width:10px; height:10px; border-radius:50%;"></span>
       <span>${s.name}</span>
+    </label>
+  `).join('');
+}
+
+function renderPractitionerDepartmentsCheckboxes(selectedIds = []) {
+  const container = document.getElementById('practitioner-departments-container');
+  if (!container) return;
+
+  const selSet = new Set(selectedIds);
+
+  container.innerHTML = (currentAgendaDepartments || []).filter(d => d.is_active !== false).map(d => `
+    <label style="display:flex; align-items:center; gap:8px; background:var(--bg-surface); padding:6px 12px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:0.85rem;">
+      <input type="checkbox" name="practitioner_departments" value="${d.id}" ${selSet.has(d.id) ? 'checked' : ''} style="width:16px; height:16px;" />
+      <span class="color-dot" style="background:${d.color_code || '#4a90e2'}; width:10px; height:10px; border-radius:50%;"></span>
+      <span>${d.name} <span style="font-size:0.75rem; color:var(--text-muted);">(${d.code})</span></span>
     </label>
   `).join('');
 }
@@ -1413,8 +1737,11 @@ async function submitPractitionerForm(e) {
   const consultation_fee = parseFloat(document.getElementById('practitioner-fee').value) || 15000;
   const is_active = document.getElementById('practitioner-active').checked;
 
-  const checkedBoxes = document.querySelectorAll('input[name="practitioner_specialties"]:checked');
-  const specialty_ids = Array.from(checkedBoxes).map(cb => cb.value);
+  const checkedSpecBoxes = document.querySelectorAll('input[name="practitioner_specialties"]:checked');
+  const specialty_ids = Array.from(checkedSpecBoxes).map(cb => cb.value);
+
+  const checkedDeptBoxes = document.querySelectorAll('input[name="practitioner_departments"]:checked');
+  const department_ids = Array.from(checkedDeptBoxes).map(cb => cb.value);
 
   if (!is_general_practitioner && specialty_ids.length === 0) {
     showToast('Veuillez cocher au moins une spécialité médicale ou cocher "Médecin Généraliste"', 'warning');
@@ -1428,6 +1755,7 @@ async function submitPractitionerForm(e) {
     grade,
     is_general_practitioner,
     specialty_ids,
+    department_ids,
     phone_number,
     email,
     license_number,
@@ -5620,7 +5948,83 @@ function renderAppLayout() {
       </div>
     </div>
 
-    <!-- 10. Practitioner & Doctor Create/Edit Modal -->
+    <!-- 10. Medical Department / Service Hospitalier Create/Edit Modal -->
+    <div class="modal-overlay" id="department-modal" style="display:none; justify-content:center; align-items:center; z-index:1160;">
+      <div class="modal-container" style="width:600px; max-width:96%; max-height:92vh; overflow-y:auto; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="department-modal-title">Ajouter un Service Hospitalier</h4>
+          <button class="modal-close" onclick="closeDepartmentModal()">&times;</button>
+        </div>
+        <form id="department-form" onsubmit="submitDepartmentForm(event)">
+          <input type="hidden" id="department-form-id" />
+          
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Nom du Service Hospitalier *</label>
+              <input type="text" class="form-control" id="department-name" placeholder="ex: Service de Cardiologie, Service de Pédiatrie" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Code Unique *</label>
+              <input type="text" class="form-control" id="department-code" placeholder="ex: SERV-CARDIO" required />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Spécialité Médicale Liée</label>
+              <select class="form-control" id="department-specialty-id">
+                <option value="">-- Aucune Spécialité --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Chef de Service (Médecin)</label>
+              <select class="form-control" id="department-head-id">
+                <option value="">-- Sélectionner Chef de Service --</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Localisation / Étage / Pavillon</label>
+              <input type="text" class="form-control" id="department-location" placeholder="ex: 1er Étage - Pavillon Mère-Enfant" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Couleur d'identification</label>
+              <input type="color" id="department-color" value="#4a90e2" style="width:100%; height:38px; border:none; border-radius:6px; cursor:pointer;" />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:15px;">
+            <label class="form-label">Description / Activités du service (optionnel)</label>
+            <textarea class="form-control" id="department-description" rows="2" placeholder="Pathologies prises en charge, équipements spécialisés..."></textarea>
+          </div>
+
+          <div style="background:var(--bg-surface); padding:15px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:15px;">
+            <label class="form-label" style="font-size:0.85rem; color:var(--text-primary); margin-bottom:8px; display:block;">
+              <strong>Praticiens rattachés à ce service :</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(Cochez pour affecter les médecins)</span>
+            </label>
+            <div id="department-practitioners-container" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <div class="form-group" style="display:flex; align-items:center; margin-bottom:15px;">
+            <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="department-active" checked style="width:18px; height:18px;" />
+              <span>Service hospitalier actif</span>
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closeDepartmentModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="department-submit-btn">Enregistrer Service</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 11. Practitioner & Doctor Create/Edit Modal -->
     <div class="modal-overlay" id="practitioner-modal" style="display:none; justify-content:center; align-items:center; z-index:1160;">
       <div class="modal-container" style="width:650px; max-width:96%; max-height:92vh; overflow-y:auto; animation: modalFadeIn 0.3s ease;">
         <div class="modal-header">
@@ -5691,6 +6095,16 @@ function renderAppLayout() {
               <div id="practitioner-specialties-container" style="display:flex; flex-wrap:wrap; gap:8px;">
                 <!-- Dynamically filled with checkboxes -->
               </div>
+            </div>
+          </div>
+
+          <!-- Department attachment selector -->
+          <div style="background:var(--bg-surface); padding:15px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:15px;">
+            <label class="form-label" style="font-size:0.85rem; color:var(--text-primary); margin-bottom:8px; display:block;">
+              <strong><i class="fas fa-hospital-alt" style="color:var(--primary);"></i> Services Hospitaliers de rattachement :</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(Un praticien peut intervenir dans plusieurs services)</span>
+            </label>
+            <div id="practitioner-departments-container" style="display:flex; flex-wrap:wrap; gap:8px;">
+              <!-- Dynamically filled with checkboxes -->
             </div>
           </div>
 
