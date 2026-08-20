@@ -958,7 +958,6 @@ async function bookAppointment(e) {
 // ============================================================================
 let activeDPIPatient = null;
 let currentPrescriptionItems = [];
-let activeDPIPatient = null;
 let currentDossierData = null;
 let activeDPITab = 'summary';
 let allPatientStatuses = [];
