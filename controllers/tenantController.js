@@ -5,7 +5,7 @@ const getTenantProfile = async (req, res) => {
   const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings 
+      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings 
        FROM tenants WHERE id = $1`,
       [tenantId]
     );
@@ -26,7 +26,7 @@ const updateTenantProfile = async (req, res) => {
   }
 
   const tenantId = req.user.tenant_id;
-  const { name, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings } = req.body;
+  const { name, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings } = req.body;
 
   try {
     const result = await req.dbClient.query(
@@ -35,17 +35,19 @@ const updateTenantProfile = async (req, res) => {
            phone_number = COALESCE($2, phone_number), 
            ninea_rc = COALESCE($3, ninea_rc), 
            logo_url = COALESCE($4, logo_url), 
-           address = COALESCE($5, address), 
-           email = COALESCE($6, email), 
-           gps_coordinates = COALESCE($7, gps_coordinates), 
-           settings = COALESCE($8, settings)
-       WHERE id = $9
+           stamp_url = COALESCE($5, stamp_url), 
+           address = COALESCE($6, address), 
+           email = COALESCE($7, email), 
+           gps_coordinates = COALESCE($8, gps_coordinates), 
+           settings = COALESCE($9, settings)
+       WHERE id = $10
        RETURNING *`,
       [
         name || null,
         phone_number || null,
         ninea_rc || null,
         logo_url || null,
+        stamp_url || null,
         address || null,
         email || null,
         gps_coordinates ? JSON.stringify(gps_coordinates) : null,
@@ -78,7 +80,7 @@ const getAllTenants = async (req, res) => {
     await req.dbClient.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     const result = await req.dbClient.query(
-      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings, is_active, created_at 
+      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings, is_active, created_at 
        FROM tenants ORDER BY created_at DESC`
     );
     return res.status(200).json(result.rows);
@@ -94,7 +96,7 @@ const createTenant = async (req, res) => {
     return res.status(403).json({ error: 'Forbidden: Only administrators can create tenants' });
   }
 
-  const { name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings, admin_email, admin_password, admin_first_name, admin_last_name } = req.body;
+  const { name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings, admin_email, admin_password, admin_first_name, admin_last_name } = req.body;
 
   if (!name || !slug || !phone_number) {
     return res.status(400).json({ error: 'Tenant name, slug, and phone number are required' });
@@ -117,8 +119,8 @@ const createTenant = async (req, res) => {
 
     // Insert Tenant
     const tenantResult = await req.dbClient.query(
-      `INSERT INTO tenants (id, name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings, is_active) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
+      `INSERT INTO tenants (id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings, is_active) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
        RETURNING *`,
       [
         tenantId,
@@ -127,6 +129,7 @@ const createTenant = async (req, res) => {
         phone_number,
         ninea_rc || null,
         logo_url || '/logo-espoir.png',
+        stamp_url || null,
         address || null,
         email || null,
         gps_coordinates ? JSON.stringify(gps_coordinates) : null,
@@ -138,12 +141,12 @@ const createTenant = async (req, res) => {
 
     // Seed default payment methods
     const paymentMethods = [
-      [crypto.randomUUID(), tenantId, 'WAVE', 'Wave Caisse', JSON.stringify({ phone_number: '', merchant_id: '' })],
-      [crypto.randomUUID(), tenantId, 'ORANGE_MONEY', 'Orange Money Caisse', JSON.stringify({ phone_number: '', merchant_code: '' })],
-      [crypto.randomUUID(), tenantId, 'SPI', 'Virement SPI', JSON.stringify({ bank_name: '', account_number: '' })],
-      [crypto.randomUUID(), tenantId, 'YAS', 'Yas Pay', JSON.stringify({ api_key: '' })],
-      [crypto.randomUUID(), tenantId, 'CARTE_BANCAIRE', 'Paiement Carte', JSON.stringify({ provider: 'Stripe', public_key: '' })]
+      { provider: 'WAVE', name: 'Wave Caisse Pro', number: '+221770000000' },
+      { provider: 'ORANGE_MONEY', name: 'Orange Money Marchand', number: '+221770000001' },
+      { provider: 'FREE_MONEY', name: 'Free Money Pro', number: '+221760000000' },
+      { provider: 'EXP_ORANGE_MONEY', name: 'Orange Money Exp', number: '+221770000002' }
     ];
+
     for (const pm of paymentMethods) {
       await req.dbClient.query(
         `INSERT INTO tenant_payment_methods (id, tenant_id, provider, name, credentials, is_active) 

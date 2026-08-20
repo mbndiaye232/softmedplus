@@ -62,6 +62,7 @@ CREATE TABLE tenants (
     phone_number VARCHAR(30) NOT NULL,
     ninea_rc VARCHAR(50), -- Identifiant fiscal sénégalais
     logo_url VARCHAR(500) NULL,
+    stamp_url VARCHAR(500) NULL,
     address TEXT NULL,
     email VARCHAR(255) NULL,
     gps_coordinates JSONB NULL, -- {"latitude": 14.6937, "longitude": -17.4479}

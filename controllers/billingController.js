@@ -256,11 +256,79 @@ const getInsurances = async (req, res) => {
   }
 };
 
+// 7. Get Complete Invoice Details (for Patient Invoice & IPM Claim Printouts)
+const getInvoiceDetails = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    // A. Invoice, Patient & Insurance info
+    const invRes = await req.dbClient.query(
+      `SELECT i.*, 
+              p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone, p.date_of_birth, p.gender,
+              ic.name AS insurance_name, ic.code AS insurance_code, ic.contact_phone AS insurance_phone,
+              pip.policy_number, pip.coverage_rate_percent AS policy_coverage_rate
+       FROM invoices i
+       JOIN patients p ON i.patient_id = p.id
+       LEFT JOIN insurance_companies ic ON i.insurance_company_id = ic.id
+       LEFT JOIN patient_insurance_policies pip ON (pip.patient_id = p.id AND pip.insurance_company_id = ic.id AND pip.is_primary = true)
+       WHERE i.id = $1 AND i.tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (invRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    const invoice = invRes.rows[0];
+
+    // B. Tenant Details (Header & Official Stamp)
+    const tenantRes = await req.dbClient.query(
+      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, settings
+       FROM tenants WHERE id = $1`,
+      [tenantId]
+    );
+    const tenant = tenantRes.rows[0] || {};
+
+    // C. Invoice Lines
+    const linesRes = await req.dbClient.query(
+      `SELECT il.*, ms.name AS service_name, ms.code AS service_code
+       FROM invoice_lines il
+       LEFT JOIN medical_services ms ON il.service_id = ms.id
+       WHERE il.invoice_id = $1
+       ORDER BY il.id ASC`,
+      [id]
+    );
+
+    // D. Payments History
+    const paymentsRes = await req.dbClient.query(
+      `SELECT p.*, u.first_name AS cashier_first, u.last_name AS cashier_last
+       FROM payments p
+       LEFT JOIN users u ON p.received_by = u.id
+       WHERE p.invoice_id = $1
+       ORDER BY p.created_at ASC`,
+      [id]
+    );
+
+    return res.status(200).json({
+      invoice,
+      tenant,
+      lines: linesRes.rows,
+      payments: paymentsRes.rows
+    });
+
+  } catch (err) {
+    console.error('Get invoice details error:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve invoice details' });
+  }
+};
+
 module.exports = {
   openCashSession,
   closeCashSession,
   createInvoice,
   getInvoices,
   getCashRegisters,
-  getInsurances
+  getInsurances,
+  getInvoiceDetails
 };

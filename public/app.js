@@ -2193,11 +2193,21 @@ async function renderBilling(container) {
                   <td>${parseFloat(inv.patient_share_amount).toLocaleString()} FCFA</td>
                   <td><span class="status-badge ${inv.status.toLowerCase()}">${inv.status}</span></td>
                   <td>
-                    ${inv.status !== 'PAID' ? `
-                      <button class="btn btn-success" onclick="openPaymentModal('${inv.id}', '${inv.invoice_number}', ${inv.patient_share_amount - inv.patient_paid_amount})">
-                        <i class="fas fa-money-bill-wave"></i> ${t('payBtn')}
+                    <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                      <button class="btn btn-secondary btn-sm" onclick="openInvoicePrintModal('${inv.id}', 'PATIENT')" title="Imprimer la Facture Patient">
+                        <i class="fas fa-file-invoice"></i> Facture Patient
                       </button>
-                    ` : '<span class="text-success"><i class="fas fa-check"></i> Réglé</span>'}
+                      ${inv.insurance_company_id ? `
+                        <button class="btn btn-secondary btn-sm" style="background:#2c3e50; color:#fff; border-color:#2c3e50;" onclick="openInvoicePrintModal('${inv.id}', 'IPM')" title="Imprimer le Décompte / Facture IPM">
+                          <i class="fas fa-building"></i> Facture IPM
+                        </button>
+                      ` : ''}
+                      ${inv.status !== 'PAID' ? `
+                        <button class="btn btn-success btn-sm" onclick="openPaymentModal('${inv.id}', '${inv.invoice_number}', ${inv.patient_share_amount - inv.patient_paid_amount})">
+                          <i class="fas fa-money-bill-wave"></i> ${t('payBtn')}
+                        </button>
+                      ` : '<span class="text-success" style="font-size:0.8rem; font-weight:600;"><i class="fas fa-check"></i> Réglé</span>'}
+                    </div>
                   </td>
                 </tr>
               `).join('')}
@@ -2493,6 +2503,259 @@ async function simulateWebhook(provider, ref, amount, invoiceId) {
 }
 
 // ============================================================================
+// 4b. Printable Invoices (Patient Invoice & IPM Claim Printouts)
+// ============================================================================
+let currentPrintInvoiceData = null;
+let currentPrintMode = 'PATIENT'; // 'PATIENT' or 'IPM'
+
+async function openInvoicePrintModal(invoiceId, mode = 'PATIENT') {
+  currentPrintMode = mode;
+  try {
+    showToast('Chargement des données de facturation...', 'info');
+    const data = await api.request(`/billing/invoices/${invoiceId}/details`);
+    currentPrintInvoiceData = data;
+    renderInvoicePrintModalContent();
+    const modal = document.getElementById('invoice-print-modal');
+    if (modal) modal.style.display = 'flex';
+  } catch (err) {
+    showToast('Erreur lors du chargement de la facture: ' + err.message, 'error');
+  }
+}
+
+function closeInvoicePrintModal() {
+  const modal = document.getElementById('invoice-print-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function switchPrintMode(mode) {
+  currentPrintMode = mode;
+  renderInvoicePrintModalContent();
+}
+
+function renderInvoicePrintModalContent() {
+  if (!currentPrintInvoiceData) return;
+  const { invoice, tenant, lines, payments } = currentPrintInvoiceData;
+  const isIPM = currentPrintMode === 'IPM';
+
+  const container = document.getElementById('invoice-print-content');
+  if (!container) return;
+
+  const totalGross = parseFloat(invoice.total_amount_gross || 0);
+  const totalNet = parseFloat(invoice.total_amount_net || 0);
+  const patientShare = parseFloat(invoice.patient_share_amount || 0);
+  const insuranceShare = parseFloat(invoice.insurance_share_amount || 0);
+  const patientPaid = parseFloat(invoice.patient_paid_amount || 0);
+  const insurancePaid = parseFloat(invoice.insurance_paid_amount || 0);
+  const balanceDue = isIPM ? (insuranceShare - insurancePaid) : (patientShare - patientPaid);
+
+  const statusBadge = invoice.status === 'PAID' ? 'ACQUITTÉE / RÉGLÉE' : (invoice.status === 'PARTIALLY_PAID' ? 'PARTIELLEMENT RÉGLÉE' : 'ÉMISE / EN ATTENTE');
+  const statusColor = invoice.status === 'PAID' ? '#27ae60' : (invoice.status === 'PARTIALLY_PAID' ? '#e67e22' : '#e74c3c');
+
+  const stampHtml = tenant.stamp_url ? `
+    <div style="text-align:center;">
+      <img src="${tenant.stamp_url}" style="max-height:85px; max-width:150px; object-fit:contain; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.15));" alt="Cachet Clinique" onerror="this.style.display='none'" />
+      <div style="font-size:0.75rem; color:#555; margin-top:4px;">Cachet & Signature Officielle</div>
+    </div>
+  ` : `
+    <div style="border:2px dashed #2c3e50; border-radius:8px; padding:10px 15px; text-align:center; display:inline-block; transform:rotate(-2deg);">
+      <div style="font-size:0.8rem; font-weight:bold; color:#2c3e50; text-transform:uppercase;">${tenant.name || 'CLINIQUE MÉDICALE'}</div>
+      <div style="font-size:0.65rem; color:#7f8c8d;">CACHET ET SIGNATURE AUTORISÉE</div>
+      <div style="font-size:0.7rem; font-weight:600; color:#27ae60; margin-top:2px;">POUR ACQUIT</div>
+    </div>
+  `;
+
+  container.innerHTML = `
+    <!-- Switch buttons inside modal -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;" class="no-print">
+      <div style="display:flex; gap:10px;">
+        <button class="btn ${!isIPM ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchPrintMode('PATIENT')">
+          <i class="fas fa-user"></i> Vue Facture Patient
+        </button>
+        ${invoice.insurance_company_id ? `
+          <button class="btn ${isIPM ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchPrintMode('IPM')">
+            <i class="fas fa-building"></i> Vue Facture / Décompte IPM
+          </button>
+        ` : ''}
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary btn-sm" onclick="window.print()" style="background:#27ae60; border-color:#27ae60; padding:6px 14px;">
+          <i class="fas fa-print"></i> Imprimer / Télécharger PDF
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="closeInvoicePrintModal()">
+          Fermer
+        </button>
+      </div>
+    </div>
+
+    <!-- PRINTABLE SHEET -->
+    <div class="printable-invoice" id="invoice-sheet" style="background:#ffffff; color:#2c3e50; padding:35px 40px; border-radius:8px; font-family:'Inter', Arial, sans-serif; box-shadow:0 4px 15px rgba(0,0,0,0.15);">
+      
+      <!-- 1. HEADER (LOGO, TENANT DETAILS, INVOICE METADATA) -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #3498db; padding-bottom:18px; margin-bottom:20px;">
+        <div style="display:flex; gap:15px; align-items:center; max-width:60%;">
+          ${tenant.logo_url ? `
+            <img src="${tenant.logo_url}" style="height:70px; max-width:120px; object-fit:contain; border-radius:6px;" alt="Logo Clinique" />
+          ` : `
+            <div style="width:60px; height:60px; border-radius:8px; background:linear-gradient(135deg, #3498db, #2c3e50); display:flex; align-items:center; justify-content:center; color:white; font-size:1.6rem; font-weight:bold;">
+              <i class="fas fa-heartbeat"></i>
+            </div>
+          `}
+          <div>
+            <h2 style="margin:0 0 3px 0; color:#1a365d; font-size:1.25rem; font-weight:800; text-transform:uppercase;">${tenant.name || 'Clinique Médicale'}</h2>
+            <div style="font-size:0.8rem; color:#4a5568; line-height:1.35;">
+              ${tenant.address ? `<div><i class="fas fa-map-marker-alt" style="color:#3498db; width:14px;"></i> ${tenant.address}</div>` : ''}
+              <div><i class="fas fa-phone-alt" style="color:#3498db; width:14px;"></i> ${tenant.phone_number || ''} ${tenant.email ? `| <i class="fas fa-envelope" style="color:#3498db; width:14px;"></i> ${tenant.email}` : ''}</div>
+              ${tenant.ninea_rc ? `<div><strong>NINEA / RC :</strong> ${tenant.ninea_rc}</div>` : ''}
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align:right;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:800; letter-spacing:1px; color:#718096;">
+            ${isIPM ? 'FACTURE TIERS-PAYANT (ORGANISME IPM)' : 'FACTURE PATIENT & REÇU D\'HONORAIRES'}
+          </div>
+          <div style="font-size:1.25rem; font-weight:800; color:#2b6cb0; margin:2px 0;">${invoice.invoice_number}</div>
+          <div style="font-size:0.8rem; color:#4a5568;">Date d'émission : <strong>${new Date(invoice.issue_date).toLocaleDateString()}</strong></div>
+          <div style="font-size:0.8rem; color:#4a5568;">Date d'échéance : <strong>${new Date(invoice.due_date).toLocaleDateString()}</strong></div>
+          <div style="margin-top:5px;">
+            <span style="display:inline-block; padding:3px 10px; border-radius:4px; font-size:0.75rem; font-weight:700; background:${statusColor}; color:#fff;">
+              ${statusBadge}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. RECIPIENT BLOCK (PATIENT OR IPM ORGANISATION) -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 18px; margin-bottom:20px;">
+        <div>
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#718096; margin-bottom:4px;">
+            <i class="fas fa-user-injured" style="color:#3498db;"></i> Renseignements Patient
+          </div>
+          <div style="font-size:1rem; font-weight:700; color:#1a202c;">${invoice.patient_first} ${invoice.patient_last}</div>
+          <div style="font-size:0.8rem; color:#4a5568; margin-top:2px;">
+            <div>Code Patient : <strong>${invoice.patient_code || 'PAT-N/A'}</strong></div>
+            <div>Téléphone : ${invoice.patient_phone || '-'}</div>
+            ${invoice.date_of_birth ? `<div>Né(e) le : ${new Date(invoice.date_of_birth).toLocaleDateString()} (${invoice.gender || ''})</div>` : ''}
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#718096; margin-bottom:4px;">
+            <i class="fas fa-shield-alt" style="color:#3498db;"></i> Prise en charge Organisme Tiers-Payant
+          </div>
+          ${invoice.insurance_name ? `
+            <div style="font-size:1rem; font-weight:700; color:#2c5282;">${invoice.insurance_name} ${invoice.insurance_code ? `(${invoice.insurance_code})` : ''}</div>
+            <div style="font-size:0.8rem; color:#4a5568; margin-top:2px;">
+              ${invoice.policy_number ? `<div>Matricule / Police : <strong>${invoice.policy_number}</strong></div>` : ''}
+              <div>Taux de prise en charge : <strong>${invoice.policy_coverage_rate || '80'}%</strong></div>
+              ${invoice.insurance_phone ? `<div>Contact IPM : ${invoice.insurance_phone}</div>` : ''}
+            </div>
+          ` : `
+            <div style="font-size:0.9rem; color:#718096; font-style:italic;">Régime Privé / Paiement direct 100% Patient</div>
+          `}
+        </div>
+      </div>
+
+      <!-- 3. DETAILED SERVICES & MEDICATIONS TABLE -->
+      <table style="width:100%; border-collapse:collapse; margin-bottom:15px; font-size:0.85rem;">
+        <thead>
+          <tr style="background:#edf2f7; color:#2d3748; text-align:left; border-bottom:2px solid #cbd5e0;">
+            <th style="padding:8px 10px;">#</th>
+            <th style="padding:8px 10px;">Désignation de la Prestation / Acte / Médicament</th>
+            <th style="padding:8px 10px; text-align:center;">Qté</th>
+            <th style="padding:8px 10px; text-align:right;">Prix Unitaire</th>
+            <th style="padding:8px 10px; text-align:right;">Total Brut</th>
+            ${isIPM ? `<th style="padding:8px 10px; text-align:right; color:#2b6cb0;">Part IPM</th>` : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${lines.map((l, idx) => {
+            const lineGross = parseFloat(l.total_line_amount || 0);
+            const lineIpm = Math.round(lineGross * ((invoice.policy_coverage_rate || 80) / 100));
+            return `
+              <tr style="border-bottom:1px solid #e2e8f0;">
+                <td style="padding:8px 10px; color:#718096;">${idx + 1}</td>
+                <td style="padding:8px 10px; font-weight:600; color:#1a202c;">${l.description}</td>
+                <td style="padding:8px 10px; text-align:center;">${l.quantity}</td>
+                <td style="padding:8px 10px; text-align:right;">${parseFloat(l.unit_price).toLocaleString()} FCFA</td>
+                <td style="padding:8px 10px; text-align:right; font-weight:700;">${lineGross.toLocaleString()} FCFA</td>
+                ${isIPM ? `<td style="padding:8px 10px; text-align:right; font-weight:700; color:#2b6cb0;">${lineIpm.toLocaleString()} FCFA</td>` : ''}
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+
+      <!-- 4. FINANCIAL TOTALS & VENTILATION -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-top:15px;">
+        <div style="max-width:55%;">
+          ${payments.length > 0 ? `
+            <div style="background:#f0fff4; border:1px solid #c6f6d5; border-radius:6px; padding:8px 12px; font-size:0.8rem;">
+              <div style="font-weight:700; color:#22543d; margin-bottom:3px;"><i class="fas fa-check-circle"></i> Historique des Règlements Reçus :</div>
+              ${payments.map(p => `
+                <div style="display:flex; justify-content:space-between; color:#2d3748; margin-bottom:2px;">
+                  <span>${new Date(p.created_at).toLocaleDateString()} — <strong>${p.payment_method}</strong> ${p.transaction_reference ? `(Réf: ${p.transaction_reference})` : ''}</span>
+                  <strong>${parseFloat(p.amount).toLocaleString()} FCFA</strong>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div style="font-size:0.8rem; color:#718096; font-style:italic;">
+              Aucun règlement encaissé à ce jour.
+            </div>
+          `}
+          <div style="font-size:0.75rem; color:#a0aec0; margin-top:8px;">
+            Document officiel certifié par SoftMed Health Information System.
+          </div>
+        </div>
+
+        <div style="width:280px; background:#f8fafc; border:1px solid #cbd5e0; border-radius:8px; padding:12px; font-size:0.85rem;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#4a5568;">
+            <span>Total Brut :</span>
+            <strong>${totalGross.toLocaleString()} FCFA</strong>
+          </div>
+          ${invoice.insurance_company_id ? `
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#2b6cb0;">
+              <span>Part Assurance / IPM :</span>
+              <strong>${insuranceShare.toLocaleString()} FCFA</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px; color:#2d3748; font-weight:600;">
+              <span>Part Patient :</span>
+              <strong>${patientShare.toLocaleString()} FCFA</strong>
+            </div>
+          ` : ''}
+          <div style="border-top:2px solid #cbd5e0; margin:6px 0; padding-top:6px; display:flex; justify-content:space-between; font-size:1rem; font-weight:800; color:#1a365d;">
+            <span>${isIPM ? 'Total Dû par l\'IPM :' : 'Net Dû par le Patient :'}</span>
+            <span>${(isIPM ? insuranceShare : patientShare).toLocaleString()} FCFA</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:3px; font-size:0.82rem; color:${balanceDue <= 0 ? '#27ae60' : '#e53e3e'}; font-weight:700;">
+            <span>Reste à payer :</span>
+            <span>${balanceDue > 0 ? balanceDue.toLocaleString() + ' FCFA' : 'SOLDE RÉGLÉ (0 FCFA)'}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. BOTTOM OFFICIAL STAMP & SIGNATURE -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:30px; border-top:1px solid #e2e8f0; padding-top:18px;">
+        <div style="font-size:0.8rem; color:#718096; max-width:45%;">
+          <div>Arrêté la présente facture à la somme de :</div>
+          <div style="font-weight:700; color:#2d3748; margin-top:2px;">
+            ${(isIPM ? insuranceShare : patientShare).toLocaleString()} Francs CFA
+          </div>
+        </div>
+
+        <div style="text-align:center;">
+          <div style="font-size:0.8rem; font-weight:700; color:#2d3748; margin-bottom:6px;">
+            Pour la Direction / Service Comptabilité
+          </div>
+          ${stampHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ============================================================================
 // 5. Pharmacy & Stocks Inventory UI
 // ============================================================================
 async function renderInventory(container) {
@@ -2740,15 +3003,25 @@ async function renderSettings(container) {
           <label class="form-label">Adresse Physique Complète</label>
           <input type="text" class="form-control" id="prof-address" value="${tenant.address || ''}" placeholder="ex: 12 Rue Cheikh Anta Diop, Dakar" />
         </div>
-        <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:15px; margin-bottom:15px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
           <div class="form-group">
             <label class="form-label">Logo de la Clinique</label>
             <div style="display:flex; gap:5px;">
               <input type="text" class="form-control" id="prof-logo" value="${tenant.logo_url || ''}" placeholder="/logo-default.png" style="flex:1;" />
               <input type="file" id="prof-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'prof-logo')" />
-              <button type="button" class="btn btn-secondary" onclick="document.getElementById('prof-logo-file').click()" style="padding:0 12px; height:38px;"><i class="fas fa-upload"></i></button>
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('prof-logo-file').click()" style="padding:0 12px; height:38px;" title="Uploader Logo"><i class="fas fa-upload"></i></button>
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label">Cachet / Tampon Officiel de la Clinique</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" class="form-control" id="prof-stamp" value="${tenant.stamp_url || ''}" placeholder="/stamp-default.png" style="flex:1;" />
+              <input type="file" id="prof-stamp-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'prof-stamp')" />
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('prof-stamp-file').click()" style="padding:0 12px; height:38px;" title="Uploader Cachet"><i class="fas fa-upload"></i></button>
+            </div>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
           <div class="form-group">
             <label class="form-label">Position GPS : Latitude</label>
             <input type="number" step="0.000001" class="form-control" id="prof-lat" value="${gps.latitude || ''}" placeholder="14.6937" />
@@ -2924,6 +3197,7 @@ async function saveClinicProfile(e) {
   const ninea_rc = document.getElementById('prof-ninea').value;
   const address = document.getElementById('prof-address').value;
   const logo_url = document.getElementById('prof-logo').value;
+  const stamp_url = document.getElementById('prof-stamp').value;
   const latVal = parseFloat(document.getElementById('prof-lat').value);
   const lngVal = parseFloat(document.getElementById('prof-lng').value);
 
@@ -2933,7 +3207,7 @@ async function saveClinicProfile(e) {
     const updated = await api.request('/tenant/profile', {
       method: 'PUT',
       body: JSON.stringify({
-        name, phone_number, email, ninea_rc, address, logo_url, gps_coordinates
+        name, phone_number, email, ninea_rc, address, logo_url, stamp_url, gps_coordinates
       })
     });
     
@@ -3063,6 +3337,7 @@ async function openEditTenantModal(id) {
     document.getElementById('tenant-ninea').value = tenant.ninea_rc || '';
     document.getElementById('tenant-email').value = tenant.email || '';
     document.getElementById('tenant-logo').value = tenant.logo_url || '';
+    document.getElementById('tenant-stamp').value = tenant.stamp_url || '';
     document.getElementById('tenant-address').value = tenant.address || '';
     document.getElementById('tenant-active').checked = tenant.is_active;
 
@@ -3097,6 +3372,7 @@ async function submitTenantForm(e) {
     ninea_rc: document.getElementById('tenant-ninea').value,
     email: document.getElementById('tenant-email').value,
     logo_url: document.getElementById('tenant-logo').value,
+    stamp_url: document.getElementById('tenant-stamp').value,
     address: document.getElementById('tenant-address').value,
   };
 
@@ -3911,7 +4187,20 @@ function renderAppLayout() {
             </div>
             <div class="form-group">
               <label class="form-label">${t('tenantLogo')}</label>
-              <input type="text" class="form-control" id="tenant-logo" placeholder="/logo-espoir.png" />
+              <div style="display:flex; gap:5px;">
+                <input type="text" class="form-control" id="tenant-logo" placeholder="/logo-espoir.png" style="flex:1;" />
+                <input type="file" id="tenant-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'tenant-logo')" />
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('tenant-logo-file').click()" style="padding:0 10px; height:38px;"><i class="fas fa-upload"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Cachet / Tampon Officiel</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" class="form-control" id="tenant-stamp" placeholder="/stamp-default.png" style="flex:1;" />
+              <input type="file" id="tenant-stamp-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'tenant-stamp')" />
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('tenant-stamp-file').click()" style="padding:0 10px; height:38px;"><i class="fas fa-upload"></i></button>
             </div>
           </div>
 
@@ -3956,6 +4245,15 @@ function renderAppLayout() {
             <button class="btn btn-primary" type="submit" id="tenant-submit-btn">${t('saveBtn')}</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- 6. Printable Invoice & IPM Claim Document Modal -->
+    <div class="modal-overlay" id="invoice-print-modal" style="display:none; z-index:1200; justify-content:center; align-items:center; background:rgba(0,0,0,0.75);">
+      <div class="modal-container" style="width:850px; max-width:96%; max-height:92vh; overflow-y:auto; padding:20px; background:#e2e8f0;">
+        <div id="invoice-print-content">
+          <!-- Dynamically injected -->
+        </div>
       </div>
     </div>
   `;

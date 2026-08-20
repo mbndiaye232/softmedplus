@@ -121,6 +121,7 @@ app.post('/api/billing/cash-sessions', billingCtrl.openCashSession);
 app.post('/api/billing/cash-sessions/:id/close', billingCtrl.closeCashSession);
 app.post('/api/billing/invoices', billingCtrl.createInvoice);
 app.get('/api/billing/invoices', billingCtrl.getInvoices);
+app.get('/api/billing/invoices/:id/details', billingCtrl.getInvoiceDetails);
 
 // 5. Inventory & Pharmacy Lots
 app.post('/api/inventory/items', stockCtrl.createStockItem);

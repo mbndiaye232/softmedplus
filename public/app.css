@@ -1016,3 +1016,40 @@ body[dir="rtl"] .feature-card {
     transform: scale(1) translateY(0);
   }
 }
+
+/* Print optimization for invoices & IPM claims */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #invoice-sheet, #invoice-sheet * {
+    visibility: visible;
+  }
+  #invoice-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 25px !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print, .modal-header, .modal-close, .sidebar, .header, .toast-container {
+    display: none !important;
+  }
+  .modal-overlay {
+    background: transparent !important;
+    position: static !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  .modal-container {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+}

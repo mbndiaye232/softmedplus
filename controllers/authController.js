@@ -88,7 +88,7 @@ const login = async (req, res) => {
 };
 
 const registerTenant = async (req, res) => {
-  const { tenant_name, tenant_slug, phone_number, ninea_rc, email, password, first_name, last_name, logo_url, address, gps_coordinates, payment_methods } = req.body;
+  const { tenant_name, tenant_slug, phone_number, ninea_rc, email, password, first_name, last_name, logo_url, stamp_url, address, gps_coordinates, payment_methods } = req.body;
 
   if (!tenant_name || !tenant_slug || !phone_number || !email || !password || !first_name || !last_name) {
     return res.status(400).json({ error: 'All primary fields are required' });
@@ -110,8 +110,8 @@ const registerTenant = async (req, res) => {
 
     // B. Insert Tenant
     await client.query(
-      `INSERT INTO tenants (id, name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO tenants (id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         tenantId,
         tenant_name,
@@ -119,6 +119,7 @@ const registerTenant = async (req, res) => {
         phone_number,
         ninea_rc || null,
         logo_url || '/logo-espoir.png',
+        stamp_url || null,
         address || null,
         email.toLowerCase().trim(), // tenant contact email defaults to superadmin email
         gps_coordinates ? JSON.stringify(gps_coordinates) : null,
