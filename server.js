@@ -1,10 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const multer = require('multer');
 require('dotenv').config();
 
 const { verifyToken, checkWriteAccess } = require('./middleware/auth');
 const { tenantIsolator } = require('./middleware/tenant');
+const { uploadFile } = require('./utils/storage');
 
 // Import controllers
 const authCtrl = require('./controllers/authController');
@@ -15,6 +17,18 @@ const paymentCtrl = require('./controllers/paymentController');
 const stockCtrl = require('./controllers/stockController');
 const reportCtrl = require('./controllers/reportController');
 const tenantCtrl = require('./controllers/tenantController');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -36,6 +50,20 @@ app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 // C. Public Payment Webhook (from Wave/OM/Yas/SPI checkouts)
 app.post('/api/payments/webhook/:provider', paymentCtrl.handleWebhook);
 
+// D. Public image upload endpoint (used for logo during registration and payment QR codes)
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  try {
+    const url = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
+    return res.status(200).json({ url });
+  } catch (err) {
+    console.error('File upload route error:', err.message);
+    return res.status(500).json({ error: 'File upload failed' });
+  }
+});
+
 // ============================================================================
 // PRIVATE ROUTES (Protected by JWT and scoped by Row Level Security)
 // ============================================================================
@@ -48,6 +76,7 @@ app.use('/api', checkWriteAccess); // Simple user write protection (blocks modif
 // 1. Payment Gateway Settings & Initialization
 app.get('/api/payment-methods', paymentCtrl.getPaymentMethods);
 app.post('/api/payment-methods', paymentCtrl.configurePaymentMethod);
+app.delete('/api/payment-methods/:id', paymentCtrl.deletePaymentMethod);
 app.post('/api/payments/initialize', paymentCtrl.initializeOnlinePayment);
 app.post('/api/payments/record', paymentCtrl.recordPayment);
 

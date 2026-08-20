@@ -1,36 +1,25 @@
 {
-  "name": "angular-document-extractor",
-  "version": "1.0.0",
-  "description": "Application Angular pour l'extraction de documents",
+  "name": "softmed-enterprise",
+  "version": "2.0.0",
+  "description": "SoftMed Medical SaaS platform with PostgreSQL, Express, React, dynamic online payments, and bilingual French/Arabic interface.",
+  "main": "server.js",
   "scripts": {
-    "ng": "ng",
-    "start": "ng serve",
-    "build": "ng build",
-    "build:prod": "ng build --configuration production",
-    "watch": "ng build --watch --configuration development",
-    "test": "ng test",
-    "deploy:vercel": "npm run build:prod && vercel --prod",
-    "deploy:netlify": "npm run build:prod && netlify deploy --prod --dir=dist/angular-document-extractor"
+    "start": "node server.js",
+    "db:init": "node db/db-init.js",
+    "test": "node test-flow.js"
   },
-  "private": true,
   "dependencies": {
-    "@angular/animations": "^17.0.0",
-    "@angular/common": "^17.0.0",
-    "@angular/compiler": "^17.0.0",
-    "@angular/core": "^17.0.0",
-    "@angular/forms": "^17.0.0",
-    "@angular/platform-browser": "^17.0.0",
-    "@angular/platform-browser-dynamic": "^17.0.0",
-    "@angular/router": "^17.0.0",
-    "rxjs": "~7.8.0",
-    "tslib": "^2.3.0",
-    "zone.js": "~0.14.2"
+    "@aws-sdk/client-s3": "^3.1114.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "pg": "^8.11.5"
   },
-  "devDependencies": {
-    "@angular-devkit/build-angular": "^17.0.0",
-    "@angular/cli": "^17.0.0",
-    "@angular/compiler-cli": "^17.0.0",
-    "@types/node": "^18.7.0",
-    "typescript": "~5.2.2"
-  }
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "private": true
 }

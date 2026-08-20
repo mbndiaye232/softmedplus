@@ -428,6 +428,43 @@ function t(key) {
   return translations[key] || key;
 }
 
+async function uploadImage(inputEl, targetInputId) {
+  const file = inputEl.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    showToast('Téléversement en cours...', 'info');
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers: {
+        ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {})
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Upload failed');
+    }
+
+    document.getElementById(targetInputId).value = data.url;
+    
+    // If there is an image preview element, update it
+    const previewEl = document.getElementById(targetInputId + '-preview');
+    if (previewEl) {
+      previewEl.src = data.url;
+      previewEl.style.display = 'block';
+    }
+    
+    showToast('Image téléversée avec succès!');
+  } catch (err) {
+    showToast(`Erreur de téléversement: ${err.message}`, 'error');
+  }
+}
+
 // ============================================================================
 // Auth flows
 // ============================================================================
@@ -1500,13 +1537,25 @@ async function processPayment(e) {
       detailsBox.innerHTML = `
         <div class="card" style="background-color:var(--bg-surface); border-color:var(--primary); text-align:center; padding:15px;">
           <h5 style="margin-bottom:10px; color:white;">Simulateur de Paiement en Ligne</h5>
-          ${initRes.qr_code_data ? `
+          ${initRes.qr_code_url ? `
+            <div style="margin-bottom: 12px; text-align:center;">
+              <strong style="color:var(--text-primary); display:block; margin-bottom:8px;">Scanner pour régler</strong>
+              <img src="${initRes.qr_code_url}" style="max-width:180px; border-radius:8px; border:1px solid var(--border-color);" alt="QR Code Marchand" />
+            </div>
+          ` : initRes.qr_code_data ? `
             <div class="qr-placeholder" style="background-color:#fff; color:#000; font-size:0.65rem; padding:10px; display:flex; flex-direction:column; justify-content:center;">
               <i class="fas fa-qrcode fa-3x" style="color:var(--primary); margin-bottom:5px;"></i>
               <strong>Code QR généré</strong>
               <div style="font-size:0.5rem; word-break:break-all;">${initRes.qr_code_data}</div>
             </div>
           ` : ''}
+          
+          ${initRes.instructions ? `
+            <div style="font-size:0.85rem; margin-bottom:12px; color:var(--text-primary); font-weight:600; padding:8px; background:rgba(255,255,255,0.05); border-radius:6px;">
+              ${initRes.instructions}
+            </div>
+          ` : ''}
+          
           ${initRes.checkout_url ? `
             <a href="${initRes.checkout_url}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem; margin-bottom:10px;">
               <i class="fas fa-external-link-alt"></i> Ouvrir page Checkout Wave/OM
@@ -1756,12 +1805,6 @@ async function renderSettings(container) {
     api.request('/tenant/profile')
   ]);
   
-  const wave = methods.find(m => m.provider === 'WAVE') || { credentials: {} };
-  const om = methods.find(m => m.provider === 'ORANGE_MONEY') || { credentials: {} };
-  const spi = methods.find(m => m.provider === 'SPI') || { credentials: {} };
-  const yas = methods.find(m => m.provider === 'YAS') || { credentials: {} };
-  const card = methods.find(m => m.provider === 'CARTE_BANCAIRE') || { credentials: {} };
-
   const gps = tenant.gps_coordinates || { latitude: '', longitude: '' };
 
   container.innerHTML = `
@@ -1795,8 +1838,12 @@ async function renderSettings(container) {
         </div>
         <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:15px; margin-bottom:15px;">
           <div class="form-group">
-            <label class="form-label">Logo URL</label>
-            <input type="text" class="form-control" id="prof-logo" value="${tenant.logo_url || ''}" placeholder="/logo-default.png" />
+            <label class="form-label">Logo de la Clinique</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" class="form-control" id="prof-logo" value="${tenant.logo_url || ''}" placeholder="/logo-default.png" style="flex:1;" />
+              <input type="file" id="prof-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'prof-logo')" />
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('prof-logo-file').click()" style="padding:0 12px; height:38px;"><i class="fas fa-upload"></i></button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Position GPS : Latitude</label>
@@ -1813,171 +1860,156 @@ async function renderSettings(container) {
 
     <!-- Payment Gateways Card -->
     <div class="card">
-      <div class="card-title"><i class="fas fa-cash-register"></i> ${t('onlinePaymentSetup')}</div>
-      <div class="payment-setup-grid">
-        <!-- 1. Wave Configuration -->
-        <div class="payment-setup-card">
-          <div class="payment-setup-header">
-            <div class="payment-brand-title"><span class="brand-icon wave">W</span> Wave Mobile Money</div>
-            <label class="switch">
-              <input type="checkbox" id="check-wave" ${wave.is_active ? 'checked' : ''} onchange="toggleGateway('WAVE', this.checked)" />
-              <span class="slider"></span>
-            </label>
+      <div class="card-title"><i class="fas fa-cash-register"></i> Moyens de paiement acceptés</div>
+      
+      <!-- Payment method Add/Edit Form -->
+      <form onsubmit="savePaymentMethod(event)" id="payment-method-form" style="background:var(--bg-surface); padding:15px; border-radius:8px; border:1px solid var(--border-color); margin-bottom:20px;">
+        <input type="hidden" id="moyen-id" value="" />
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; align-items:flex-end;">
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Moyen</label>
+            <input type="text" class="form-control" id="moyen-name" placeholder="ex: Wave" required />
           </div>
-          <div class="form-group">
-            <label class="form-label">${t('waveMerchant')}</label>
-            <input type="text" class="form-control" id="val-wave-merchant" value="${wave.credentials.merchant_id || ''}" placeholder="WAVE-ESPOIR-001" />
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Numéro à créditer</label>
+            <input type="text" class="form-control" id="moyen-number" placeholder="77 123 45 67" required />
           </div>
-          <div class="form-group">
-            <label class="form-label">${t('phone')} Associé</label>
-            <input type="text" class="form-control" id="val-wave-phone" value="${wave.credentials.phone_number || ''}" placeholder="+22177..." />
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">QR code (facultatif)</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" class="form-control" id="moyen-qr-url" placeholder="URL du QR Code..." style="flex:1;" />
+              <input type="file" id="moyen-qr-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'moyen-qr-url')" />
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('moyen-qr-file').click()" style="padding:0 12px; height:38px;"><i class="fas fa-upload"></i></button>
+            </div>
           </div>
-          <button class="btn btn-primary" style="font-size:0.8rem; width:100%;" onclick="saveGatewayConfig('WAVE')">${t('saveConfig')}</button>
         </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:15px;">
+          <span style="font-size:0.8rem; color:var(--text-muted);">Format d'image recommandé: PNG ou JPEG.</span>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-secondary" type="button" onclick="clearPaymentMethodForm()" style="font-size:0.85rem;">Annuler</button>
+            <button class="btn btn-primary" id="moyen-btn" type="submit" style="font-size:0.85rem; padding:0 20px; height:36px;">Ajouter</button>
+          </div>
+        </div>
+      </form>
+      
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">
+        Affichés à vos clients une fois leur commande validée — c'est là qu'ils en ont besoin. Le QR est celui que votre application vous donne : prenez-en une capture et déposez-la ici, elle sera réduite automatiquement.
+      </p>
+      <p style="font-size:0.85rem; color:var(--text-muted); font-style:italic; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        La plateforme n'encaisse rien : vos clients vous paient directement. Nous ne faisons qu'afficher vos coordonnées.
+      </p>
 
-        <!-- 2. Orange Money Configuration -->
-        <div class="payment-setup-card">
-          <div class="payment-setup-header">
-            <div class="payment-brand-title"><span class="brand-icon om">OM</span> Orange Money</div>
-            <label class="switch">
-              <input type="checkbox" id="check-om" ${om.is_active ? 'checked' : ''} onchange="toggleGateway('ORANGE_MONEY', this.checked)" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('omCode')}</label>
-            <input type="text" class="form-control" id="val-om-merchant" value="${om.credentials.merchant_code || ''}" placeholder="190928" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('phone')} Associé</label>
-            <input type="text" class="form-control" id="val-om-phone" value="${om.credentials.phone_number || ''}" placeholder="+22178..." />
-          </div>
-          <button class="btn btn-primary" style="font-size:0.8rem; width:100%;" onclick="saveGatewayConfig('ORANGE_MONEY')">${t('saveConfig')}</button>
-        </div>
-
-        <!-- 3. SPI Instant Payment Configuration -->
-        <div class="payment-setup-card">
-          <div class="payment-setup-header">
-            <div class="payment-brand-title"><span class="brand-icon spi">SPI</span> SPI instantané</div>
-            <label class="switch">
-              <input type="checkbox" id="check-spi" ${spi.is_active ? 'checked' : ''} onchange="toggleGateway('SPI', this.checked)" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('spiIban')}</label>
-            <input type="text" class="form-control" id="val-spi-iban" value="${spi.credentials.account_number || ''}" placeholder="SN098 01092 19280192801 92" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Nom Banque</label>
-            <input type="text" class="form-control" id="val-spi-bank" value="${spi.credentials.bank_name || ''}" placeholder="CBAO Groupe Attijariwafa" />
-          </div>
-          <button class="btn btn-primary" style="font-size:0.8rem; width:100%;" onclick="saveGatewayConfig('SPI')">${t('saveConfig')}</button>
-        </div>
-
-        <!-- 4. Yas Payment Configuration -->
-        <div class="payment-setup-card">
-          <div class="payment-setup-header">
-            <div class="payment-brand-title"><span class="brand-icon yas">Y</span> Yas Mobile</div>
-            <label class="switch">
-              <input type="checkbox" id="check-yas" ${yas.is_active ? 'checked' : ''} onchange="toggleGateway('YAS', this.checked)" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('yasKey')}</label>
-            <input type="password" class="form-control" id="val-yas-key" value="${yas.credentials.api_key || ''}" placeholder="••••••••••••••••" />
-          </div>
-          <button class="btn btn-primary" style="font-size:0.8rem; width:100%;" onclick="saveGatewayConfig('YAS')">${t('saveConfig')}</button>
-        </div>
-
-        <!-- 5. Card configuration -->
-        <div class="payment-setup-card">
-          <div class="payment-setup-header">
-            <div class="payment-brand-title"><span class="brand-icon card">CB</span> Carte Bancaire</div>
-            <label class="switch">
-              <input type="checkbox" id="check-card" ${card.is_active ? 'checked' : ''} onchange="toggleGateway('CARTE_BANCAIRE', this.checked)" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('cardKey')}</label>
-            <input type="text" class="form-control" id="val-card-key" value="${card.credentials.public_key || ''}" placeholder="pk_live_..." />
-          </div>
-          <button class="btn btn-primary" style="font-size:0.8rem; width:100%;" onclick="saveGatewayConfig('CARTE_BANCAIRE')">${t('saveConfig')}</button>
-        </div>
+      <!-- Active Payment Methods List -->
+      <div id="payment-methods-list">
+        ${methods.length === 0 ? `<div style="text-align:center; padding:20px; color:var(--text-muted);">Aucun moyen de paiement configuré.</div>` : 
+          methods.map(m => {
+            const creds = m.credentials || {};
+            const numVal = creds.phone_number || creds.account_number || '';
+            const isActive = m.is_active;
+            const qrCodeUrl = m.qr_code_template || '';
+            return `
+              <div class="card" style="margin-bottom: 12px; display:flex; flex-direction:row; align-items:center; justify-content:space-between; padding:12px; background-color: var(--bg-surface); opacity: ${isActive ? 1 : 0.6}">
+                <div style="display:flex; align-items:center; gap:15px;">
+                  <img src="${qrCodeUrl || 'https://placehold.co/100x100?text=Pas+de+QR'}" style="width:50px; height:50px; object-fit:cover; border-radius:6px; border:1px solid var(--border-color);" alt="QR Code" />
+                  <div>
+                    <h4 style="margin:0; font-size:1rem; color:var(--text-primary); font-weight:600;">${m.name}</h4>
+                    <span style="font-size:0.85rem; color:var(--text-muted);">${numVal}</span>
+                  </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn btn-secondary" style="font-size:0.8rem; padding: 4px 10px;" onclick="editPaymentMethod('${m.id}', '${m.provider}', '${m.name.replace(/'/g, "\\'")}', '${numVal.replace(/'/g, "\\'")}', '${qrCodeUrl.replace(/'/g, "\\'")}')">Modifier</button>
+                  <button class="btn btn-secondary" style="font-size:0.8rem; padding: 4px 10px;" onclick="togglePaymentMethodStatus('${m.id}', '${m.provider}', '${m.name.replace(/'/g, "\\'")}', '${numVal.replace(/'/g, "\\'")}', '${qrCodeUrl.replace(/'/g, "\\'")}', ${isActive})">
+                    ${isActive ? 'Masquer' : 'Afficher'}
+                  </button>
+                  <button class="btn btn-danger" style="font-size:0.8rem; padding: 4px 10px; background-color:var(--danger);" onclick="deletePaymentMethod('${m.id}')">Supprimer</button>
+                </div>
+              </div>
+            `;
+          }).join('')
+        }
       </div>
     </div>
   `;
 }
 
-async function saveGatewayConfig(provider) {
-  let name = '';
-  let credentials = {};
-  
-  if (provider === 'WAVE') {
-    name = 'Wave Payment';
-    credentials = {
-      merchant_id: document.getElementById('val-wave-merchant').value,
-      phone_number: document.getElementById('val-wave-phone').value
-    };
-  } else if (provider === 'ORANGE_MONEY') {
-    name = 'Orange Money Payment';
-    credentials = {
-      merchant_code: document.getElementById('val-om-merchant').value,
-      phone_number: document.getElementById('val-om-phone').value
-    };
-  } else if (provider === 'SPI') {
-    name = 'SPI Bank Transfer';
-    credentials = {
-      account_number: document.getElementById('val-spi-iban').value,
-      bank_name: document.getElementById('val-spi-bank').value
-    };
-  } else if (provider === 'YAS') {
-    name = 'Yas Pay';
-    credentials = {
-      api_key: document.getElementById('val-yas-key').value
-    };
-  } else if (provider === 'CARTE_BANCAIRE') {
-    name = 'Carte Bancaire Stripe';
-    credentials = {
-      public_key: document.getElementById('val-card-key').value
-    };
-  }
-
-  const isChecked = document.getElementById(`check-${provider.toLowerCase() === 'carte_bancaire' ? 'card' : provider.toLowerCase()}`).checked;
-
-  try {
-    await api.request('/payment-methods', {
-      method: 'POST',
-      body: JSON.stringify({
-        provider,
-        name,
-        credentials,
-        is_active: isChecked
-      })
-    });
-    showToast(`Configuration ${provider} enregistrée avec succès!`);
-  } catch (err) {}
+function clearPaymentMethodForm() {
+  document.getElementById('moyen-id').value = '';
+  document.getElementById('moyen-name').value = '';
+  document.getElementById('moyen-number').value = '';
+  document.getElementById('moyen-qr-url').value = '';
+  document.getElementById('moyen-btn').innerText = 'Ajouter';
 }
 
-async function toggleGateway(provider, isChecked) {
+function editPaymentMethod(id, provider, name, number, qrUrl) {
+  document.getElementById('moyen-id').value = id;
+  document.getElementById('moyen-name').value = name;
+  document.getElementById('moyen-number').value = number;
+  document.getElementById('moyen-qr-url').value = qrUrl;
+  document.getElementById('moyen-btn').innerText = 'Enregistrer';
+  document.getElementById('payment-method-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function savePaymentMethod(e) {
+  e.preventDefault();
+  const id = document.getElementById('moyen-id').value;
+  const name = document.getElementById('moyen-name').value;
+  const number = document.getElementById('moyen-number').value;
+  const qrUrl = document.getElementById('moyen-qr-url').value;
+  const provider = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '_');
+
   try {
-    // If it's a simple toggle, save current credentials but change status
-    const methods = await api.request('/payment-methods');
-    const gateway = methods.find(m => m.provider === provider) || { credentials: {}, name: `${provider} Payment` };
-    
+    showToast("Enregistrement du moyen de paiement...", 'info');
     await api.request('/payment-methods', {
       method: 'POST',
       body: JSON.stringify({
+        id: id || undefined,
         provider,
-        name: gateway.name,
-        credentials: gateway.credentials,
-        is_active: isChecked
+        name,
+        credentials: { phone_number: number },
+        qr_code_template: qrUrl || null
       })
     });
-    showToast(`Passerelle ${provider} ${isChecked ? 'activée' : 'désactivée'}.`);
-  } catch (err) {}
+    
+    showToast(`Moyen de paiement ${name} enregistré avec succès!`);
+    clearPaymentMethodForm();
+    navigate('settings');
+  } catch (err) {
+    showToast(`Erreur d'enregistrement: ${err.message}`, 'error');
+  }
+}
+
+async function togglePaymentMethodStatus(id, provider, name, number, qrUrl, currentActive) {
+  try {
+    await api.request('/payment-methods', {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        provider,
+        name,
+        credentials: { phone_number: number },
+        qr_code_template: qrUrl || null,
+        is_active: !currentActive
+      })
+    });
+    showToast(`Moyen de paiement ${name} ${!currentActive ? 'activé' : 'désactivé'} avec succès.`);
+    navigate('settings');
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+async function deletePaymentMethod(id) {
+  if (!confirm('Êtes-vous sûr de vouloir supprimer ce moyen de paiement ?')) return;
+  
+  try {
+    await api.request(`/payment-methods/${id}`, {
+      method: 'DELETE'
+    });
+    showToast('Moyen de paiement supprimé avec succès.');
+    navigate('settings');
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
 }
 
 async function saveClinicProfile(e) {
@@ -2349,8 +2381,12 @@ function renderAuthLayout() {
               <input type="text" class="form-control" id="signup-address" placeholder="12 Rue de Dakar, Fann" />
             </div>
             <div style="flex:1;">
-              <label class="form-label">URL du Logo</label>
-              <input type="text" class="form-control" id="signup-logo" placeholder="/logo-espoir.png" />
+              <label class="form-label">Logo de la Clinique</label>
+              <div style="display:flex; gap:5px;">
+                <input type="text" class="form-control" id="signup-logo" placeholder="/logo-espoir.png" style="flex:1;" />
+                <input type="file" id="signup-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'signup-logo')" />
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('signup-logo-file').click()" style="padding:0 12px; height:38px;"><i class="fas fa-upload"></i></button>
+              </div>
             </div>
           </div>
 
