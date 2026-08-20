@@ -26,7 +26,7 @@ const tenantIsolator = async (req, res, next) => {
 
     // Begin transaction and inject the current_tenant_id session config
     await client.query('BEGIN');
-    await client.query(`SET LOCAL app.current_tenant_id = $1`, [tenantId]);
+    await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [tenantId]);
 
     // Track transaction status
     let isFinished = false;
