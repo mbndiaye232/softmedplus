@@ -2,9 +2,13 @@ const crypto = require('crypto');
 
 // 1. Get Patient Statuses for current tenant
 const getStatuses = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT * FROM patient_statuses WHERE is_active = true ORDER BY is_default DESC, name ASC`
+      `SELECT * FROM patient_statuses 
+       WHERE tenant_id = $1 AND is_active = true 
+       ORDER BY is_default DESC, name ASC`,
+      [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -73,9 +77,9 @@ const updateStatus = async (req, res) => {
            color_code = COALESCE($2, color_code),
            is_default = COALESCE($3, is_default),
            is_active = COALESCE($4, is_active)
-       WHERE id = $5
+       WHERE id = $5 AND tenant_id = $6
        RETURNING *`,
-      [name, color_code, is_default !== undefined ? is_default : null, is_active !== undefined ? is_active : null, id]
+      [name, color_code, is_default !== undefined ? is_default : null, is_active !== undefined ? is_active : null, id, tenantId]
     );
 
     if (result.rowCount === 0) {
@@ -92,20 +96,21 @@ const updateStatus = async (req, res) => {
 // 4. Delete / Deactivate Patient Status
 const deleteStatus = async (req, res) => {
   const { id } = req.params;
+  const tenantId = req.user.tenant_id;
 
   try {
     // Check if any patients use this status
     const countRes = await req.dbClient.query(
-      `SELECT COUNT(*) FROM patients WHERE status_id = $1`,
-      [id]
+      `SELECT COUNT(*) FROM patients WHERE status_id = $1 AND tenant_id = $2`,
+      [id, tenantId]
     );
 
     if (parseInt(countRes.rows[0].count) > 0) {
       // Soft-delete (set is_active = false) so history is preserved
-      await req.dbClient.query(`UPDATE patient_statuses SET is_active = false WHERE id = $1`, [id]);
+      await req.dbClient.query(`UPDATE patient_statuses SET is_active = false WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
       return res.status(200).json({ message: 'Status deactivated as it is referenced by existing patients' });
     } else {
-      await req.dbClient.query(`DELETE FROM patient_statuses WHERE id = $1`, [id]);
+      await req.dbClient.query(`DELETE FROM patient_statuses WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
       return res.status(200).json({ message: 'Status deleted successfully' });
     }
   } catch (err) {

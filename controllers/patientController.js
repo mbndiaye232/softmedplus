@@ -100,14 +100,15 @@ const registerPatient = async (req, res) => {
 // 2. Get Patients (isolated by RLS with joined Status)
 const getPatients = async (req, res) => {
   const { status, search, status_id } = req.query;
+  const tenantId = req.user.tenant_id;
 
   let queryStr = `
     SELECT p.*, ps.name AS status_name, ps.color_code AS status_color, ps.code AS status_code
     FROM patients p
     LEFT JOIN patient_statuses ps ON p.status_id = ps.id
-    WHERE 1=1
+    WHERE p.tenant_id = $1
   `;
-  const params = [];
+  const params = [tenantId];
 
   if (status_id) {
     params.push(status_id);

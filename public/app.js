@@ -963,11 +963,13 @@ let activeDPITab = 'summary';
 let allPatientStatuses = [];
 
 async function renderPatients(container) {
-  const [patients, statuses] = await Promise.all([
+  const [patients, rawStatuses] = await Promise.all([
     api.request('/patients'),
     api.request('/patient-statuses').catch(() => [])
   ]);
 
+  // Ensure strict uniqueness by name
+  const statuses = Array.from(new Map(rawStatuses.map(s => [s.name.trim().toLowerCase(), s])).values());
   allPatientStatuses = statuses;
 
   container.innerHTML = `
