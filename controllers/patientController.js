@@ -27,7 +27,8 @@ const registerPatient = async (req, res) => {
     chronic_conditions, 
     address, 
     trusted_payer_phone, 
-    status 
+    status,
+    status_id
   } = req.body;
 
   if (!phone_number || !first_name || !last_name || !gender || !date_of_birth) {
@@ -50,10 +51,10 @@ const registerPatient = async (req, res) => {
     const result = await req.dbClient.query(
       `INSERT INTO patients (
         tenant_id, patient_code, phone_number, first_name, last_name, gender, date_of_birth, 
-        blood_group, height_cm, weight_kg, observations, allergies, chronic_conditions, 
+        blood_group, height_cm, weight_kg, observations, status_id, allergies, chronic_conditions, 
         address, trusted_payer_phone, status
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING *`,
       [
         tenantId,
@@ -67,6 +68,7 @@ const registerPatient = async (req, res) => {
         height_cm ? parseFloat(height_cm) : null,
         weight_kg ? parseFloat(weight_kg) : null,
         observations || null,
+        status_id || null,
         parsedAllergies,
         parsedConditions,
         address || null,
@@ -95,24 +97,32 @@ const registerPatient = async (req, res) => {
   }
 };
 
-// 2. Get Patients (isolated by RLS)
+// 2. Get Patients (isolated by RLS with joined Status)
 const getPatients = async (req, res) => {
-  const { status, search } = req.query;
+  const { status, search, status_id } = req.query;
 
-  let queryStr = `SELECT * FROM patients WHERE 1=1`;
+  let queryStr = `
+    SELECT p.*, ps.name AS status_name, ps.color_code AS status_color, ps.code AS status_code
+    FROM patients p
+    LEFT JOIN patient_statuses ps ON p.status_id = ps.id
+    WHERE 1=1
+  `;
   const params = [];
 
-  if (status) {
+  if (status_id) {
+    params.push(status_id);
+    queryStr += ` AND p.status_id = $${params.length}`;
+  } else if (status) {
     params.push(status);
-    queryStr += ` AND status = $${params.length}`;
+    queryStr += ` AND (p.status = $${params.length} OR ps.code = $${params.length})`;
   }
 
   if (search) {
     params.push(`%${search}%`);
-    queryStr += ` AND (first_name ILIKE $${params.length} OR last_name ILIKE $${params.length} OR patient_code ILIKE $${params.length} OR phone_number ILIKE $${params.length})`;
+    queryStr += ` AND (p.first_name ILIKE $${params.length} OR p.last_name ILIKE $${params.length} OR p.patient_code ILIKE $${params.length} OR p.phone_number ILIKE $${params.length})`;
   }
 
-  queryStr += ` ORDER BY created_at DESC`;
+  queryStr += ` ORDER BY p.created_at DESC`;
 
   try {
     const result = await req.dbClient.query(queryStr, params);
@@ -120,6 +130,52 @@ const getPatients = async (req, res) => {
   } catch (err) {
     console.error('Get patients error:', err.message);
     return res.status(500).json({ error: 'Failed to retrieve patients' });
+  }
+};
+
+// 2b. Update Patient
+const updatePatient = async (req, res) => {
+  const { id } = req.params;
+  const { phone_number, first_name, last_name, gender, date_of_birth, blood_group, height_cm, weight_kg, observations, status_id, status, address, allergies, chronic_conditions } = req.body;
+
+  const parsedAllergies = Array.isArray(allergies) 
+    ? allergies 
+    : (allergies && typeof allergies === 'string' ? allergies.split(',').map(s => s.trim()).filter(Boolean) : null);
+
+  try {
+    const result = await req.dbClient.query(
+      `UPDATE patients
+       SET phone_number = COALESCE($1, phone_number),
+           first_name = COALESCE($2, first_name),
+           last_name = COALESCE($3, last_name),
+           gender = COALESCE($4, gender),
+           date_of_birth = COALESCE($5, date_of_birth),
+           blood_group = COALESCE($6, blood_group),
+           height_cm = COALESCE($7, height_cm),
+           weight_kg = COALESCE($8, weight_kg),
+           observations = COALESCE($9, observations),
+           status_id = COALESCE($10, status_id),
+           status = COALESCE($11, status),
+           address = COALESCE($12, address),
+           allergies = COALESCE($13, allergies)
+       WHERE id = $14
+       RETURNING *`,
+      [
+        phone_number, first_name, last_name, gender, date_of_birth, blood_group,
+        height_cm ? parseFloat(height_cm) : null,
+        weight_kg ? parseFloat(weight_kg) : null,
+        observations, status_id, status, address, parsedAllergies, id
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update patient error:', err.message);
+    return res.status(500).json({ error: 'Failed to update patient' });
   }
 };
 
@@ -306,6 +362,7 @@ const verifyPrescription = async (req, res) => {
 module.exports = {
   registerPatient,
   getPatients,
+  updatePatient,
   createConsultation,
   verifyPrescription
 };

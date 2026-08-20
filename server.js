@@ -18,6 +18,8 @@ const stockCtrl = require('./controllers/stockController');
 const reportCtrl = require('./controllers/reportController');
 const tenantCtrl = require('./controllers/tenantController');
 const hospitalCtrl = require('./controllers/hospitalController');
+const patientStatusCtrl = require('./controllers/patientStatusController');
+const medicalHistoryCtrl = require('./controllers/medicalHistoryController');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -81,10 +83,29 @@ app.delete('/api/payment-methods/:id', paymentCtrl.deletePaymentMethod);
 app.post('/api/payments/initialize', paymentCtrl.initializeOnlinePayment);
 app.post('/api/payments/record', paymentCtrl.recordPayment);
 
-// 2. Patient Registry & DPI
+// 2. Patient Registry & DPI 360
 app.post('/api/patients', patientCtrl.registerPatient);
 app.get('/api/patients', patientCtrl.getPatients);
+app.put('/api/patients/:id', patientCtrl.updatePatient);
 app.post('/api/clinical/consultations', patientCtrl.createConsultation);
+
+// 2b. Patient Statuses CRUD
+app.get('/api/patient-statuses', patientStatusCtrl.getStatuses);
+app.post('/api/patient-statuses', patientStatusCtrl.createStatus);
+app.put('/api/patient-statuses/:id', patientStatusCtrl.updateStatus);
+app.delete('/api/patient-statuses/:id', patientStatusCtrl.deleteStatus);
+
+// 2c. Patient Medical 360° Dossier, Treatments & Lab Orders
+app.get('/api/patients/:patientId/dossier', medicalHistoryCtrl.getPatientDossier);
+app.get('/api/patients/:patientId/treatments', medicalHistoryCtrl.getTreatments);
+app.post('/api/patients/:patientId/treatments', medicalHistoryCtrl.createTreatment);
+app.put('/api/patients/treatments/:id', medicalHistoryCtrl.updateTreatment);
+app.delete('/api/patients/treatments/:id', medicalHistoryCtrl.deleteTreatment);
+
+app.get('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.getLabOrders);
+app.post('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.createLabOrder);
+app.put('/api/patients/lab-orders/:id', medicalHistoryCtrl.updateLabOrder);
+app.delete('/api/patients/lab-orders/:id', medicalHistoryCtrl.deleteLabOrder);
 
 // 3. Appointments & Scheduling catalog
 app.post('/api/medical-services', apptCtrl.createMedicalService);

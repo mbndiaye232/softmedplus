@@ -182,6 +182,24 @@ const registerTenant = async (req, res) => {
       [crypto.randomUUID(), tenantId, practitionerId]
     );
 
+    // G. Seed Default Patient Statuses
+    const defaultStatuses = [
+      { code: 'EXTERNE', name: 'Externe (Ambulatoire)', color: '#3498db', is_default: true },
+      { code: 'HOSPITALISE', name: 'Hospitalisé', color: '#e74c3c', is_default: false },
+      { code: 'OBSERVATION', name: 'En observation', color: '#f39c12', is_default: false },
+      { code: 'URGENCE', name: 'Urgence', color: '#c0392b', is_default: false },
+      { code: 'POST_OP', name: 'Post-opératoire', color: '#9b59b6', is_default: false }
+    ];
+
+    for (const st of defaultStatuses) {
+      await client.query(
+        `INSERT INTO patient_statuses (id, tenant_id, code, name, color_code, is_default, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
+         ON CONFLICT (tenant_id, code) DO NOTHING`,
+        [crypto.randomUUID(), tenantId, st.code, st.name, st.color, st.is_default]
+      );
+    }
+
     await client.query('COMMIT');
 
     // E. Generate JWT for the newly registered super-admin

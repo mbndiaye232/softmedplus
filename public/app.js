@@ -958,37 +958,48 @@ async function bookAppointment(e) {
 // ============================================================================
 let activeDPIPatient = null;
 let currentPrescriptionItems = [];
+let activeDPIPatient = null;
+let currentDossierData = null;
+let activeDPITab = 'summary';
+let allPatientStatuses = [];
 
 async function renderPatients(container) {
-  const patients = await api.request('/patients');
+  const [patients, statuses] = await Promise.all([
+    api.request('/patients'),
+    api.request('/patient-statuses').catch(() => [])
+  ]);
+
+  allPatientStatuses = statuses;
 
   container.innerHTML = `
-    <div class="agenda-grid" style="grid-template-columns: 350px 1fr;">
+    <div class="agenda-grid" style="grid-template-columns: 360px 1fr; gap:20px;">
       <div class="card">
         <div class="card-title"><i class="fas fa-user-plus"></i> ${t('regPatient')}</div>
         <form onsubmit="registerPatient(event)">
           <div class="form-group">
-            <label class="form-label">${t('firstName')}</label>
+            <label class="form-label">${t('firstName')} *</label>
             <input type="text" class="form-control" id="p-first" required />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('lastName')}</label>
+            <label class="form-label">${t('lastName')} *</label>
             <input type="text" class="form-control" id="p-last" required />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('phone')}</label>
+            <label class="form-label">${t('phone')} *</label>
             <input type="text" class="form-control" id="p-phone" required placeholder="+22177..." />
           </div>
-          <div class="form-group">
-            <label class="form-label">${t('gender')}</label>
-            <select class="form-control" id="p-gender" required>
-              <option value="M">M</option>
-              <option value="F">F</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">${t('dob')}</label>
-            <input type="date" class="form-control" id="p-dob" required />
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">${t('gender')} *</label>
+              <select class="form-control" id="p-gender" required>
+                <option value="M">M</option>
+                <option value="F">F</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('dob')} *</label>
+              <input type="date" class="form-control" id="p-dob" required />
+            </div>
           </div>
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
             <div class="form-group">
@@ -997,9 +1008,8 @@ async function renderPatients(container) {
             </div>
             <div class="form-group">
               <label class="form-label">${t('status')}</label>
-              <select class="form-control" id="p-status">
-                <option value="Externe">${t('externe')}</option>
-                <option value="Interne">${t('interne')}</option>
+              <select class="form-control" id="p-status-id">
+                ${statuses.map(s => `<option value="${s.id}" ${s.is_default ? 'selected' : ''}>${s.name}</option>`).join('')}
               </select>
             </div>
           </div>
@@ -1026,7 +1036,12 @@ async function renderPatients(container) {
       </div>
       
       <div class="card">
-        <div class="card-title"><i class="fas fa-users"></i> ${t('patientList')}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+          <div class="card-title" style="margin:0;"><i class="fas fa-users"></i> ${t('patientList')}</div>
+          <button class="btn btn-secondary btn-sm" onclick="openPatientStatusModal()">
+            <i class="fas fa-tags"></i> Gérer les Statuts
+          </button>
+        </div>
         <div class="table-responsive">
           <table class="table">
             <thead>
@@ -1042,10 +1057,13 @@ async function renderPatients(container) {
               </tr>
             </thead>
             <tbody>
+              ${patients.length === 0 ? '<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted);">Aucun patient enregistré</td></tr>' : ''}
               ${patients.map(p => {
                 const height = p.height_cm ? parseFloat(p.height_cm) : null;
                 const weight = p.weight_kg ? parseFloat(p.weight_kg) : null;
                 const imc = (height && weight) ? (weight / Math.pow(height / 100, 2)).toFixed(1) : null;
+                const statusName = p.status_name || p.status || 'Externe';
+                const statusColor = p.status_color || '#4a90e2';
                 return `
                 <tr>
                   <td><strong>${p.patient_code}</strong></td>
@@ -1061,10 +1079,14 @@ async function renderPatients(container) {
                     ${height ? `${height} cm` : '-'} / ${weight ? `${weight} kg` : '-'}
                     ${imc ? `<br><small style="color:var(--primary); font-weight:600;">IMC: ${imc}</small>` : ''}
                   </td>
-                  <td><span class="status-badge ${p.status.toLowerCase()}">${p.status === 'Interne' ? t('interne') : t('externe')}</span></td>
                   <td>
-                    <button class="btn btn-secondary" onclick="openDPIModal('${p.id}', '${p.first_name} ${p.last_name}')">
-                      <i class="fas fa-file-medical"></i> DPI
+                    <span class="badge" style="background:${statusColor}; color:white; padding:4px 8px; border-radius:4px; font-weight:600; font-size:0.75rem;">
+                      ${statusName}
+                    </span>
+                  </td>
+                  <td>
+                    <button class="btn btn-primary btn-sm" onclick="openDPIModal('${p.id}', '${p.first_name} ${p.last_name}')" style="padding:5px 10px;">
+                      <i class="fas fa-folder-open"></i> Dossier 360°
                     </button>
                   </td>
                 </tr>
@@ -1089,7 +1111,10 @@ async function registerPatient(e) {
   const weight_kg = document.getElementById('p-weight').value || null;
   const observations = document.getElementById('p-observations').value || null;
   const allergies = document.getElementById('p-allergies').value ? document.getElementById('p-allergies').value.split(',').map(s => s.trim()) : [];
-  const status = document.getElementById('p-status').value;
+  
+  const statusSelect = document.getElementById('p-status-id');
+  const status_id = statusSelect ? statusSelect.value : null;
+  const status = statusSelect && statusSelect.options[statusSelect.selectedIndex] ? statusSelect.options[statusSelect.selectedIndex].text : 'Externe';
 
   try {
     await api.request('/patients', {
@@ -1105,6 +1130,7 @@ async function registerPatient(e) {
         weight_kg, 
         observations, 
         allergies, 
+        status_id,
         status
       })
     });
@@ -1113,20 +1139,731 @@ async function registerPatient(e) {
   } catch (err) {}
 }
 
-function openDPIModal(patientId, patientName) {
-  activeDPIPatient = { id: patientId, name: patientName };
-  currentPrescriptionItems = [];
-  
+// ============================================================================
+// Dossier Médical 360° (DPI Complet)
+// ============================================================================
+async function openDPIModal(patientId, patientName) {
   const modal = document.getElementById('dpi-modal');
-  document.getElementById('dpi-modal-title').innerText = `${t('recordConsult')} - ${patientName}`;
-  renderPrescriptionItems();
-  
+  if (!modal) return;
+
+  activeDPIPatient = { id: patientId, name: patientName };
+  activeDPITab = 'summary';
   modal.style.display = 'flex';
+
+  const bodyContainer = document.getElementById('dpi-modal-content');
+  if (bodyContainer) {
+    bodyContainer.innerHTML = `<div style="text-align:center; padding:40px;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--primary);"></i><div style="margin-top:10px;">Chargement du Dossier Médical 360°...</div></div>`;
+  }
+
+  try {
+    const [dossier, statuses] = await Promise.all([
+      api.request(`/patients/${patientId}/dossier`),
+      api.request('/patient-statuses').catch(() => [])
+    ]);
+
+    currentDossierData = dossier;
+    allPatientStatuses = statuses;
+
+    renderDPI360Modal();
+  } catch (err) {
+    showToast(`Erreur chargement dossier: ${err.message}`, 'error');
+    closeDPIModal();
+  }
 }
 
 function closeDPIModal() {
-  document.getElementById('dpi-modal').style.display = 'none';
+  const modal = document.getElementById('dpi-modal');
+  if (modal) modal.style.display = 'none';
   activeDPIPatient = null;
+  currentDossierData = null;
+}
+
+function renderDPI360Modal() {
+  if (!currentDossierData) return;
+  const p = currentDossierData.patient;
+  const bodyContainer = document.getElementById('dpi-modal-content');
+  if (!bodyContainer) return;
+
+  const age = p.date_of_birth ? Math.floor((new Date() - new Date(p.date_of_birth)) / (365.25 * 24 * 60 * 60 * 1000)) : null;
+
+  bodyContainer.innerHTML = `
+    <!-- Patient Profile Header Banner -->
+    <div style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; padding:15px 20px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+      <div style="display:flex; align-items:center; gap:15px;">
+        <div style="width:50px; height:50px; border-radius:50%; background:var(--primary); color:white; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.2rem;">
+          ${p.first_name[0]}${p.last_name[0]}
+        </div>
+        <div>
+          <div style="font-size:1.2rem; font-weight:700; color:var(--text-primary);">
+            ${p.first_name} ${p.last_name} 
+            ${p.blood_group ? `<span class="badge" style="background:#e74c3c; color:white; font-size:0.75rem; vertical-align:middle; margin-left:6px;">${p.blood_group}</span>` : ''}
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-muted); display:flex; gap:15px; margin-top:3px;">
+            <span><i class="fas fa-id-card"></i> <strong>${p.patient_code}</strong></span>
+            <span><i class="fas fa-phone"></i> ${p.phone_number}</span>
+            <span><i class="fas fa-venus-mars"></i> ${p.gender === 'M' ? 'Homme' : 'Femme'}</span>
+            <span><i class="fas fa-birthday-cake"></i> ${age ? `${age} ans (${new Date(p.date_of_birth).toLocaleDateString()})` : '-'}</span>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Direct Status Change Selector -->
+      <div style="display:flex; align-items:center; gap:10px;">
+        <label style="font-size:0.85rem; color:var(--text-muted); margin:0;">Statut :</label>
+        <select onchange="changePatientStatusDirect('${p.id}', this.value)" style="background:${p.status_color || '#4A90E2'}; color:white; border:none; padding:6px 12px; border-radius:6px; font-weight:600; font-size:0.85rem; cursor:pointer;">
+          ${allPatientStatuses.map(st => `
+            <option value="${st.id}" ${p.status_id === st.id ? 'selected' : ''} style="background:var(--bg-surface); color:var(--text-primary);">
+              ${st.name}
+            </option>
+          `).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- DPI Navigation Tabs -->
+    <div style="display:flex; gap:5px; border-bottom:2px solid var(--border-color); margin-bottom:20px; overflow-x:auto; padding-bottom:2px;">
+      <button class="btn btn-sm ${activeDPITab === 'summary' ? 'btn-primary' : 'btn-secondary'}" onclick="switchDPITab('summary')">
+        <i class="fas fa-id-badge"></i> Synthèse & Constantes
+      </button>
+      <button class="btn btn-sm ${activeDPITab === 'treatments' ? 'btn-primary' : 'btn-secondary'}" onclick="switchDPITab('treatments')">
+        <i class="fas fa-pills"></i> Traitements & Résultats (${currentDossierData.treatments.length})
+      </button>
+      <button class="btn btn-sm ${activeDPITab === 'lab' ? 'btn-primary' : 'btn-secondary'}" onclick="switchDPITab('lab')">
+        <i class="fas fa-vial"></i> Analyses & Examens (${currentDossierData.labOrders.length})
+      </button>
+      <button class="btn btn-sm ${activeDPITab === 'consultations' ? 'btn-primary' : 'btn-secondary'}" onclick="switchDPITab('consultations')">
+        <i class="fas fa-stethoscope"></i> Consultations & Ordonnances (${currentDossierData.consultations.length})
+      </button>
+      <button class="btn btn-sm ${activeDPITab === 'history' ? 'btn-primary' : 'btn-secondary'}" onclick="switchDPITab('history')">
+        <i class="fas fa-history"></i> RDV & Hospitalisation (${currentDossierData.appointments.length + currentDossierData.hospitalizations.length})
+      </button>
+    </div>
+
+    <!-- Tab Active Body -->
+    <div id="dpi-tab-body">
+      ${renderDPITabBody()}
+    </div>
+  `;
+}
+
+function switchDPITab(tab) {
+  activeDPITab = tab;
+  renderDPI360Modal();
+}
+
+function renderDPITabBody() {
+  if (!currentDossierData) return '';
+  const p = currentDossierData.patient;
+
+  // -------------------------------------------------------------
+  // TAB 1: SYNTHÈSE & CONSTANTES
+  // -------------------------------------------------------------
+  if (activeDPITab === 'summary') {
+    const height = p.height_cm ? parseFloat(p.height_cm) : null;
+    const weight = p.weight_kg ? parseFloat(p.weight_kg) : null;
+    let imc = null;
+    let imcLabel = '';
+    let imcColor = '#2ecc71';
+
+    if (height && weight) {
+      imc = (weight / Math.pow(height / 100, 2)).toFixed(1);
+      if (imc < 18.5) { imcLabel = 'Insuffisance pondérale'; imcColor = '#3498db'; }
+      else if (imc <= 24.9) { imcLabel = 'Poids normal'; imcColor = '#2ecc71'; }
+      else if (imc <= 29.9) { imcLabel = 'Surpoids'; imcColor = '#f39c12'; }
+      else { imcLabel = 'Obésité'; imcColor = '#e74c3c'; }
+    }
+
+    // Last consultation vitals if any
+    const lastConsult = currentDossierData.consultations[0];
+    const lastVitals = (lastConsult && lastConsult.vital_signs) ? lastConsult.vital_signs : {};
+
+    return `
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+        <!-- Left: Vitals & Body Metrics -->
+        <div class="card" style="margin:0;">
+          <div class="card-title"><i class="fas fa-heartbeat"></i> Constantes & Mesures Corporelles</div>
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:15px;">
+            <div style="background:var(--bg-primary); padding:12px; border-radius:8px; text-align:center; border:1px solid var(--border-color);">
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Taille</div>
+              <div style="font-size:1.3rem; font-weight:700; color:var(--primary);">${height ? `${height} cm` : '-'}</div>
+            </div>
+            <div style="background:var(--bg-primary); padding:12px; border-radius:8px; text-align:center; border:1px solid var(--border-color);">
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">Poids</div>
+              <div style="font-size:1.3rem; font-weight:700; color:var(--primary);">${weight ? `${weight} kg` : '-'}</div>
+            </div>
+            <div style="background:var(--bg-primary); padding:12px; border-radius:8px; text-align:center; border:1px solid var(--border-color);">
+              <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;">IMC</div>
+              <div style="font-size:1.3rem; font-weight:700; color:${imcColor};">${imc || '-'}</div>
+              ${imcLabel ? `<div style="font-size:0.65rem; color:${imcColor}; font-weight:600;">${imcLabel}</div>` : ''}
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:15px;">
+            <div style="background:var(--bg-primary); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Tension Artérielle (Dernière)</div>
+              <div style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">
+                ${(lastVitals.bp_systolic && lastVitals.bp_diastolic) ? `${lastVitals.bp_systolic}/${lastVitals.bp_diastolic} mmHg` : 'Non mesurée'}
+              </div>
+            </div>
+            <div style="background:var(--bg-primary); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+              <div style="font-size:0.75rem; color:var(--text-muted);">Température (Dernière)</div>
+              <div style="font-size:1.1rem; font-weight:600; color:var(--text-primary);">
+                ${lastVitals.temperature_c ? `${lastVitals.temperature_c} °C` : 'Non mesurée'}
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:15px;">
+            <label class="form-label" style="font-weight:600;"><i class="fas fa-allergies"></i> Allergies connues :</label>
+            <div>
+              ${(p.allergies && p.allergies.length > 0) ? p.allergies.map(a => `<span class="badge" style="background:#e74c3c; color:white; margin-right:5px; padding:4px 8px; border-radius:4px;">${a}</span>`).join('') : '<span style="color:var(--text-muted); font-size:0.85rem;">Aucune allergie déclarée</span>'}
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Observations & Quick Update -->
+        <div class="card" style="margin:0;">
+          <div class="card-title"><i class="fas fa-edit"></i> Observations & Antécédents</div>
+          <form onsubmit="updatePatientVitalsFromDossier(event, '${p.id}')">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+              <div class="form-group">
+                <label class="form-label">Taille (cm)</label>
+                <input type="number" step="0.1" class="form-control" id="dossier-p-height" value="${p.height_cm || ''}" placeholder="175" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Poids (kg)</label>
+                <input type="number" step="0.1" class="form-control" id="dossier-p-weight" value="${p.weight_kg || ''}" placeholder="70" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Observations générales / Antécédents médicaux</label>
+              <textarea class="form-control" id="dossier-p-observations" rows="4" placeholder="Antécédents familiaux, chirurgicaux, mode de vie, remarques...">${p.observations || ''}</textarea>
+            </div>
+            <button class="btn btn-primary" type="submit" style="width:100%;">
+              <i class="fas fa-save"></i> Enregistrer les Modifications
+            </button>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  // -------------------------------------------------------------
+  // TAB 2: TRAITEMENTS & RÉSULTATS OBTENUS
+  // -------------------------------------------------------------
+  if (activeDPITab === 'treatments') {
+    const list = currentDossierData.treatments || [];
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h4 style="margin:0; color:var(--text-primary);"><i class="fas fa-pills"></i> Traitements Administrés & Résultats Obtenus</h4>
+        <button class="btn btn-primary btn-sm" onclick="openCreateTreatmentModal('${p.id}')">
+          <i class="fas fa-plus"></i> Nouveau Traitement
+        </button>
+      </div>
+
+      ${list.length === 0 ? `
+        <div class="card" style="text-align:center; padding:30px; color:var(--text-muted);">
+          <i class="fas fa-notes-medical fa-2x" style="margin-bottom:10px;"></i>
+          <div>Aucun traitement consigné pour ce patient.</div>
+        </div>
+      ` : `
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          ${list.map(t => {
+            const statusBadge = t.status === 'TERMINE' ? 'badge-success' : (t.status === 'EN_COURS' ? 'badge-primary' : 'badge-danger');
+            const statusLabel = t.status === 'TERMINE' ? 'Terminé' : (t.status === 'EN_COURS' ? 'En cours' : 'Interrompu');
+            return `
+              <div class="card" style="margin:0; padding:15px; border-left:4px solid var(--primary);">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                  <div>
+                    <h4 style="margin:0 0 4px 0; color:var(--text-primary);">${t.treatment_name}</h4>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">
+                      <span class="badge" style="background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border-color);">${t.treatment_type || 'Médicamenteux'}</span>
+                      <span style="margin-left:8px;"><i class="fas fa-calendar-alt"></i> Du ${new Date(t.start_date).toLocaleDateString()} ${t.end_date ? `au ${new Date(t.end_date).toLocaleDateString()}` : '(En cours)'}</span>
+                      ${t.doc_first ? `<span style="margin-left:8px;"><i class="fas fa-user-md"></i> Dr. ${t.doc_first} ${t.doc_last}</span>` : ''}
+                    </div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="badge" style="background:${t.status === 'TERMINE' ? 'var(--success)' : 'var(--primary)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem;">
+                      ${statusLabel}
+                    </span>
+                    <button class="btn btn-secondary btn-sm" onclick="openEditTreatmentModal('${t.id}')" title="Modifier">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteTreatmentRecord('${t.id}', '${p.id}')" style="background:var(--danger); border-color:var(--danger);" title="Supprimer">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+
+                ${t.dosage_instructions ? `
+                  <div style="font-size:0.85rem; margin-bottom:10px; color:var(--text-primary);">
+                    <strong>Posologie / Protocole :</strong> ${t.dosage_instructions}
+                  </div>
+                ` : ''}
+
+                <!-- Highlighted Clinical Results -->
+                <div style="background: rgba(46, 204, 113, 0.08); border:1px solid rgba(46, 204, 113, 0.3); border-radius:6px; padding:10px 12px; margin-top:8px;">
+                  <div style="font-size:0.8rem; font-weight:700; color:var(--success); margin-bottom:3px;">
+                    <i class="fas fa-poll-h"></i> Résultats Cliniques Obtenus & Évolution :
+                  </div>
+                  <div style="font-size:0.85rem; color:var(--text-primary);">
+                    ${t.results_obtained ? t.results_obtained : `<span style="color:var(--text-muted); font-style:italic;">Aucun résultat consigné. Cliquez sur Modifier pour saisir l'évolution.</span>`}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  // -------------------------------------------------------------
+  // TAB 3: ANALYSES & EXAMENS (LABORATOIRE)
+  // -------------------------------------------------------------
+  if (activeDPITab === 'lab') {
+    const list = currentDossierData.labOrders || [];
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h4 style="margin:0; color:var(--text-primary);"><i class="fas fa-vial"></i> Analyses Médicales & Examens Prescrits</h4>
+        <button class="btn btn-primary btn-sm" onclick="openCreateLabOrderModal('${p.id}')">
+          <i class="fas fa-plus"></i> Prescrire un Examen
+        </button>
+      </div>
+
+      ${list.length === 0 ? `
+        <div class="card" style="text-align:center; padding:30px; color:var(--text-muted);">
+          <i class="fas fa-microscope fa-2x" style="margin-bottom:10px;"></i>
+          <div>Aucune analyse ou examen prescrit pour ce patient.</div>
+        </div>
+      ` : `
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          ${list.map(lo => {
+            const isDone = lo.status === 'TERMINE';
+            const statusColor = isDone ? 'var(--success)' : (lo.status === 'EN_COURS' ? 'var(--primary)' : '#f39c12');
+            const statusLabel = isDone ? 'Terminé (Résultats disponibles)' : (lo.status === 'EN_COURS' ? 'En cours d\'analyse' : 'À faire');
+            return `
+              <div class="card" style="margin:0; padding:15px; border-left:4px solid ${statusColor};">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                  <div>
+                    <h4 style="margin:0 0 4px 0; color:var(--text-primary);">${lo.test_name}</h4>
+                    <div style="font-size:0.8rem; color:var(--text-muted);">
+                      <span class="badge" style="background:var(--bg-primary); border:1px solid var(--border-color);">${lo.category || 'Biologie'}</span>
+                      <span class="badge" style="background:${lo.priority === 'URGENTE' ? '#e74c3c' : '#3498db'}; color:white; margin-left:6px;">${lo.priority}</span>
+                      <span style="margin-left:8px;"><i class="fas fa-clock"></i> Prescrit le ${new Date(lo.created_at).toLocaleDateString()}</span>
+                      ${lo.doc_first ? `<span style="margin-left:8px;"><i class="fas fa-user-md"></i> Dr. ${lo.doc_first} ${lo.doc_last}</span>` : ''}
+                    </div>
+                  </div>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="badge" style="background:${statusColor}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem;">
+                      ${statusLabel}
+                    </span>
+                    <button class="btn btn-secondary btn-sm" onclick="openRecordLabResultModal('${lo.id}')" title="Saisir les résultats">
+                      <i class="fas fa-file-medical-alt"></i> Saisir Résultats
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteLabOrderRecord('${lo.id}', '${p.id}')" style="background:var(--danger); border-color:var(--danger);" title="Supprimer">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </div>
+
+                ${lo.clinical_notes ? `
+                  <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">
+                    <strong>Renseignements cliniques :</strong> ${lo.clinical_notes}
+                  </div>
+                ` : ''}
+
+                <!-- Lab Results Report Box -->
+                ${lo.results_text ? `
+                  <div style="background:rgba(52, 152, 219, 0.08); border:1px solid rgba(52, 152, 219, 0.3); border-radius:6px; padding:10px 12px; margin-top:8px;">
+                    <div style="font-size:0.8rem; font-weight:700; color:var(--primary); margin-bottom:4px;">
+                      <i class="fas fa-check-circle"></i> Compte-rendu & Valeurs d'Analyses (Validé le ${lo.results_date ? new Date(lo.results_date).toLocaleDateString() : ''}) :
+                    </div>
+                    <div style="font-size:0.85rem; color:var(--text-primary); white-space:pre-wrap;">${lo.results_text}</div>
+                    ${lo.document_url ? `<div style="margin-top:6px;"><a href="${lo.document_url}" target="_blank" class="btn btn-secondary btn-sm"><i class="fas fa-paperclip"></i> Voir document joint</a></div>` : ''}
+                  </div>
+                ` : `
+                  <div style="font-size:0.8rem; color:var(--text-muted); font-style:italic;">En attente de résultat. Cliquez sur "Saisir Résultats" une fois l'analyse effectuée.</div>
+                `}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  // -------------------------------------------------------------
+  // TAB 4: CONSULTATIONS & ORDONNANCES
+  // -------------------------------------------------------------
+  if (activeDPITab === 'consultations') {
+    const list = currentDossierData.consultations || [];
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <h4 style="margin:0; color:var(--text-primary);"><i class="fas fa-stethoscope"></i> Historique des Consultations</h4>
+        <button class="btn btn-primary btn-sm" onclick="openNewConsultationFromDPI()">
+          <i class="fas fa-plus"></i> Nouvelle Consultation & Ordonnance
+        </button>
+      </div>
+
+      ${list.length === 0 ? `
+        <div class="card" style="text-align:center; padding:30px; color:var(--text-muted);">
+          <i class="fas fa-file-medical fa-2x" style="margin-bottom:10px;"></i>
+          <div>Aucune consultation enregistrée pour le moment.</div>
+        </div>
+      ` : `
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          ${list.map(c => `
+            <div class="card" style="margin:0; padding:15px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                <div>
+                  <h4 style="margin:0; color:var(--text-primary);">${c.reason_for_visit}</h4>
+                  <div style="font-size:0.8rem; color:var(--text-muted);">
+                    <span><i class="fas fa-calendar-alt"></i> ${new Date(c.created_at).toLocaleString()}</span>
+                    ${c.doc_first ? `<span style="margin-left:10px;"><i class="fas fa-user-md"></i> Dr. ${c.doc_first} ${c.doc_last}</span>` : ''}
+                  </div>
+                </div>
+                ${(c.icd10_diagnosis_codes && c.icd10_diagnosis_codes.length > 0) ? `
+                  <div>
+                    ${c.icd10_diagnosis_codes.map(code => `<span class="badge badge-primary" style="font-size:0.75rem;">${code}</span>`).join(' ')}
+                  </div>
+                ` : ''}
+              </div>
+
+              <div style="font-size:0.9rem; color:var(--text-primary); margin-bottom:8px;">
+                <strong>Diagnostic :</strong> ${c.diagnosis_text}
+              </div>
+
+              ${c.clinical_examination ? `
+                <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:8px;">
+                  <strong>Examen clinique :</strong> ${c.clinical_examination}
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `}
+    `;
+  }
+
+  // -------------------------------------------------------------
+  // TAB 5: RDV & HOSPITALISATION
+  // -------------------------------------------------------------
+  if (activeDPITab === 'history') {
+    const appts = currentDossierData.appointments || [];
+    const hosp = currentDossierData.hospitalizations || [];
+
+    return `
+      <div style="margin-bottom:20px;">
+        <h4 style="margin-bottom:10px; color:var(--text-primary);"><i class="fas fa-calendar-check"></i> Rendez-vous (${appts.length})</h4>
+        ${appts.length === 0 ? '<div style="color:var(--text-muted); font-size:0.85rem;">Aucun rendez-vous</div>' : `
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Date & Heure</th>
+                <th>Service</th>
+                <th>Médecin</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${appts.map(a => `
+                <tr>
+                  <td>${new Date(a.start_time).toLocaleString()}</td>
+                  <td>${a.service_name || 'Consultation'}</td>
+                  <td>${a.doc_first ? `Dr. ${a.doc_first} ${a.doc_last}` : '-'}</td>
+                  <td><span class="badge badge-info">${a.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+
+      <div>
+        <h4 style="margin-bottom:10px; color:var(--text-primary);"><i class="fas fa-bed"></i> Séjours Hospitaliers (${hosp.length})</h4>
+        ${hosp.length === 0 ? '<div style="color:var(--text-muted); font-size:0.85rem;">Aucun séjour hospitalier</div>' : `
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Bâtiment & Chambre</th>
+                <th>Lit</th>
+                <th>Admission</th>
+                <th>Sortie</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${hosp.map(h => `
+                <tr>
+                  <td>${h.building_name || 'Bâtiment'} - Ch. ${h.room_number || ''}</td>
+                  <td><strong>Lit ${h.bed_number}</strong></td>
+                  <td>${new Date(h.admission_date).toLocaleDateString()}</td>
+                  <td>${h.discharge_date ? new Date(h.discharge_date).toLocaleDateString() : 'En cours'}</td>
+                  <td><span class="badge ${h.status === 'EN_COURS' ? 'badge-danger' : 'badge-success'}">${h.status}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    `;
+  }
+}
+
+// Quick Update Vitals & Observations from Dossier Modal
+async function updatePatientVitalsFromDossier(e, patientId) {
+  e.preventDefault();
+  const height_cm = document.getElementById('dossier-p-height').value;
+  const weight_kg = document.getElementById('dossier-p-weight').value;
+  const observations = document.getElementById('dossier-p-observations').value;
+
+  try {
+    await api.request(`/patients/${patientId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ height_cm, weight_kg, observations })
+    });
+    showToast('Constantes et observations mises à jour!');
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+// Instant Patient Status Change from Dossier Banner
+async function changePatientStatusDirect(patientId, statusId) {
+  try {
+    const selected = allPatientStatuses.find(s => s.id === statusId);
+    await api.request(`/patients/${patientId}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        status_id: statusId,
+        status: selected ? selected.name : 'Externe'
+      })
+    });
+    showToast('Statut du patient mis à jour!');
+    openDPIModal(patientId, activeDPIPatient.name);
+    if (state.currentTab === 'patients') {
+      navigate('patients');
+    }
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+// -------------------------------------------------------------
+// Treatments Actions
+// -------------------------------------------------------------
+function openCreateTreatmentModal(patientId) {
+  const modal = document.getElementById('treatment-modal');
+  if (!modal) return;
+
+  document.getElementById('treatment-form-id').value = '';
+  document.getElementById('treatment-patient-id').value = patientId;
+  document.getElementById('treatment-modal-title').innerText = 'Nouveau Traitement';
+  document.getElementById('treatment-name').value = '';
+  document.getElementById('treatment-type').value = 'Médicamenteux';
+  document.getElementById('treatment-start-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('treatment-end-date').value = '';
+  document.getElementById('treatment-dosage').value = '';
+  document.getElementById('treatment-status').value = 'EN_COURS';
+  document.getElementById('treatment-results').value = '';
+
+  modal.style.display = 'flex';
+}
+
+function openEditTreatmentModal(treatmentId) {
+  const modal = document.getElementById('treatment-modal');
+  if (!modal || !currentDossierData) return;
+
+  const t = currentDossierData.treatments.find(item => item.id === treatmentId);
+  if (!t) return;
+
+  document.getElementById('treatment-form-id').value = t.id;
+  document.getElementById('treatment-patient-id').value = t.patient_id;
+  document.getElementById('treatment-modal-title').innerText = 'Modifier Traitement & Résultats';
+  document.getElementById('treatment-name').value = t.treatment_name;
+  document.getElementById('treatment-type').value = t.treatment_type || 'Médicamenteux';
+  document.getElementById('treatment-start-date').value = t.start_date ? t.start_date.split('T')[0] : '';
+  document.getElementById('treatment-end-date').value = t.end_date ? t.end_date.split('T')[0] : '';
+  document.getElementById('treatment-dosage').value = t.dosage_instructions || '';
+  document.getElementById('treatment-status').value = t.status || 'EN_COURS';
+  document.getElementById('treatment-results').value = t.results_obtained || '';
+
+  modal.style.display = 'flex';
+}
+
+function closeTreatmentModal() {
+  const modal = document.getElementById('treatment-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveTreatmentForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('treatment-form-id').value;
+  const patientId = document.getElementById('treatment-patient-id').value;
+  const treatment_name = document.getElementById('treatment-name').value;
+  const treatment_type = document.getElementById('treatment-type').value;
+  const start_date = document.getElementById('treatment-start-date').value;
+  const end_date = document.getElementById('treatment-end-date').value || null;
+  const dosage_instructions = document.getElementById('treatment-dosage').value;
+  const status = document.getElementById('treatment-status').value;
+  const results_obtained = document.getElementById('treatment-results').value;
+
+  try {
+    if (id) {
+      await api.request(`/patients/treatments/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ treatment_name, treatment_type, start_date, end_date, dosage_instructions, status, results_obtained })
+      });
+      showToast('Traitement et résultats mis à jour!');
+    } else {
+      await api.request(`/patients/${patientId}/treatments`, {
+        method: 'POST',
+        body: JSON.stringify({ treatment_name, treatment_type, start_date, end_date, dosage_instructions, status, results_obtained })
+      });
+      showToast('Nouveau traitement enregistré!');
+    }
+    closeTreatmentModal();
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+async function deleteTreatmentRecord(treatmentId, patientId) {
+  if (!confirm('Supprimer ce traitement ?')) return;
+  try {
+    await api.request(`/patients/treatments/${treatmentId}`, { method: 'DELETE' });
+    showToast('Traitement supprimé.');
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+// -------------------------------------------------------------
+// Lab Orders & Results Actions
+// -------------------------------------------------------------
+function openCreateLabOrderModal(patientId) {
+  const modal = document.getElementById('lab-order-modal');
+  if (!modal) return;
+
+  document.getElementById('lab-order-patient-id').value = patientId;
+  document.getElementById('lab-order-test-name').value = '';
+  document.getElementById('lab-order-category').value = 'Biologie';
+  document.getElementById('lab-order-priority').value = 'NORMALE';
+  document.getElementById('lab-order-notes').value = '';
+
+  modal.style.display = 'flex';
+}
+
+function closeLabOrderModal() {
+  const modal = document.getElementById('lab-order-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveLabOrderForm(e) {
+  e.preventDefault();
+  const patientId = document.getElementById('lab-order-patient-id').value;
+  const test_name = document.getElementById('lab-order-test-name').value;
+  const category = document.getElementById('lab-order-category').value;
+  const priority = document.getElementById('lab-order-priority').value;
+  const clinical_notes = document.getElementById('lab-order-notes').value;
+
+  try {
+    await api.request(`/patients/${patientId}/lab-orders`, {
+      method: 'POST',
+      body: JSON.stringify({ test_name, category, priority, clinical_notes })
+    });
+    showToast('Examen / analyse prescrit avec succès!');
+    closeLabOrderModal();
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+function openRecordLabResultModal(labOrderId) {
+  const modal = document.getElementById('lab-result-modal');
+  if (!modal || !currentDossierData) return;
+
+  const lo = currentDossierData.labOrders.find(item => item.id === labOrderId);
+  if (!lo) return;
+
+  document.getElementById('lab-result-id').value = lo.id;
+  document.getElementById('lab-result-patient-id').value = lo.patient_id;
+  document.getElementById('lab-result-test-title').innerText = lo.test_name;
+  document.getElementById('lab-result-status').value = lo.status === 'A_FAIRE' ? 'TERMINE' : lo.status;
+  document.getElementById('lab-result-text').value = lo.results_text || '';
+  document.getElementById('lab-result-doc-url').value = lo.document_url || '';
+
+  modal.style.display = 'flex';
+}
+
+function closeLabResultModal() {
+  const modal = document.getElementById('lab-result-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveLabResultForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('lab-result-id').value;
+  const patientId = document.getElementById('lab-result-patient-id').value;
+  const status = document.getElementById('lab-result-status').value;
+  const results_text = document.getElementById('lab-result-text').value;
+  const document_url = document.getElementById('lab-result-doc-url').value;
+
+  try {
+    await api.request(`/patients/lab-orders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status, results_text, document_url })
+    });
+    showToast('Résultats d\'analyse consignés avec succès!');
+    closeLabResultModal();
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+async function deleteLabOrderRecord(labOrderId, patientId) {
+  if (!confirm('Supprimer cette analyse / examen ?')) return;
+  try {
+    await api.request(`/patients/lab-orders/${labOrderId}`, { method: 'DELETE' });
+    showToast('Examen supprimé.');
+    openDPIModal(patientId, activeDPIPatient.name);
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+// -------------------------------------------------------------
+// New Consultation from DPI
+// -------------------------------------------------------------
+function openNewConsultationFromDPI() {
+  if (!activeDPIPatient) return;
+  currentPrescriptionItems = [];
+  renderPrescriptionItems();
+  
+  const modal = document.getElementById('dpi-consultation-form-modal');
+  if (modal) {
+    document.getElementById('dpi-consult-patient-name').innerText = activeDPIPatient.name;
+    document.getElementById('dpi-reason').value = '';
+    document.getElementById('dpi-diagnosis').value = '';
+    document.getElementById('dpi-bp-sys').value = '';
+    document.getElementById('dpi-bp-dia').value = '';
+    document.getElementById('dpi-temp').value = '';
+    document.getElementById('dpi-icd10').value = '';
+    document.getElementById('dpi-confidential').value = '';
+    modal.style.display = 'flex';
+  }
+}
+
+function closeNewConsultationModal() {
+  const modal = document.getElementById('dpi-consultation-form-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 function addPrescriptionItem() {
@@ -1154,8 +1891,9 @@ function addPrescriptionItem() {
 
 function renderPrescriptionItems() {
   const container = document.getElementById('rx-items-list');
+  if (!container) return;
   if (currentPrescriptionItems.length === 0) {
-    container.innerHTML = '<div style="color:var(--text-muted);">Aucun médicament prescrit</div>';
+    container.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem;">Aucun médicament prescrit</div>';
     return;
   }
 
@@ -1234,7 +1972,8 @@ async function submitConsultation(e) {
     });
 
     showToast('Consultation et ordonnance enregistrées!');
-    closeDPIModal();
+    closeNewConsultationModal();
+    openDPIModal(activeDPIPatient.id, activeDPIPatient.name);
     
     // If prescription exists, show verification details
     if (res.prescription) {
@@ -1245,6 +1984,7 @@ async function submitConsultation(e) {
 
 function showPrescriptionConfirmation(rx) {
   const modal = document.getElementById('rx-confirmation-modal');
+  if (!modal) return;
   document.getElementById('conf-rx-code').innerText = rx.prescription_code;
   document.getElementById('conf-rx-hash').innerText = rx.qr_cryptographic_hash;
   
@@ -1257,6 +1997,81 @@ function showPrescriptionConfirmation(rx) {
 
 function closeRxConfirmModal() {
   document.getElementById('rx-confirmation-modal').style.display = 'none';
+}
+
+// -------------------------------------------------------------
+// Patient Statuses CRUD Modal
+// -------------------------------------------------------------
+async function openPatientStatusModal() {
+  const modal = document.getElementById('patient-status-modal');
+  if (!modal) return;
+
+  const list = await api.request('/patient-statuses').catch(() => []);
+  allPatientStatuses = list;
+
+  const listContainer = document.getElementById('patient-status-list');
+  if (listContainer) {
+    listContainer.innerHTML = list.length === 0 ? '<div style="color:var(--text-muted); padding:10px;">Aucun statut configuré</div>' : `
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        ${list.map(s => `
+          <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-primary); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color);">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="display:inline-block; width:14px; height:14px; border-radius:50%; background:${s.color_code};"></span>
+              <strong>${s.name}</strong>
+              <code style="font-size:0.75rem; color:var(--text-muted);">${s.code}</code>
+              ${s.is_default ? `<span class="badge badge-success" style="font-size:0.65rem;">Par défaut</span>` : ''}
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="deletePatientStatus('${s.id}')" style="padding:2px 6px; font-size:0.75rem; background:var(--danger); border-color:var(--danger);">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  modal.style.display = 'flex';
+}
+
+function closePatientStatusModal() {
+  const modal = document.getElementById('patient-status-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function savePatientStatus(e) {
+  e.preventDefault();
+  const name = document.getElementById('status-name').value;
+  const color_code = document.getElementById('status-color').value;
+  const is_default = document.getElementById('status-is-default').checked;
+
+  try {
+    await api.request('/patient-statuses', {
+      method: 'POST',
+      body: JSON.stringify({ name, color_code, is_default })
+    });
+    showToast('Nouveau statut ajouté!');
+    document.getElementById('status-name').value = '';
+    openPatientStatusModal();
+    if (state.currentTab === 'patients') {
+      navigate('patients');
+    }
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
+}
+
+async function deletePatientStatus(statusId) {
+  if (!confirm('Supprimer ce statut ?')) return;
+  try {
+    await api.request(`/patient-statuses/${statusId}`, { method: 'DELETE' });
+    showToast('Statut supprimé / désactivé.');
+    openPatientStatusModal();
+    if (state.currentTab === 'patients') {
+      navigate('patients');
+    }
+  } catch (err) {
+    showToast(`Erreur: ${err.message}`, 'error');
+  }
 }
 
 // ============================================================================
@@ -1866,14 +2681,43 @@ async function simulateDepletion(id, name) {
 // 6. Settings UI (Online Payment Gateways Configuration)
 // ============================================================================
 async function renderSettings(container) {
-  const [methods, tenant] = await Promise.all([
+  const [methods, tenant, statuses] = await Promise.all([
     api.request('/payment-methods'),
-    api.request('/tenant/profile')
+    api.request('/tenant/profile'),
+    api.request('/patient-statuses').catch(() => [])
   ]);
   
   const gps = tenant.gps_coordinates || { latitude: '', longitude: '' };
 
   container.innerHTML = `
+    <!-- Patient Statuses Settings Card -->
+    <div class="card" style="margin-bottom: 24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+        <div class="card-title" style="margin:0;"><i class="fas fa-tags"></i> Statuts des Patients (Configuration & CRUD)</div>
+        <button class="btn btn-primary btn-sm" onclick="openPatientStatusModal()">
+          <i class="fas fa-plus"></i> Nouveau Statut
+        </button>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">
+        Personnalisez les statuts de suivi de vos patients (ex: Ambulatoire, Hospitalisé, En observation, Soins intensifs, Post-opératoire...).
+      </p>
+      <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:12px;">
+        ${statuses.map(st => `
+          <div style="background:var(--bg-surface); padding:12px; border-radius:8px; border:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="display:inline-block; width:16px; height:16px; border-radius:50%; background:${st.color_code}; flex-shrink:0;"></span>
+              <div>
+                <strong style="color:var(--text-primary); font-size:0.9rem;">${st.name}</strong>
+                <div style="font-size:0.75rem; color:var(--text-muted);">${st.code} ${st.is_default ? '<span class="badge badge-success" style="font-size:0.65rem;">Défaut</span>' : ''}</div>
+              </div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="deletePatientStatus('${st.id}')" style="padding:2px 6px; font-size:0.75rem; background:var(--danger); border-color:var(--danger);">
+              <i class="fas fa-trash"></i>
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
     <!-- Clinic Identity Settings -->
     <div class="card" style="margin-bottom: 24px;">
       <div class="card-title"><i class="fas fa-clinic-medical"></i> Identité de la Clinique / Cabinet</div>
@@ -2677,22 +3521,37 @@ function renderAppLayout() {
 
     <!-- Modals declarations -->
     
-    <!-- 1. DPI Consultation Record Modal -->
+    <!-- 1. Dossier Médical 360° (DPI Modal) -->
     <div class="modal-overlay" id="dpi-modal" style="display:none;">
-      <div class="modal-container" style="width:700px; max-width:95%;">
-        <div class="modal-header">
-          <h4 class="modal-title" id="dpi-modal-title">Consultation DPI</h4>
+      <div class="modal-container" style="width:950px; max-width:96%; max-height:92vh; overflow-y:auto;">
+        <div class="modal-header" style="border-bottom:none; padding-bottom:0;">
+          <h4 class="modal-title" style="display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-folder-open" style="color:var(--primary);"></i> Dossier Médical Partagé (DPI 360°)
+          </h4>
           <button class="modal-close" onclick="closeDPIModal()">&times;</button>
+        </div>
+        <div id="dpi-modal-content" style="margin-top:15px;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 1b. Nouvelle Consultation & Prescription Form Modal -->
+    <div class="modal-overlay" id="dpi-consultation-form-modal" style="display:none; z-index:1100;">
+      <div class="modal-container" style="width:750px; max-width:95%; max-height:90vh; overflow-y:auto;">
+        <div class="modal-header">
+          <h4 class="modal-title">Nouvelle Consultation - <span id="dpi-consult-patient-name"></span></h4>
+          <button class="modal-close" onclick="closeNewConsultationModal()">&times;</button>
         </div>
         <form onsubmit="submitConsultation(event)">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
             <div class="form-group">
-              <label class="form-label">${t('reason')}</label>
-              <input type="text" class="form-control" id="dpi-reason" required />
+              <label class="form-label">${t('reason')} *</label>
+              <input type="text" class="form-control" id="dpi-reason" required placeholder="ex: Céphalées fébriles" />
             </div>
             <div class="form-group">
-              <label class="form-label">${t('diagnosis')}</label>
-              <input type="text" class="form-control" id="dpi-diagnosis" required />
+              <label class="form-label">${t('diagnosis')} *</label>
+              <input type="text" class="form-control" id="dpi-diagnosis" required placeholder="ex: Accès palustre simple" />
             </div>
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; margin-bottom:15px;">
@@ -2710,8 +3569,8 @@ function renderAppLayout() {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">${t('icd10')}</label>
-            <input type="text" class="form-control" id="dpi-icd10" placeholder="K35.8, R51" />
+            <label class="form-label">${t('icd10')} (Codes CIM-10)</label>
+            <input type="text" class="form-control" id="dpi-icd10" placeholder="B54, R50.9, R51" />
           </div>
           <div class="form-group">
             <label class="form-label">${t('confidentialNotes')}</label>
@@ -2719,15 +3578,15 @@ function renderAppLayout() {
           </div>
           
           <div class="card" style="margin-top:15px; padding:15px; border-color:var(--primary);">
-            <h5 style="margin-bottom:10px; color:#fff;"><i class="fas fa-file-prescription"></i> ${t('prescribe')}</h5>
+            <h5 style="margin-bottom:10px; color:#fff;"><i class="fas fa-file-prescription"></i> ${t('prescribe')} (Ordonnance Sécurisée)</h5>
             <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
-              <input type="text" class="form-control" id="rx-drug" placeholder="Médicament (ex: Paracétamol)" />
-              <input type="text" class="form-control" id="rx-dosage" placeholder="Dosage (ex: 1g)" />
-              <input type="text" class="form-control" id="rx-frequency" placeholder="Fréquence" />
-              <input type="number" class="form-control" id="rx-duration" value="5" placeholder="Durée" />
+              <input type="text" class="form-control" id="rx-drug" placeholder="Médicament (ex: Coartem 80/480mg)" />
+              <input type="text" class="form-control" id="rx-dosage" placeholder="Dosage (ex: 1 cp)" />
+              <input type="text" class="form-control" id="rx-frequency" placeholder="2 fois/jour" />
+              <input type="number" class="form-control" id="rx-duration" value="3" placeholder="Durée (jours)" />
             </div>
             <div style="display:flex; gap:10px; margin-bottom:15px;">
-              <input type="text" class="form-control" id="rx-instructions" placeholder="Instructions (ex: Pendant les repas)" style="flex:1;" />
+              <input type="text" class="form-control" id="rx-instructions" placeholder="Instructions (ex: Au cours d'un repas gras)" style="flex:1;" />
               <button class="btn btn-secondary" type="button" onclick="addPrescriptionItem()">${t('addItem')}</button>
             </div>
             <div id="rx-items-list"></div>
@@ -2738,10 +3597,193 @@ function renderAppLayout() {
           </div>
           
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-            <button class="btn btn-secondary" type="button" onclick="closeDPIModal()">Annuler</button>
+            <button class="btn btn-secondary" type="button" onclick="closeNewConsultationModal()">Annuler</button>
             <button class="btn btn-primary" type="submit">${t('saveConsult')}</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- 1c. Treatment Add/Edit Modal with Clinical Outcomes -->
+    <div class="modal-overlay" id="treatment-modal" style="display:none; z-index:1100;">
+      <div class="modal-container" style="width:650px; max-width:95%;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="treatment-modal-title">Traitement Médical</h4>
+          <button class="modal-close" onclick="closeTreatmentModal()">&times;</button>
+        </div>
+        <form onsubmit="saveTreatmentForm(event)">
+          <input type="hidden" id="treatment-form-id" value="" />
+          <input type="hidden" id="treatment-patient-id" value="" />
+          <div class="form-group">
+            <label class="form-label">Nom du Traitement / Protocole *</label>
+            <input type="text" class="form-control" id="treatment-name" required placeholder="ex: Antibiothérapie Amoxicilline 1g, Protocole CTA..." />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Type de Traitement</label>
+              <select class="form-control" id="treatment-type">
+                <option value="Médicamenteux">Médicamenteux</option>
+                <option value="Chirurgical">Chirurgical</option>
+                <option value="Soins infirmiers">Soins infirmiers / Pansement</option>
+                <option value="Rééducation">Kinésithérapie / Rééducation</option>
+                <option value="Autre">Autre</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Statut du Traitement</label>
+              <select class="form-control" id="treatment-status">
+                <option value="EN_COURS">En cours</option>
+                <option value="TERMINE">Terminé</option>
+                <option value="INTERROMPU">Interrompu</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Date Début *</label>
+              <input type="date" class="form-control" id="treatment-start-date" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date Fin</label>
+              <input type="date" class="form-control" id="treatment-end-date" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Posologie & Instructions</label>
+            <textarea class="form-control" id="treatment-dosage" rows="2" placeholder="ex: 1 comprimé matin et soir pendant 7 jours..."></textarea>
+          </div>
+          <div class="form-group" style="background:rgba(46, 204, 113, 0.08); padding:12px; border-radius:6px; border:1px solid rgba(46, 204, 113, 0.3);">
+            <label class="form-label" style="color:var(--success); font-weight:700;">
+              <i class="fas fa-poll-h"></i> Résultats Cliniques Obtenus & Évolution
+            </label>
+            <textarea class="form-control" id="treatment-results" rows="3" placeholder="Consignez l'évolution, l'efficacité, les réactions du patient, disparition des symptômes, résultats de contrôle..."></textarea>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button class="btn btn-secondary" type="button" onclick="closeTreatmentModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer le Traitement</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 1d. Lab Order Prescription Modal -->
+    <div class="modal-overlay" id="lab-order-modal" style="display:none; z-index:1100;">
+      <div class="modal-container" style="width:600px; max-width:95%;">
+        <div class="modal-header">
+          <h4 class="modal-title">Prescrire un Examen / Analyse Médicale</h4>
+          <button class="modal-close" onclick="closeLabOrderModal()">&times;</button>
+        </div>
+        <form onsubmit="saveLabOrderForm(event)">
+          <input type="hidden" id="lab-order-patient-id" value="" />
+          <div class="form-group">
+            <label class="form-label">Désignation de l'Examen / Bilan *</label>
+            <input type="text" class="form-control" id="lab-order-test-name" required placeholder="ex: Numération Formule Sanguine (NFS), Glycémie à jeun, Radiographie Thorax, Échographie..." />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Catégorie</label>
+              <select class="form-control" id="lab-order-category">
+                <option value="Biologie">Biologie médicale</option>
+                <option value="Hématologie">Hématologie</option>
+                <option value="Biochimie">Biochimie</option>
+                <option value="Imagerie">Radiologie / Imagerie</option>
+                <option value="Microbiologie">Bactériologie / Parasitologie</option>
+                <option value="Cardiologie">Cardiologie (ECG, Echo)</option>
+                <option value="Autre">Autre</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Priorité</label>
+              <select class="form-control" id="lab-order-priority">
+                <option value="NORMALE">Normale</option>
+                <option value="URGENTE">Urgente (Urgence)</option>
+                <option value="CONTROLE">Bilan de contrôle</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Renseignements Cliniques / Justification</label>
+            <textarea class="form-control" id="lab-order-notes" rows="3" placeholder="Précisez le contexte clinique, suspicion diagnostique..."></textarea>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button class="btn btn-secondary" type="button" onclick="closeLabOrderModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit">Valider la Prescription</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 1e. Lab Results Recording Modal -->
+    <div class="modal-overlay" id="lab-result-modal" style="display:none; z-index:1100;">
+      <div class="modal-container" style="width:650px; max-width:95%;">
+        <div class="modal-header">
+          <h4 class="modal-title">Saisir Résultats : <span id="lab-result-test-title"></span></h4>
+          <button class="modal-close" onclick="closeLabResultModal()">&times;</button>
+        </div>
+        <form onsubmit="saveLabResultForm(event)">
+          <input type="hidden" id="lab-result-id" value="" />
+          <input type="hidden" id="lab-result-patient-id" value="" />
+          <div class="form-group">
+            <label class="form-label">Statut de l'Analyse</label>
+            <select class="form-control" id="lab-result-status">
+              <option value="TERMINE">Terminé (Résultats disponibles)</option>
+              <option value="EN_COURS">En cours d'analyse</option>
+              <option value="A_FAIRE">À faire</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Résultats & Compte-rendu d'Analyse *</label>
+            <textarea class="form-control" id="lab-result-text" rows="5" required placeholder="ex: GB: 6 500 /mm3, Hb: 13.8 g/dL, Plaquettes: 240 000 /mm3. Conclusion: Formule dans les limites de la normale."></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Document Joint (facultatif)</label>
+            <div style="display:flex; gap:5px;">
+              <input type="text" class="form-control" id="lab-result-doc-url" placeholder="URL du document ou scanner..." style="flex:1;" />
+              <input type="file" id="lab-result-file" style="display:none;" accept="image/*,.pdf" onchange="uploadImage(this, 'lab-result-doc-url')" />
+              <button type="button" class="btn btn-secondary" onclick="document.getElementById('lab-result-file').click()"><i class="fas fa-upload"></i></button>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button class="btn btn-secondary" type="button" onclick="closeLabResultModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit">Enregistrer les Résultats</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 1f. Patient Statuses Configuration Modal -->
+    <div class="modal-overlay" id="patient-status-modal" style="display:none; z-index:1100;">
+      <div class="modal-container" style="width:600px; max-width:95%;">
+        <div class="modal-header">
+          <h4 class="modal-title"><i class="fas fa-tags"></i> Gestion des Statuts Patients</h4>
+          <button class="modal-close" onclick="closePatientStatusModal()">&times;</button>
+        </div>
+        <div>
+          <form onsubmit="savePatientStatus(event)" style="background:var(--bg-primary); padding:15px; border-radius:8px; border:1px solid var(--border-color); margin-bottom:20px;">
+            <h5 style="margin:0 0 10px 0; color:var(--text-primary);">Ajouter un nouveau statut</h5>
+            <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:10px; align-items:flex-end;">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Libellé du Statut *</label>
+                <input type="text" class="form-control" id="status-name" placeholder="ex: Soins Intensifs" required />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label">Couleur</label>
+                <input type="color" class="form-control" id="status-color" value="#3498db" style="height:38px; padding:2px;" />
+              </div>
+              <div class="form-group" style="margin:0; display:flex; align-items:center; height:38px;">
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; cursor:pointer; color:var(--text-primary);">
+                  <input type="checkbox" id="status-is-default" /> Par défaut
+                </label>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm" type="submit" style="margin-top:10px; width:100%;">
+              <i class="fas fa-plus"></i> Ajouter ce statut
+            </button>
+          </form>
+
+          <h5 style="margin:0 0 10px 0; color:var(--text-primary);">Statuts Actifs</h5>
+          <div id="patient-status-list"></div>
+        </div>
       </div>
     </div>
 

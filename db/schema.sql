@@ -112,6 +112,18 @@ CREATE TABLE practitioners (
 -- 2. RÉFÉRENTIEL PATIENTS & COUVERTURE ASSURANCE (IPM)
 -- ============================================================================
 
+CREATE TABLE patient_statuses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    code VARCHAR(50) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    color_code VARCHAR(7) DEFAULT '#4A90E2',
+    is_default BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT unique_tenant_status_code UNIQUE (tenant_id, code)
+);
+
 CREATE TABLE patients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -125,14 +137,46 @@ CREATE TABLE patients (
     height_cm NUMERIC(5, 2), -- Taille en cm
     weight_kg NUMERIC(5, 2), -- Poids en kg
     observations TEXT, -- Observations et antécédents libres
+    status_id UUID REFERENCES patient_statuses(id) ON DELETE SET NULL,
     allergies TEXT[],
     chronic_conditions TEXT[],
     address TEXT,
     trusted_payer_phone VARCHAR(30), -- Payeur diaspora
-    status VARCHAR(20) NOT NULL DEFAULT 'Externe' CHECK (status IN ('Interne', 'Externe')),
+    status VARCHAR(50) NOT NULL DEFAULT 'Externe',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_tenant_patient_code UNIQUE (tenant_id, patient_code),
     CONSTRAINT unique_tenant_phone UNIQUE (tenant_id, phone_number)
+);
+
+CREATE TABLE patient_treatments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    treatment_name VARCHAR(255) NOT NULL,
+    treatment_type VARCHAR(100) DEFAULT 'Médicamenteux', -- 'Médicamenteux', 'Chirurgical', 'Soins infirmiers', 'Rééducation', 'Autre'
+    start_date DATE NOT NULL,
+    end_date DATE,
+    dosage_instructions TEXT,
+    status VARCHAR(50) DEFAULT 'EN_COURS', -- 'EN_COURS', 'TERMINE', 'INTERROMPU'
+    results_obtained TEXT, -- Résultats cliniques obtenus & évolution
+    prescribed_by UUID REFERENCES practitioners(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE patient_lab_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    practitioner_id UUID REFERENCES practitioners(id) ON DELETE SET NULL,
+    test_name VARCHAR(255) NOT NULL,
+    category VARCHAR(100) DEFAULT 'Biologie',
+    priority VARCHAR(20) DEFAULT 'NORMALE',
+    status VARCHAR(50) DEFAULT 'A_FAIRE', -- 'A_FAIRE', 'EN_COURS', 'TERMINE', 'ANNULE'
+    clinical_notes TEXT,
+    results_text TEXT,
+    results_date TIMESTAMPTZ,
+    document_url VARCHAR(500),
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE insurance_companies (
