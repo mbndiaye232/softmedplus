@@ -3879,7 +3879,12 @@ async function renderTenants(container) {
             ` : list.map(tnt => `
               <tr>
                 <td>
-                  <img src="${tnt.logo_url || '/logo-espoir.png'}" alt="logo" style="width:40px; height:40px; border-radius:8px; object-fit:contain; background-color:white; padding:2px; border:1px solid var(--border-color);" onerror="this.src='/logo-espoir.png';" />
+                  ${tnt.logo_url ? `
+                    <img src="${tnt.logo_url}" alt="logo" style="width:40px; height:40px; border-radius:8px; object-fit:contain; background-color:white; padding:2px; border:1px solid var(--border-color);" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                    <div style="display:none; width:40px; height:40px; border-radius:8px; background:rgba(74,144,226,0.1); color:var(--primary); align-items:center; justify-content:center; font-size:1.2rem;"><i class="fas fa-clinic-medical"></i></div>
+                  ` : `
+                    <div style="width:40px; height:40px; border-radius:8px; background:rgba(74,144,226,0.1); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:1.2rem;"><i class="fas fa-clinic-medical"></i></div>
+                  `}
                 </td>
                 <td><strong>${tnt.name}</strong></td>
                 <td><code style="background-color:var(--bg-primary); padding:3px 6px; border-radius:4px; font-size:0.85rem; color:var(--primary); font-weight:600;">${tnt.slug}</code></td>
