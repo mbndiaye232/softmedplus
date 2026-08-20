@@ -48,6 +48,9 @@ const i18n = {
     gender: "Genre",
     dob: "Date de naissance",
     bloodGroup: "Groupe Sanguin",
+    height: "Taille",
+    weight: "Poids",
+    observations: "Observations & Antécédents",
     allergies: "Allergies (séparées par virgules)",
     status: "Statut Patient",
     interne: "Hospitalisé (Interne)",
@@ -220,6 +223,9 @@ const i18n = {
     gender: "الجنس",
     dob: "تاريخ الميلاد",
     bloodGroup: "فصيلة الدم",
+    height: "الطول",
+    weight: "الوزن",
+    observations: "الملاحظات والسوابق",
     allergies: "الحساسية (مفصولة بفاصلة)",
     status: "حالة المريض",
     interne: "مريض داخلي (مستشفى)",
@@ -984,20 +990,36 @@ async function renderPatients(container) {
             <label class="form-label">${t('dob')}</label>
             <input type="date" class="form-control" id="p-dob" required />
           </div>
-          <div class="form-group">
-            <label class="form-label">${t('bloodGroup')}</label>
-            <input type="text" class="form-control" id="p-blood" placeholder="A+" />
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">${t('bloodGroup')}</label>
+              <input type="text" class="form-control" id="p-blood" placeholder="A+, O-..." />
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('status')}</label>
+              <select class="form-control" id="p-status">
+                <option value="Externe">${t('externe')}</option>
+                <option value="Interne">${t('interne')}</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div class="form-group">
+              <label class="form-label">${t('height')} (cm)</label>
+              <input type="number" step="0.1" class="form-control" id="p-height" placeholder="175" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">${t('weight')} (kg)</label>
+              <input type="number" step="0.1" class="form-control" id="p-weight" placeholder="70" />
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">${t('allergies')}</label>
             <input type="text" class="form-control" id="p-allergies" placeholder="pollen, pénicilline" />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('status')}</label>
-            <select class="form-control" id="p-status">
-              <option value="Externe">${t('externe')}</option>
-              <option value="Interne">${t('interne')}</option>
-            </select>
+            <label class="form-label">${t('observations')}</label>
+            <textarea class="form-control" id="p-observations" rows="2" placeholder="Observations, antécédents médicaux ou notes utiles..."></textarea>
           </div>
           <button class="btn btn-primary" style="width:100%;"><i class="fas fa-save"></i> ${t('regBtn')}</button>
         </form>
@@ -1014,18 +1036,31 @@ async function renderPatients(container) {
                 <th>${t('phone')}</th>
                 <th>${t('gender')}</th>
                 <th>Naissance</th>
+                <th>${t('height')} / ${t('weight')}</th>
                 <th>${t('status')}</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              ${patients.map(p => `
+              ${patients.map(p => {
+                const height = p.height_cm ? parseFloat(p.height_cm) : null;
+                const weight = p.weight_kg ? parseFloat(p.weight_kg) : null;
+                const imc = (height && weight) ? (weight / Math.pow(height / 100, 2)).toFixed(1) : null;
+                return `
                 <tr>
                   <td><strong>${p.patient_code}</strong></td>
-                  <td>${p.first_name} ${p.last_name}</td>
+                  <td>
+                    <strong>${p.first_name} ${p.last_name}</strong>
+                    ${p.blood_group ? `<span class="badge" style="background:#e74c3c; color:white; font-size:0.7rem; padding:1px 5px; border-radius:4px; margin-left:4px;">${p.blood_group}</span>` : ''}
+                    ${p.observations ? `<div style="font-size:0.75rem; color:var(--text-muted); max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${p.observations}"><i class="fas fa-sticky-note"></i> ${p.observations}</div>` : ''}
+                  </td>
                   <td>${p.phone_number}</td>
                   <td>${p.gender}</td>
                   <td>${new Date(p.date_of_birth).toLocaleDateString()}</td>
+                  <td>
+                    ${height ? `${height} cm` : '-'} / ${weight ? `${weight} kg` : '-'}
+                    ${imc ? `<br><small style="color:var(--primary); font-weight:600;">IMC: ${imc}</small>` : ''}
+                  </td>
                   <td><span class="status-badge ${p.status.toLowerCase()}">${p.status === 'Interne' ? t('interne') : t('externe')}</span></td>
                   <td>
                     <button class="btn btn-secondary" onclick="openDPIModal('${p.id}', '${p.first_name} ${p.last_name}')">
@@ -1033,7 +1068,7 @@ async function renderPatients(container) {
                     </button>
                   </td>
                 </tr>
-              `).join('')}
+              `;}).join('')}
             </tbody>
           </table>
         </div>
@@ -1049,7 +1084,10 @@ async function registerPatient(e) {
   const last_name = document.getElementById('p-last').value;
   const gender = document.getElementById('p-gender').value;
   const date_of_birth = document.getElementById('p-dob').value;
-  const blood_group = document.getElementById('p-blood').value;
+  const blood_group = document.getElementById('p-blood').value || null;
+  const height_cm = document.getElementById('p-height').value || null;
+  const weight_kg = document.getElementById('p-weight').value || null;
+  const observations = document.getElementById('p-observations').value || null;
   const allergies = document.getElementById('p-allergies').value ? document.getElementById('p-allergies').value.split(',').map(s => s.trim()) : [];
   const status = document.getElementById('p-status').value;
 
@@ -1057,7 +1095,17 @@ async function registerPatient(e) {
     await api.request('/patients', {
       method: 'POST',
       body: JSON.stringify({
-        phone_number, first_name, last_name, gender, date_of_birth, blood_group, allergies, status
+        phone_number, 
+        first_name, 
+        last_name, 
+        gender, 
+        date_of_birth, 
+        blood_group, 
+        height_cm, 
+        weight_kg, 
+        observations, 
+        allergies, 
+        status
       })
     });
     showToast('Patient enregistré avec succès!');

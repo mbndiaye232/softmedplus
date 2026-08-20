@@ -13,7 +13,22 @@ const generatePatientCode = () => {
 
 // 1. Register Patient
 const registerPatient = async (req, res) => {
-  const { phone_number, first_name, last_name, gender, date_of_birth, blood_group, allergies, chronic_conditions, address, trusted_payer_phone, status } = req.body;
+  const { 
+    phone_number, 
+    first_name, 
+    last_name, 
+    gender, 
+    date_of_birth, 
+    blood_group, 
+    height_cm,
+    weight_kg,
+    observations,
+    allergies, 
+    chronic_conditions, 
+    address, 
+    trusted_payer_phone, 
+    status 
+  } = req.body;
 
   if (!phone_number || !first_name || !last_name || !gender || !date_of_birth) {
     return res.status(400).json({ error: 'Required fields missing: phone_number, first_name, last_name, gender, date_of_birth' });
@@ -22,10 +37,23 @@ const registerPatient = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const patientCode = generatePatientCode();
 
+  // Normalize array fields for PostgreSQL TEXT[]
+  const parsedAllergies = Array.isArray(allergies) 
+    ? allergies 
+    : (allergies && typeof allergies === 'string' ? allergies.split(',').map(s => s.trim()).filter(Boolean) : null);
+
+  const parsedConditions = Array.isArray(chronic_conditions) 
+    ? chronic_conditions 
+    : (chronic_conditions && typeof chronic_conditions === 'string' ? chronic_conditions.split(',').map(s => s.trim()).filter(Boolean) : null);
+
   try {
     const result = await req.dbClient.query(
-      `INSERT INTO patients (tenant_id, patient_code, phone_number, first_name, last_name, gender, date_of_birth, blood_group, allergies, chronic_conditions, address, trusted_payer_phone, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      `INSERT INTO patients (
+        tenant_id, patient_code, phone_number, first_name, last_name, gender, date_of_birth, 
+        blood_group, height_cm, weight_kg, observations, allergies, chronic_conditions, 
+        address, trusted_payer_phone, status
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING *`,
       [
         tenantId,
@@ -36,8 +64,11 @@ const registerPatient = async (req, res) => {
         gender,
         date_of_birth,
         blood_group || null,
-        allergies ? JSON.stringify(allergies) : null,
-        chronic_conditions ? JSON.stringify(chronic_conditions) : null,
+        height_cm ? parseFloat(height_cm) : null,
+        weight_kg ? parseFloat(weight_kg) : null,
+        observations || null,
+        parsedAllergies,
+        parsedConditions,
         address || null,
         trusted_payer_phone || null,
         status || 'Externe'

@@ -122,6 +122,9 @@ CREATE TABLE patients (
     gender VARCHAR(10) NOT NULL CHECK (gender IN ('M', 'F')),
     date_of_birth DATE NOT NULL,
     blood_group VARCHAR(5), -- A+, O-, etc.
+    height_cm NUMERIC(5, 2), -- Taille en cm
+    weight_kg NUMERIC(5, 2), -- Poids en kg
+    observations TEXT, -- Observations et antécédents libres
     allergies TEXT[],
     chronic_conditions TEXT[],
     address TEXT,
