@@ -2300,6 +2300,7 @@ function renderBillingInsurancesContent(insurances) {
             <tr>
               <th>Nom de l'Organisme / IPM</th>
               <th>Code / Sigle</th>
+              <th>Adresse Physique</th>
               <th>Email Contact</th>
               <th>Téléphone</th>
               <th>Délai Règlement</th>
@@ -2314,6 +2315,7 @@ function renderBillingInsurancesContent(insurances) {
                   <strong style="color:var(--text-primary); font-size:0.95rem;">${ic.name}</strong>
                 </td>
                 <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${ic.code}</code></td>
+                <td>${ic.address ? `<span style="font-size:0.85rem; color:var(--text-primary);"><i class="fas fa-map-marker-alt" style="color:var(--primary); width:14px;"></i> ${ic.address}</span>` : '<span style="color:var(--text-muted); font-size:0.85rem;">-</span>'}</td>
                 <td>${ic.contact_email ? `<a href="mailto:${ic.contact_email}" style="color:var(--text-muted); text-decoration:none;"><i class="fas fa-envelope"></i> ${ic.contact_email}</a>` : '<span style="color:var(--text-muted);">-</span>'}</td>
                 <td>${ic.contact_phone ? `<span><i class="fas fa-phone"></i> ${ic.contact_phone}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
                 <td><span class="badge" style="background:#2c3e50; color:#fff; font-size:0.75rem;">${ic.payment_terms_days || 30} jours</span></td>
@@ -2635,6 +2637,7 @@ function openCreateInsuranceModal() {
   form.reset();
   document.getElementById('insurance-form-id').value = '';
   document.getElementById('insurance-modal-title').innerText = 'Ajouter un Organisme IPM / Assurance';
+  document.getElementById('insurance-address').value = '';
   document.getElementById('insurance-terms').value = '30';
   document.getElementById('insurance-active').checked = true;
 
@@ -2654,6 +2657,7 @@ async function openEditInsuranceModal(id) {
     document.getElementById('insurance-modal-title').innerText = 'Modifier l\'Organisme IPM / Assurance';
     document.getElementById('insurance-name').value = ic.name || '';
     document.getElementById('insurance-code').value = ic.code || '';
+    document.getElementById('insurance-address').value = ic.address || '';
     document.getElementById('insurance-email').value = ic.contact_email || '';
     document.getElementById('insurance-phone').value = ic.contact_phone || '';
     document.getElementById('insurance-terms').value = ic.payment_terms_days || 30;
@@ -2677,6 +2681,7 @@ async function submitInsuranceForm(e) {
   const payload = {
     name: document.getElementById('insurance-name').value,
     code: document.getElementById('insurance-code').value,
+    address: document.getElementById('insurance-address').value,
     contact_email: document.getElementById('insurance-email').value,
     contact_phone: document.getElementById('insurance-phone').value,
     payment_terms_days: parseInt(document.getElementById('insurance-terms').value, 10) || 30,
@@ -2967,9 +2972,10 @@ function renderInvoicePrintModalContent() {
           ${invoice.insurance_name ? `
             <div style="font-size:1rem; font-weight:700; color:#2c5282;">${invoice.insurance_name} ${invoice.insurance_code ? `(${invoice.insurance_code})` : ''}</div>
             <div style="font-size:0.8rem; color:#4a5568; margin-top:2px;">
+              ${invoice.insurance_address ? `<div><i class="fas fa-map-marker-alt" style="color:#3498db; width:12px;"></i> ${invoice.insurance_address}</div>` : ''}
               ${invoice.policy_number ? `<div>Matricule / Police : <strong>${invoice.policy_number}</strong></div>` : ''}
               <div>Taux de prise en charge : <strong>${invoice.policy_coverage_rate || '80'}%</strong></div>
-              ${invoice.insurance_phone ? `<div>Contact IPM : ${invoice.insurance_phone}</div>` : ''}
+              ${invoice.insurance_phone ? `<div>Contact IPM : ${invoice.insurance_phone} ${invoice.insurance_email ? `| ${invoice.insurance_email}` : ''}</div>` : ''}
             </div>
           ` : `
             <div style="font-size:0.9rem; color:#718096; font-style:italic;">Régime Privé / Paiement direct 100% Patient</div>
@@ -4597,6 +4603,11 @@ function renderAppLayout() {
               <label class="form-label">Code / Sigle *</label>
               <input type="text" class="form-control" id="insurance-code" placeholder="ex: SONATEL" required />
             </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:15px;">
+            <label class="form-label">Adresse Physique Complète</label>
+            <input type="text" class="form-control" id="insurance-address" placeholder="ex: 64 Rue Félix Faure, Dakar" />
           </div>
 
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">

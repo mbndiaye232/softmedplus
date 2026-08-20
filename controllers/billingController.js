@@ -259,7 +259,7 @@ const getInsurances = async (req, res) => {
 // 6b. Create Insurance Company
 const createInsurance = async (req, res) => {
   const tenantId = req.user.tenant_id;
-  const { name, code, contact_email, contact_phone, payment_terms_days } = req.body;
+  const { name, code, address, contact_email, contact_phone, payment_terms_days } = req.body;
 
   if (!name || !code) {
     return res.status(400).json({ error: 'Le nom et le code de l\'IPM sont requis' });
@@ -267,13 +267,14 @@ const createInsurance = async (req, res) => {
 
   try {
     const result = await req.dbClient.query(
-      `INSERT INTO insurance_companies (tenant_id, name, code, contact_email, contact_phone, payment_terms_days)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO insurance_companies (tenant_id, name, code, address, contact_email, contact_phone, payment_terms_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
       [
         tenantId,
         name.trim(),
         code.trim().toUpperCase(),
+        address ? address.trim() : null,
         contact_email ? contact_email.trim() : null,
         contact_phone ? contact_phone.trim() : null,
         parseInt(payment_terms_days, 10) || 30
@@ -290,7 +291,7 @@ const createInsurance = async (req, res) => {
 const updateInsurance = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const { id } = req.params;
-  const { name, code, contact_email, contact_phone, payment_terms_days, is_active } = req.body;
+  const { name, code, address, contact_email, contact_phone, payment_terms_days, is_active } = req.body;
 
   if (!name || !code) {
     return res.status(400).json({ error: 'Le nom et le code de l\'IPM sont requis' });
@@ -301,15 +302,17 @@ const updateInsurance = async (req, res) => {
       `UPDATE insurance_companies
        SET name = $1,
            code = $2,
-           contact_email = $3,
-           contact_phone = $4,
-           payment_terms_days = $5,
-           is_active = $6
-       WHERE id = $7 AND tenant_id = $8
+           address = $3,
+           contact_email = $4,
+           contact_phone = $5,
+           payment_terms_days = $6,
+           is_active = $7
+       WHERE id = $8 AND tenant_id = $9
        RETURNING *`,
       [
         name.trim(),
         code.trim().toUpperCase(),
+        address ? address.trim() : null,
         contact_email ? contact_email.trim() : null,
         contact_phone ? contact_phone.trim() : null,
         parseInt(payment_terms_days, 10) || 30,
@@ -376,7 +379,7 @@ const getInvoiceDetails = async (req, res) => {
     const invRes = await req.dbClient.query(
       `SELECT i.*, 
               p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone, p.date_of_birth, p.gender,
-              ic.name AS insurance_name, ic.code AS insurance_code, ic.contact_phone AS insurance_phone,
+              ic.name AS insurance_name, ic.code AS insurance_code, ic.address AS insurance_address, ic.contact_email AS insurance_email, ic.contact_phone AS insurance_phone,
               pip.policy_number, pip.coverage_rate_percent AS policy_coverage_rate
        FROM invoices i
        JOIN patients p ON i.patient_id = p.id

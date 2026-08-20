@@ -185,6 +185,7 @@ CREATE TABLE insurance_companies (
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     name VARCHAR(200) NOT NULL, -- Ex: IPM SONATEL, AXA Sénégal, ASKIA, SUNU
     code VARCHAR(50) NOT NULL,
+    address VARCHAR(255),
     contact_email VARCHAR(255),
     contact_phone VARCHAR(30),
     payment_terms_days INT NOT NULL DEFAULT 30,
