@@ -2082,19 +2082,12 @@ let invoiceLines = [];
 let activePaymentInvoice = null;
 
 async function renderBilling(container) {
-  // Check active cash session
-  // In our simple state, we check if there is an open cash session for this cashier
-  const sessionCheck = await api.request('/patients'); // We can fetch current open session or simulate
-  // For the frontend client, we will fetch cash sessions or check state
-  const invoices = await api.request('/billing/invoices');
-  const patients = await api.request('/patients');
-  const insurances = await api.request('/payment-methods'); // We fetch all models
-  
-  // Custom fetch for insurance companies list
-  // Let's seed insurance list
-  const insuranceCompanies = [
-    { id: 'insurance-seeded-uuid', name: 'IPM SONATEL', code: 'IPM-SONATEL' }
-  ];
+  const [invoices, patients, registers, insurances] = await Promise.all([
+    api.request('/billing/invoices').catch(() => []),
+    api.request('/patients').catch(() => []),
+    api.request('/billing/cash-registers').catch(() => []),
+    api.request('/billing/insurances').catch(() => [])
+  ]);
 
   container.innerHTML = `
     <div class="agenda-grid" style="grid-template-columns: 400px 1fr;">
@@ -2121,7 +2114,7 @@ async function renderBilling(container) {
               <div class="form-group">
                 <label class="form-label">${t('selectRegister')}</label>
                 <select class="form-control" id="open-register-id" required>
-                  <option value="register-seeded-uuid">Caisse Principale Guichet 1</option>
+                  ${registers.length > 0 ? registers.map(r => `<option value="${r.id}">${r.name}</option>`).join('') : '<option value="">Aucune caisse enregistrée</option>'}
                 </select>
               </div>
               <div class="form-group">
@@ -2145,9 +2138,9 @@ async function renderBilling(container) {
             </div>
             <div class="form-group">
               <label class="form-label">${t('insurance')}</label>
-              <select class="form-control" id="inv-insurance-id">
+              <select class="form-control" id="inv-insurance-id" onchange="renderInvoiceLines()">
                 <option value="">Privé (Pas de couverture)</option>
-                ${insuranceCompanies.map(ic => `<option value="${ic.id}">${ic.name}</option>`).join('')}
+                ${insurances.map(ic => `<option value="${ic.id}">${ic.name} (${ic.code})</option>`).join('')}
               </select>
             </div>
             
@@ -2166,8 +2159,8 @@ async function renderBilling(container) {
             
             <div class="card" style="background-color:var(--bg-surface); padding:15px; font-size:0.85rem;" id="invoice-totals-box">
               <!-- Live totals calculation -->
-              <div>Gross Total: 0 FCFA</div>
-              <div>Patient split (100%): 0 FCFA</div>
+              <div>Total Brut: 0 FCFA</div>
+              <div>Part Patient (100%): 0 FCFA</div>
             </div>
             
             <button class="btn btn-primary" style="width:100%;"><i class="fas fa-print"></i> ${t('saveInvoiceBtn')}</button>
@@ -2195,7 +2188,7 @@ async function renderBilling(container) {
                 <tr>
                   <td><strong>${inv.invoice_number}</strong></td>
                   <td>${inv.patient_first} ${inv.patient_last}</td>
-                  <td>${inv.insurance_company_id ? 'IPM SONATEL' : 'Privé'}</td>
+                  <td>${inv.insurance_name || (inv.insurance_company_id ? 'IPM / Assurance' : 'Privé')}</td>
                   <td>${parseFloat(inv.total_amount_net).toLocaleString()} FCFA</td>
                   <td>${parseFloat(inv.patient_share_amount).toLocaleString()} FCFA</td>
                   <td><span class="status-badge ${inv.status.toLowerCase()}">${inv.status}</span></td>

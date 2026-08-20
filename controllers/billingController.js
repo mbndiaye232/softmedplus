@@ -103,6 +103,11 @@ const createInvoice = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const invoiceNumber = `FAC-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
+  // Validate UUID formats
+  const isValidUUID = str => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+  const validInsuranceId = isValidUUID(insurance_company_id) ? insurance_company_id : null;
+  const validAppointmentId = isValidUUID(appointment_id) ? appointment_id : null;
+
   try {
     // A. Calculate gross amount
     let totalGross = 0;
@@ -116,14 +121,17 @@ const createInvoice = async (req, res) => {
 
     // B. Check insurance coverage if company is supplied
     let coverageRate = 0;
-    if (insurance_company_id) {
+    if (validInsuranceId) {
       const policyRes = await req.dbClient.query(
         `SELECT coverage_rate_percent FROM patient_insurance_policies 
          WHERE patient_id = $1 AND insurance_company_id = $2 AND is_primary = true`,
-        [patient_id, insurance_company_id]
+        [patient_id, validInsuranceId]
       );
       if (policyRes.rowCount > 0) {
         coverageRate = parseFloat(policyRes.rows[0].coverage_rate_percent);
+      } else {
+        // Default standard IPM / Tiers-payant coverage rate of 80% if selected
+        coverageRate = 80;
       }
     }
 
@@ -132,9 +140,13 @@ const createInvoice = async (req, res) => {
     const patientShare = netAmount - insuranceShare;
 
     // Fetch tenant settings to get grace period
-    const tenantRes = await req.dbClient.query(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
-    const settings = tenantRes.rows[0].settings || {};
-    const gracePeriod = settings.grace_period_days || 30;
+    let gracePeriod = 30;
+    try {
+      const tenantRes = await req.dbClient.query(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+      if (tenantRes.rowCount > 0 && tenantRes.rows[0].settings) {
+        gracePeriod = tenantRes.rows[0].settings.grace_period_days || 30;
+      }
+    } catch (e) {}
 
     const issueDate = new Date();
     const dueDate = new Date();
@@ -149,8 +161,8 @@ const createInvoice = async (req, res) => {
         tenantId,
         invoiceNumber,
         patient_id,
-        appointment_id || null,
-        insurance_company_id || null,
+        validAppointmentId,
+        validInsuranceId,
         totalGross,
         discount,
         netAmount,
@@ -166,14 +178,15 @@ const createInvoice = async (req, res) => {
 
     // E. Insert Invoice Lines
     for (const line of lines) {
+      const validServiceId = isValidUUID(line.service_id) ? line.service_id : null;
       const lineRes = await req.dbClient.query(
         `INSERT INTO invoice_lines (invoice_id, service_id, description, quantity, unit_price, total_line_amount)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
         [
           invoice.id,
-          line.service_id || null,
-          line.description,
+          validServiceId,
+          line.description || 'Prestation Médicale',
           parseInt(line.quantity || 1),
           parseFloat(line.unit_price || 0),
           line.total
@@ -188,18 +201,23 @@ const createInvoice = async (req, res) => {
 
   } catch (err) {
     console.error('Create invoice error:', err.message);
-    return res.status(500).json({ error: 'Failed to create invoice' });
+    return res.status(500).json({ error: `Failed to create invoice: ${err.message}` });
   }
 };
 
 // 4. Get Invoices
 const getInvoices = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT i.*, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code
+      `SELECT i.*, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
+              ic.name AS insurance_name
        FROM invoices i
        JOIN patients p ON i.patient_id = p.id
-       ORDER BY i.created_at DESC`
+       LEFT JOIN insurance_companies ic ON i.insurance_company_id = ic.id
+       WHERE i.tenant_id = $1
+       ORDER BY i.created_at DESC`,
+      [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -208,9 +226,41 @@ const getInvoices = async (req, res) => {
   }
 };
 
+// 5. Get Cash Registers
+const getCashRegisters = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  try {
+    const result = await req.dbClient.query(
+      `SELECT * FROM cash_registers WHERE tenant_id = $1 AND is_active = true ORDER BY name ASC`,
+      [tenantId]
+    );
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Get cash registers error:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve cash registers' });
+  }
+};
+
+// 6. Get Insurance Companies
+const getInsurances = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  try {
+    const result = await req.dbClient.query(
+      `SELECT * FROM insurance_companies WHERE tenant_id = $1 AND is_active = true ORDER BY name ASC`,
+      [tenantId]
+    );
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Get insurances error:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve insurances' });
+  }
+};
+
 module.exports = {
   openCashSession,
   closeCashSession,
   createInvoice,
-  getInvoices
+  getInvoices,
+  getCashRegisters,
+  getInsurances
 };

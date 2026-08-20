@@ -200,6 +200,29 @@ const registerTenant = async (req, res) => {
       );
     }
 
+    // H. Seed Default Cash Register
+    await client.query(
+      `INSERT INTO cash_registers (id, tenant_id, name, is_active)
+       VALUES ($1, $2, 'Caisse Principale Guichet 1', true)`,
+      [crypto.randomUUID(), tenantId]
+    );
+
+    // I. Seed Default Insurance Companies
+    const defaultInsurances = [
+      { name: 'IPM SONATEL', code: 'IPM-SONATEL', phone: '+221338391200' },
+      { name: 'AXA Assurances', code: 'AXA-SN', phone: '+221338493434' },
+      { name: 'GMC Assurances / IPM', code: 'GMC-SN', phone: '+221338234567' },
+      { name: 'Allianz Sénégal', code: 'ALLIANZ-SN', phone: '+221338898989' }
+    ];
+
+    for (const ins of defaultInsurances) {
+      await client.query(
+        `INSERT INTO insurance_companies (id, tenant_id, name, code, contact_phone, is_active)
+         VALUES ($1, $2, $3, $4, $5, true)`,
+        [crypto.randomUUID(), tenantId, ins.name, ins.code, ins.phone]
+      );
+    }
+
     await client.query('COMMIT');
 
     // E. Generate JWT for the newly registered super-admin
