@@ -75,7 +75,7 @@ const getAllTenants = async (req, res) => {
 
   try {
     // Bypass RLS since we want to view all tenants globally
-    await req.dbClient.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await req.dbClient.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     const result = await req.dbClient.query(
       `SELECT id, name, slug, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings, is_active, created_at 
@@ -105,7 +105,7 @@ const createTenant = async (req, res) => {
 
   try {
     // Bypass RLS for initial insertions
-    await req.dbClient.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await req.dbClient.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     // Check slug uniqueness
     const slugCheck = await req.dbClient.query(`SELECT 1 FROM tenants WHERE slug = $1`, [slug.toLowerCase().trim()]);
@@ -190,7 +190,7 @@ const updateTenant = async (req, res) => {
   const { name, phone_number, ninea_rc, logo_url, address, email, gps_coordinates, settings, is_active } = req.body;
 
   try {
-    await req.dbClient.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await req.dbClient.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     const result = await req.dbClient.query(
       `UPDATE tenants 
@@ -241,7 +241,7 @@ const deleteTenant = async (req, res) => {
   const { id } = req.params;
 
   try {
-    await req.dbClient.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await req.dbClient.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     const result = await req.dbClient.query(
       `DELETE FROM tenants WHERE id = $1 RETURNING *`,

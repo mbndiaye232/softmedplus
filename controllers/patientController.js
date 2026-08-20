@@ -292,8 +292,8 @@ const verifyPrescription = async (req, res) => {
   // Check out a client from the pool to run RLS-bypassed queries
   const client = await pool.connect();
   try {
-    // Enable RLS bypass for this database session to lookup the records globally
-    await client.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     // Fetch prescription and relative details
     const prescrRes = await client.query(

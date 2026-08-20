@@ -297,8 +297,9 @@ const handleWebhook = async (req, res) => {
   // Check out a client from the pool to run bypassed queries
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     // Enable RLS bypass to fetch the invoice and resolve its tenant ID
-    await client.query(`SET LOCAL app.bypass_rls = 'true'`);
+    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
 
     const invRes = await client.query(
       `SELECT tenant_id, id, patient_id FROM invoices WHERE id = $1`,
@@ -306,6 +307,7 @@ const handleWebhook = async (req, res) => {
     );
 
     if (invRes.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Invoice associated with webhook not found' });
     }
 
@@ -313,11 +315,12 @@ const handleWebhook = async (req, res) => {
 
     // Find the system superadmin user for this tenant to mark as received_by
     const adminUserRes = await client.query(
-      `SELECT id FROM users WHERE tenant_id = $1 AND role = 'SUPER_ADMIN' LIMIT 1`,
+      `SELECT id FROM users WHERE tenant_id = $1 ORDER BY (role = 'SUPER_ADMIN') DESC LIMIT 1`,
       [invoice.tenant_id]
     );
 
     if (adminUserRes.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(500).json({ error: 'No admin user found for RLS billing verification' });
     }
 
@@ -331,10 +334,8 @@ const handleWebhook = async (req, res) => {
 
     const pmId = pmRes.rowCount > 0 ? pmRes.rows[0].id : null;
 
-    // Run transaction
-    await client.query('BEGIN');
-    // Set RLS scope to the invoice's tenant so we can write the payment
-    await client.query(`SET LOCAL app.current_tenant_id = $1`, [invoice.tenant_id]);
+    // Set RLS scope to the invoice's tenant
+    await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [invoice.tenant_id]);
 
     const recon = await processPaymentReconciliation(client, req, {
       tenant_id: invoice.tenant_id,
@@ -354,9 +355,9 @@ const handleWebhook = async (req, res) => {
     return res.status(200).json({ success: true, invoice_status: recon.invoice.status });
 
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch(e) {}
     console.error('Webhook processing error:', err.message);
-    return res.status(500).json({ error: 'Failed to process payment webhook reconciliations' });
+    return res.status(500).json({ error: `Failed to process payment webhook reconciliations: ${err.message}` });
   } finally {
     client.release();
   }
