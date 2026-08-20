@@ -527,11 +527,7 @@ async function handleTenantSignup(e) {
   const lng = parseFloat(document.getElementById('signup-lng').value);
   const gps_coordinates = (!isNaN(lat) && !isNaN(lng)) ? { latitude: lat, longitude: lng } : null;
 
-  const payment_methods = [];
-  if (document.getElementById('signup-pay-wave').checked) payment_methods.push('WAVE');
-  if (document.getElementById('signup-pay-om').checked) payment_methods.push('ORANGE_MONEY');
-  if (document.getElementById('signup-pay-yas').checked) payment_methods.push('YAS');
-  if (document.getElementById('signup-pay-card').checked) payment_methods.push('CARTE_BANCAIRE');
+  const payment_methods = signupPaymentMethods;
 
   try {
     const response = await fetch('/api/auth/register-tenant', {
@@ -2412,21 +2408,27 @@ function renderAuthLayout() {
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="form-label">Moyens de paiement acceptés</label>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; margin-bottom:15px;">
-              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
-                <input type="checkbox" id="signup-pay-wave" checked /> Wave
-              </label>
-              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
-                <input type="checkbox" id="signup-pay-om" checked /> Orange Money
-              </label>
-              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
-                <input type="checkbox" id="signup-pay-yas" checked /> Yas Pay
-              </label>
-              <label style="font-size:0.85rem; display:flex; align-items:center; gap:6px; color:var(--text-primary); cursor:pointer; margin:0;">
-                <input type="checkbox" id="signup-pay-card" checked /> Carte Bancaire
-              </label>
+          <div class="form-group" style="margin-bottom:20px;">
+            <label class="form-label" style="font-weight:600;"><i class="fas fa-cash-register"></i> Moyens de paiement acceptés</label>
+            <div style="background:var(--bg-primary); border: 1px solid var(--border-color); padding: 12px; border-radius: 8px;">
+              <div id="signup-payment-methods-list" style="margin-bottom:10px;">
+                <!-- Dynamically rendered list -->
+              </div>
+
+              <!-- Sub-form to add a payment method -->
+              <div style="border-top:1px dashed var(--border-color); padding-top:10px; margin-top:10px;">
+                <span style="font-size:0.85rem; font-weight:600; color:var(--text-primary); display:block; margin-bottom:8px;">Ajouter un moyen de paiement :</span>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:8px;">
+                  <input type="text" class="form-control" id="signup-moyen-name" placeholder="Libellé (ex: Wave, Chèque...)" style="font-size:0.85rem;" />
+                  <input type="text" class="form-control" id="signup-moyen-number" placeholder="Numéro à créditer" style="font-size:0.85rem;" />
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input type="text" class="form-control" id="signup-moyen-qr" placeholder="QR Code URL (facultatif)" style="font-size:0.85rem; flex:1;" />
+                  <input type="file" id="signup-moyen-qr-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'signup-moyen-qr')" />
+                  <button type="button" class="btn btn-secondary" onclick="document.getElementById('signup-moyen-qr-file').click()" title="Uploader un QR Code" style="padding:0 12px; height:36px;"><i class="fas fa-upload"></i></button>
+                  <button type="button" class="btn btn-primary" onclick="addSignupPaymentMethod()" style="font-size:0.85rem; padding:0 14px; height:36px; white-space:nowrap;"><i class="fas fa-plus"></i> Ajouter</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2458,6 +2460,59 @@ function openAuthModal(tab) {
   }
 }
 
+let signupPaymentMethods = [];
+
+function renderSignupPaymentMethodsList() {
+  const container = document.getElementById('signup-payment-methods-list');
+  if (!container) return;
+
+  if (signupPaymentMethods.length === 0) {
+    container.innerHTML = `<div style="font-size:0.8rem; color:var(--text-muted); font-style:italic;">Aucun moyen de paiement ajouté (vous pourrez aussi en configurer dans les paramètres).</div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:6px;">
+      ${signupPaymentMethods.map((pm, idx) => `
+        <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-surface); padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:0.85rem;">
+          <div>
+            <strong>${pm.name}</strong> : <span style="color:var(--text-muted);">${pm.number || 'N/A'}</span>
+            ${pm.qr_code_url ? `<span class="badge badge-success" style="font-size:0.7rem; margin-left:6px; background:var(--primary); color:white; padding:2px 6px; border-radius:10px;"><i class="fas fa-qrcode"></i> QR</span>` : ''}
+          </div>
+          <button type="button" class="btn btn-danger btn-sm" onclick="removeSignupPaymentMethod(${idx})" style="padding:2px 6px; font-size:0.75rem; background:var(--danger); border-color:var(--danger);"><i class="fas fa-trash"></i></button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function addSignupPaymentMethod() {
+  const nameInput = document.getElementById('signup-moyen-name');
+  const numberInput = document.getElementById('signup-moyen-number');
+  const qrInput = document.getElementById('signup-moyen-qr');
+
+  const name = nameInput.value.trim();
+  const number = numberInput.value.trim();
+  const qr_code_url = qrInput.value.trim();
+
+  if (!name) {
+    showToast('Veuillez saisir le libellé du moyen de paiement', 'warning');
+    return;
+  }
+
+  signupPaymentMethods.push({ name, number, qr_code_url });
+  nameInput.value = '';
+  numberInput.value = '';
+  qrInput.value = '';
+
+  renderSignupPaymentMethodsList();
+}
+
+function removeSignupPaymentMethod(index) {
+  signupPaymentMethods.splice(index, 1);
+  renderSignupPaymentMethodsList();
+}
+
 function closeAuthModal() {
   const modal = document.getElementById('auth-modal');
   if (modal) {
@@ -2483,6 +2538,7 @@ function switchAuthTab(tab) {
     signupForm.style.display = 'block';
     loginBtn.style.borderBottom = 'none';
     signupBtn.style.borderBottom = '2px solid var(--primary)';
+    renderSignupPaymentMethodsList();
     if (title) title.innerText = state.currentLang === 'ar' ? 'سجل عيادة جديدة' : "S'enregistrer (Clinique)";
   }
 }

@@ -126,21 +126,28 @@ const registerTenant = async (req, res) => {
       ]
     );
 
-    // C. Initialize Default Online Payment configurations
-    const activeProviders = Array.isArray(payment_methods) ? payment_methods : [];
-    const paymentMethodsList = [
-      [crypto.randomUUID(), tenantId, 'WAVE', 'Wave Caisse', JSON.stringify({ phone_number: '', merchant_id: '' }), activeProviders.includes('WAVE')],
-      [crypto.randomUUID(), tenantId, 'ORANGE_MONEY', 'Orange Money Caisse', JSON.stringify({ phone_number: '', merchant_code: '' }), activeProviders.includes('ORANGE_MONEY')],
-      [crypto.randomUUID(), tenantId, 'SPI', 'Virement SPI', JSON.stringify({ bank_name: '', account_number: '' }), activeProviders.includes('SPI')],
-      [crypto.randomUUID(), tenantId, 'YAS', 'Yas Pay', JSON.stringify({ api_key: '' }), activeProviders.includes('YAS')],
-      [crypto.randomUUID(), tenantId, 'CARTE_BANCAIRE', 'Paiement Carte', JSON.stringify({ provider: 'Stripe', public_key: '' }), activeProviders.includes('CARTE_BANCAIRE')]
-    ];
-    for (const pm of paymentMethodsList) {
-      await client.query(
-        `INSERT INTO tenant_payment_methods (id, tenant_id, provider, name, credentials, is_active) 
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        pm
-      );
+    // C. Initialize Dynamic Payment configurations
+    if (Array.isArray(payment_methods) && payment_methods.length > 0) {
+      for (const pm of payment_methods) {
+        if (typeof pm === 'object' && pm.name) {
+          const provider = (pm.name || 'CUSTOM').toUpperCase().replace(/\s+/g, '_');
+          const creds = JSON.stringify({
+            phone_number: pm.number || pm.phone_number || '',
+            qr_code_url: pm.qr_code_url || ''
+          });
+          await client.query(
+            `INSERT INTO tenant_payment_methods (id, tenant_id, provider, name, credentials, qr_code_template, is_active) 
+             VALUES ($1, $2, $3, $4, $5, $6, true)`,
+            [crypto.randomUUID(), tenantId, provider, pm.name, creds, pm.qr_code_url || null]
+          );
+        } else if (typeof pm === 'string') {
+          await client.query(
+            `INSERT INTO tenant_payment_methods (id, tenant_id, provider, name, credentials, is_active) 
+             VALUES ($1, $2, $3, $4, $5, true)`,
+            [crypto.randomUUID(), tenantId, pm, pm, JSON.stringify({})]
+          );
+        }
+      }
     }
 
     // D. Hash Super Admin password and Insert User
