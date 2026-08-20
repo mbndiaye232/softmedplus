@@ -129,7 +129,8 @@ const getAppointments = async (req, res) => {
   `;
   const params = [];
 
-  if (practitioner_id) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (practitioner_id && uuidRegex.test(practitioner_id)) {
     params.push(practitioner_id);
     queryStr += ` AND a.practitioner_id = $${params.length}`;
   }
@@ -151,9 +152,23 @@ const getAppointments = async (req, res) => {
   }
 };
 
+// 5. Get Practitioners (Doctors catalog)
+const getPractitioners = async (req, res) => {
+  try {
+    const result = await req.dbClient.query(
+      `SELECT * FROM practitioners WHERE is_active = true ORDER BY first_name ASC`
+    );
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Get practitioners error:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve practitioners' });
+  }
+};
+
 module.exports = {
   createMedicalService,
   getMedicalServices,
   createAppointment,
-  getAppointments
+  getAppointments,
+  getPractitioners
 };

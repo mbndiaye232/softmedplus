@@ -793,22 +793,31 @@ async function simulateRecovery(invoiceId, phone) {
 let activePractitionerId = null;
 
 async function renderAgenda(container) {
-  // Fetch services and patients for selectors
-  const patients = await api.request('/patients');
-  const services = await api.request('/medical-services');
+  // Fetch services, patients, and real database practitioners
+  const [patients, services, dbPractitioners] = await Promise.all([
+    api.request('/patients').catch(() => []),
+    api.request('/medical-services').catch(() => []),
+    api.request('/practitioners').catch(() => [])
+  ]);
   
-  // Hardcoded sample practitioners or fetch
-  // Normally doctor is registered, we can look up from practitioners table
-  const dbPractitioners = await api.request('/patients'); // We can fetch from backend users or custom list
-  // Let's seed a standard doctor list
-  const practitioners = [
-    { id: 'doctor-seeded-uuid', name: 'Dr. Amadou Diallo', specialty: 'Pédiatre', color: '#4A90E2' }
-  ];
+  const practitioners = dbPractitioners && dbPractitioners.length > 0
+    ? dbPractitioners.map(p => ({
+        id: p.id,
+        name: `${p.title || 'Dr.'} ${p.first_name} ${p.last_name}`,
+        specialty: p.specialty_name || 'Médecine',
+        color: p.color_code || '#4A90E2'
+      }))
+    : [];
 
-  if (!activePractitionerId) activePractitionerId = practitioners[0].id;
+  if (!activePractitionerId && practitioners.length > 0) {
+    activePractitionerId = practitioners[0].id;
+  }
 
   // Fetch appointments
-  const appointments = await api.request(`/appointments?practitioner_id=${activePractitionerId}`);
+  const apptUrl = activePractitionerId 
+    ? `/appointments?practitioner_id=${activePractitionerId}`
+    : '/appointments';
+  const appointments = await api.request(apptUrl).catch(() => []);
 
   container.innerHTML = `
     <div class="agenda-grid">
@@ -908,16 +917,17 @@ async function bookAppointment(e) {
   const start_time = document.getElementById('book-start-time').value;
   const booking_channel = document.getElementById('book-channel').value;
   
-  // Seed database doctor-seeded-uuid (which matches seeded doctor user)
-  // Let's resolve the doctor from practitioners seeded in init
   try {
-    const listRes = await api.request('/patients'); // Lookup or use hardcoded uuid
-    // In db-init, we seeded Amadou Diallo. Let's find his ID from the backend practitioners list
-    // To make it easy, backend will return practitioners. But for tests, we will verify this.
-    // Let's query practitioner ID
-    const serviceRes = await api.request('/medical-services');
+    const serviceRes = await api.request('/medical-services').catch(() => []);
     const targetedService = serviceRes.find(s => s.id === medical_service_id);
-    const practitioner_id = targetedService.practitioner_id || 'doctor-seeded-uuid';
+    let practitioner_id = targetedService ? targetedService.practitioner_id : null;
+
+    if (!practitioner_id) {
+      const pracList = await api.request('/practitioners').catch(() => []);
+      if (pracList.length > 0) {
+        practitioner_id = pracList[0].id;
+      }
+    }
 
     const result = await api.request('/appointments', {
       method: 'POST',
@@ -1145,9 +1155,12 @@ async function submitConsultation(e) {
 
   const icd10_diagnosis_codes = icd10 ? icd10.split(',').map(s => s.trim()) : [];
 
+  const pracList = await api.request('/practitioners').catch(() => []);
+  const practitioner_id = pracList.length > 0 ? pracList[0].id : null;
+
   const payload = {
     patient_id: activeDPIPatient.id,
-    practitioner_id: 'doctor-seeded-uuid', // Map doctor id
+    practitioner_id,
     reason_for_visit,
     diagnosis_text,
     icd10_diagnosis_codes,

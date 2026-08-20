@@ -89,6 +89,7 @@ app.post('/api/clinical/consultations', patientCtrl.createConsultation);
 // 3. Appointments & Scheduling catalog
 app.post('/api/medical-services', apptCtrl.createMedicalService);
 app.get('/api/medical-services', apptCtrl.getMedicalServices);
+app.get('/api/practitioners', apptCtrl.getPractitioners);
 app.post('/api/appointments', apptCtrl.createAppointment);
 app.get('/api/appointments', apptCtrl.getAppointments);
 
