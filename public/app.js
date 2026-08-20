@@ -2694,7 +2694,7 @@ function renderInvoicePrintModalContent() {
               <div style="font-weight:700; color:#22543d; margin-bottom:3px;"><i class="fas fa-check-circle"></i> Historique des Règlements Reçus :</div>
               ${payments.map(p => `
                 <div style="display:flex; justify-content:space-between; color:#2d3748; margin-bottom:2px;">
-                  <span>${new Date(p.created_at).toLocaleDateString()} — <strong>${p.payment_method}</strong> ${p.transaction_reference ? `(Réf: ${p.transaction_reference})` : ''}</span>
+                  <span>${new Date(p.payment_date || p.created_at).toLocaleDateString()} — <strong>${p.payment_method}</strong> ${p.transaction_reference ? `(Réf: ${p.transaction_reference})` : ''}</span>
                   <strong>${parseFloat(p.amount).toLocaleString()} FCFA</strong>
                 </div>
               `).join('')}

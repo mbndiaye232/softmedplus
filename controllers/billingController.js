@@ -306,7 +306,7 @@ const getInvoiceDetails = async (req, res) => {
        FROM payments p
        LEFT JOIN users u ON p.received_by = u.id
        WHERE p.invoice_id = $1
-       ORDER BY p.created_at ASC`,
+       ORDER BY p.payment_date ASC`,
       [id]
     );
 
