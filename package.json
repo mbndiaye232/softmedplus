@@ -1,7 +1,7 @@
 {
   "name": "softmed-enterprise",
   "version": "2.0.0",
-  "description": "SoftMed Medical SaaS platform with PostgreSQL, Express, React, dynamic online payments, and bilingual French/Arabic interface.",
+  "description": "SoftMed Medical SaaS platform with PostgreSQL, Express, React, and dynamic online payments.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -156,7 +156,7 @@ const i18n = {
     tenantsList: "Liste des Cliniques / Tenants",
     noTenants: "Aucune clinique enregistrée.",
     homeTitle: "Gérez votre clinique en toute simplicité",
-    homeSubtitle: "La plateforme médicale SaaS multi-tenant moderne, sécurisée et bilingue.",
+    homeSubtitle: "La plateforme médicale SaaS multi-tenant moderne et sécurisée.",
     homeCTAConnect: "Se Connecter",
     homeCTASignup: "Créer un Nouveau Cabinet",
     homeFeatures: "Fonctionnalités Clés",
@@ -166,10 +166,12 @@ const i18n = {
     homeFeature2Desc: "Génération de prescriptions infalsifiables avec signature cryptographique QR Code.",
     homeFeature3: "Facturation & Tiers-Payant (IPM)",
     homeFeature3Desc: "Ventilation automatisée de la part patient et assurance, avec suivi de la balance âgée.",
-    homeFeature4: "Gestion de Pharmacie & Stock",
-    homeFeature4Desc: "Contrôle des stocks de consommables, suivi des lots et alertes de péremption.",
-    homeFeature5: "Sécurité & Isolation RLS",
-    homeFeature5Desc: "Isolation stricte des données de santé au niveau de la base de données (Row-Level Security).",
+    homeFeature4: "Hospitalisation & Hébergement",
+    homeFeature4Desc: "Gestion des bâtiments, chambres et lits par niveau de luxe, avec tarification journalière intégrée.",
+    homeFeature5: "Gestion de Pharmacie & Stock",
+    homeFeature5Desc: "Contrôle des stocks de consommables, suivi des lots et alertes de péremption.",
+    homeFeature6: "Sécurité & Isolation RLS",
+    homeFeature6Desc: "Isolation stricte des données de santé au niveau de la base de données (Row-Level Security).",
     complianceText: "Conforme à la législation sénégalaise (CDP Loi 2008-12) et interopérable avec les moyens de paiement de la zone UEMOA (Wave, Orange Money, SPI, Yas)."
   },
   ar: {
@@ -326,7 +328,7 @@ const i18n = {
     tenantsList: "قائمة العيادات / المستأجرين",
     noTenants: "لا توجد عيادات مسجلة.",
     homeTitle: "إدارة عيادتك الطبية بكل سهولة",
-    homeSubtitle: "منصة طبية سحابية حديثة، آمنة، متعددة المستأجرين وتدعم اللغتين العربية والفرنسية.",
+    homeSubtitle: "منصة طبية سحابية حديثة، آمنة ومتعددة المستأجرين.",
     homeCTAConnect: "تسجيل الدخول",
     homeCTASignup: "تسجيل عيادة جديدة",
     homeFeatures: "الميزات الرئيسية للمنصة",
@@ -336,10 +338,12 @@ const i18n = {
     homeFeature2Desc: "إنشاء وصفات طبية غير قابلة للتزوير تعتمد على رمز الاستجابة السريعة المشفر QR.",
     homeFeature3: "الفواتير والجهات الضامنة (IPM)",
     homeFeature3Desc: "حساب آلي للمساهمات المشتركة للمرضى والشركات، مع إدارة الديون المتأخرة.",
-    homeFeature4: "إدارة الصيدلية والمخزون",
-    homeFeature4Desc: "مراقبة مستمرة للمستهلكات الطبية، وتتبع تواريخ الصلاحية وتنبيهات النفاد.",
-    homeFeature5: "الأمان وعزل البيانات الصارم (RLS)",
-    homeFeature5Desc: "عزل كامل لبيانات المرضى على مستوى قاعدة البيانات لضمان السرية والخصوصية.",
+    homeFeature4: "الاستشفاء والإقامة الطبية",
+    homeFeature4Desc: "إدارة متكاملة للمباني، الغرف والأسرة حسب مستويات الفخامة مع احتساب آلي لتعرفة الإقامة اليومية.",
+    homeFeature5: "إدارة الصيدلية والمخزون",
+    homeFeature5Desc: "مراقبة مستمرة للمستهلكات الطبية، وتتبع تواريخ الصلاحية وتنبيهات النفاد.",
+    homeFeature6: "الأمان وعزل البيانات الصارم (RLS)",
+    homeFeature6Desc: "عزل كامل لبيانات المرضى على مستوى قاعدة البيانات لضمان السرية والخصوصية.",
     complianceText: "متوافق مع قوانين حماية البيانات الشخصية واللوائح المالية لمنطقة غرب إفريقيا (Wave, Orange Money, SPI, Yas)."
   }
 };
@@ -2309,14 +2313,19 @@ function renderAuthLayout() {
             <p>${t('homeFeature3Desc')}</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon"><i class="fas fa-box"></i></div>
+            <div class="feature-icon"><i class="fas fa-bed"></i></div>
             <h3>${t('homeFeature4')}</h3>
             <p>${t('homeFeature4Desc')}</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+            <div class="feature-icon"><i class="fas fa-box"></i></div>
             <h3>${t('homeFeature5')}</h3>
             <p>${t('homeFeature5Desc')}</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon"><i class="fas fa-shield-alt"></i></div>
+            <h3>${t('homeFeature6')}</h3>
+            <p>${t('homeFeature6Desc')}</p>
           </div>
         </div>
       </section>
