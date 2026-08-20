@@ -107,9 +107,11 @@ app.post('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.createLabOrde
 app.put('/api/patients/lab-orders/:id', medicalHistoryCtrl.updateLabOrder);
 app.delete('/api/patients/lab-orders/:id', medicalHistoryCtrl.deleteLabOrder);
 
-// 3. Appointments & Scheduling catalog
+// 3. Appointments & Scheduling catalog (Medical Services / Consultations & Treatments CRUD)
 app.post('/api/medical-services', apptCtrl.createMedicalService);
 app.get('/api/medical-services', apptCtrl.getMedicalServices);
+app.put('/api/medical-services/:id', apptCtrl.updateMedicalService);
+app.delete('/api/medical-services/:id', apptCtrl.deleteMedicalService);
 app.get('/api/practitioners', apptCtrl.getPractitioners);
 app.post('/api/appointments', apptCtrl.createAppointment);
 app.get('/api/appointments', apptCtrl.getAppointments);

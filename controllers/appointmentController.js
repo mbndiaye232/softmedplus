@@ -1,27 +1,29 @@
 const { logAudit } = require('../middleware/audit');
 
-// 1. Create Medical Service (Price catalog)
+// 1. Create Medical Service (Price catalog for Consultations, Treatments, Acts)
 const createMedicalService = async (req, res) => {
-  const { code, name, duration_minutes, price, deposit_amount, practitioner_id } = req.body;
+  const { code, name, category, duration_minutes, price, deposit_amount, description, practitioner_id } = req.body;
 
-  if (!code || !name || !duration_minutes || !price) {
-    return res.status(400).json({ error: 'Required fields missing: code, name, duration_minutes, price' });
+  if (!code || !name || price === undefined || price === null) {
+    return res.status(400).json({ error: 'Champs requis manquants: code, nom, tarif' });
   }
 
   const tenantId = req.user.tenant_id;
 
   try {
     const result = await req.dbClient.query(
-      `INSERT INTO medical_services (tenant_id, code, name, duration_minutes, price, deposit_amount, practitioner_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO medical_services (tenant_id, code, name, category, duration_minutes, price, deposit_amount, description, practitioner_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         tenantId,
-        code,
-        name,
-        parseInt(duration_minutes),
-        parseFloat(price),
+        code.trim().toUpperCase(),
+        name.trim(),
+        (category || 'CONSULTATION').trim().toUpperCase(),
+        parseInt(duration_minutes, 10) || 30,
+        parseFloat(price) || 0,
         parseFloat(deposit_amount || 0),
+        description ? description.trim() : null,
         practitioner_id || null
       ]
     );
@@ -29,18 +31,110 @@ const createMedicalService = async (req, res) => {
     return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Create medical service error:', err.message);
-    return res.status(500).json({ error: 'Failed to create medical service' });
+    return res.status(500).json({ error: 'Échec de la création de la prestation: ' + err.message });
   }
 };
 
 // 2. Get Medical Services
 const getMedicalServices = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
-    const result = await req.dbClient.query(`SELECT * FROM medical_services WHERE is_active = true ORDER BY name ASC`);
+    const result = await req.dbClient.query(
+      `SELECT ms.*, p.first_name AS practitioner_first, p.last_name AS practitioner_last
+       FROM medical_services ms
+       LEFT JOIN practitioners p ON ms.practitioner_id = p.id
+       WHERE ms.tenant_id = $1
+       ORDER BY ms.is_active DESC, ms.category ASC, ms.name ASC`,
+      [tenantId]
+    );
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('Get medical services error:', err.message);
-    return res.status(500).json({ error: 'Failed to retrieve medical services' });
+    return res.status(500).json({ error: 'Échec de récupération des prestations' });
+  }
+};
+
+// 2b. Update Medical Service
+const updateMedicalService = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { id } = req.params;
+  const { code, name, category, duration_minutes, price, deposit_amount, description, practitioner_id, is_active } = req.body;
+
+  if (!code || !name || price === undefined || price === null) {
+    return res.status(400).json({ error: 'Champs requis manquants: code, nom, tarif' });
+  }
+
+  try {
+    const result = await req.dbClient.query(
+      `UPDATE medical_services
+       SET code = $1,
+           name = $2,
+           category = $3,
+           duration_minutes = $4,
+           price = $5,
+           deposit_amount = $6,
+           description = $7,
+           practitioner_id = $8,
+           is_active = $9
+       WHERE id = $10 AND tenant_id = $11
+       RETURNING *`,
+      [
+        code.trim().toUpperCase(),
+        name.trim(),
+        (category || 'CONSULTATION').trim().toUpperCase(),
+        parseInt(duration_minutes, 10) || 30,
+        parseFloat(price) || 0,
+        parseFloat(deposit_amount || 0),
+        description ? description.trim() : null,
+        practitioner_id || null,
+        is_active !== undefined ? is_active : true,
+        id,
+        tenantId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Prestation introuvable' });
+    }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update medical service error:', err.message);
+    return res.status(500).json({ error: 'Échec de modification de la prestation: ' + err.message });
+  }
+};
+
+// 2c. Delete Medical Service
+const deleteMedicalService = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { id } = req.params;
+
+  try {
+    const linkedAppointments = await req.dbClient.query(
+      `SELECT 1 FROM appointments WHERE medical_service_id = $1 LIMIT 1`,
+      [id]
+    );
+    const linkedInvoiceLines = await req.dbClient.query(
+      `SELECT 1 FROM invoice_lines WHERE service_id = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (linkedAppointments.rowCount > 0 || linkedInvoiceLines.rowCount > 0) {
+      await req.dbClient.query(
+        `UPDATE medical_services SET is_active = false WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      return res.status(200).json({ message: 'Prestation désactivée (car déjà utilisée dans des factures ou RDV)' });
+    }
+
+    await req.dbClient.query(
+      `DELETE FROM medical_services WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    return res.status(200).json({ message: 'Prestation supprimée avec succès' });
+  } catch (err) {
+    console.error('Delete medical service error:', err.message);
+    return res.status(500).json({ error: 'Échec de suppression de la prestation: ' + err.message });
   }
 };
 
@@ -168,6 +262,8 @@ const getPractitioners = async (req, res) => {
 module.exports = {
   createMedicalService,
   getMedicalServices,
+  updateMedicalService,
+  deleteMedicalService,
   createAppointment,
   getAppointments,
   getPractitioners

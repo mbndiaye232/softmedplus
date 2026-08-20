@@ -2080,27 +2080,38 @@ async function deletePatientStatus(statusId) {
 // ============================================================================
 let invoiceLines = [];
 let activePaymentInvoice = null;
-let activeBillingSubTab = 'invoices'; // 'invoices' or 'insurances'
+let activeBillingSubTab = 'invoices'; // 'invoices', 'services', or 'insurances'
+let currentServiceCategoryFilter = 'ALL';
 
 async function renderBilling(container) {
-  const [invoices, patients, registers, insurances] = await Promise.all([
+  const [invoices, patients, registers, insurances, services] = await Promise.all([
     api.request('/billing/invoices').catch(() => []),
     api.request('/patients').catch(() => []),
     api.request('/billing/cash-registers').catch(() => []),
-    api.request('/billing/insurances').catch(() => [])
+    api.request('/billing/insurances').catch(() => []),
+    api.request('/medical-services').catch(() => [])
   ]);
 
   container.innerHTML = `
     <!-- Subtabs Navigation -->
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
-      <div style="display:flex; gap:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button class="btn ${activeBillingSubTab === 'invoices' ? 'btn-primary' : 'btn-secondary'}" onclick="switchBillingSubTab('invoices')" style="font-size:0.9rem; padding:7px 18px;">
           <i class="fas fa-cash-register"></i> Caisse & Facturation
+        </button>
+        <button class="btn ${activeBillingSubTab === 'services' ? 'btn-primary' : 'btn-secondary'}" onclick="switchBillingSubTab('services')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-tags"></i> Prestations, Traitements & Tarifs (${services.length})
         </button>
         <button class="btn ${activeBillingSubTab === 'insurances' ? 'btn-primary' : 'btn-secondary'}" onclick="switchBillingSubTab('insurances')" style="font-size:0.9rem; padding:7px 18px;">
           <i class="fas fa-building"></i> Organismes IPM & Assurances (${insurances.length})
         </button>
       </div>
+
+      ${activeBillingSubTab === 'services' ? `
+        <button class="btn btn-primary" onclick="openCreateServiceModal()" style="font-size:0.85rem;">
+          <i class="fas fa-plus"></i> Nouvel Acte / Traitement / Consultation
+        </button>
+      ` : ''}
 
       ${activeBillingSubTab === 'insurances' ? `
         <button class="btn btn-primary" onclick="openCreateInsuranceModal()" style="font-size:0.85rem;">
@@ -2111,8 +2122,10 @@ async function renderBilling(container) {
 
     <div id="billing-subtab-content">
       ${activeBillingSubTab === 'invoices' 
-        ? renderBillingInvoicesContent(invoices, patients, registers, insurances) 
-        : renderBillingInsurancesContent(insurances)
+        ? renderBillingInvoicesContent(invoices, patients, registers, insurances, services) 
+        : activeBillingSubTab === 'services'
+          ? renderBillingServicesContent(services)
+          : renderBillingInsurancesContent(insurances)
       }
     </div>
   `;
@@ -2127,9 +2140,9 @@ function switchBillingSubTab(tab) {
   navigate('billing');
 }
 
-function renderBillingInvoicesContent(invoices, patients, registers, insurances) {
+function renderBillingInvoicesContent(invoices, patients, registers, insurances, services) {
   return `
-    <div class="agenda-grid" style="grid-template-columns: 400px 1fr;">
+    <div class="agenda-grid" style="grid-template-columns: 420px 1fr;">
       <div>
         <div class="card" id="cash-session-card">
           <!-- Session open/close state render dynamically -->
@@ -2184,14 +2197,30 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances)
             </div>
             
             <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px;">
-              <h5 style="margin-bottom:10px;">Prestations Facturées</h5>
+              <h5 style="margin-bottom:10px;"><i class="fas fa-hand-holding-medical"></i> Prestations & Traitements Facturés</h5>
+              
+              <!-- Quick selection from catalogue -->
+              <div class="form-group" style="margin-bottom:12px; background:var(--bg-surface); padding:8px 10px; border-radius:6px; border:1px dashed var(--border-color);">
+                <label class="form-label" style="font-size:0.78rem; color:var(--text-muted); margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                  <i class="fas fa-magic" style="color:var(--primary);"></i> Catalogue (Consultations & Traitements) :
+                </label>
+                <select class="form-control" id="service-catalogue-select" onchange="applyServiceFromCatalogue(this)" style="font-size:0.85rem;">
+                  <option value="">-- Choisir un acte ou traitement pour remplir --</option>
+                  ${(services || []).filter(s => s.is_active !== false).map(s => `
+                    <option value="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" data-price="${s.price}">
+                      [${s.category || 'ACTE'}] ${s.name} — ${parseFloat(s.price).toLocaleString()} FCFA
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+
               <div class="form-group">
-                <input type="text" class="form-control" id="line-desc" placeholder="Désignation de l'acte (ex: Consultation)" />
+                <input type="text" class="form-control" id="line-desc" placeholder="Désignation de l'acte (ex: Perfusion sanguine)" />
               </div>
               <div style="display:flex; gap:10px; margin-bottom:15px;">
-                <input type="number" class="form-control" id="line-price" placeholder="Tarif" style="flex:2;" />
+                <input type="number" class="form-control" id="line-price" placeholder="Tarif (FCFA)" style="flex:2;" />
                 <input type="number" class="form-control" id="line-qty" value="1" placeholder="Qté" style="flex:1;" />
-                <button class="btn btn-secondary" type="button" onclick="addInvoiceLine()"><i class="fas fa-plus"></i></button>
+                <button class="btn btn-secondary" type="button" onclick="addInvoiceLine()"><i class="fas fa-plus"></i> Ajouter</button>
               </div>
               <div id="invoice-lines-list" style="margin-bottom:15px;"></div>
             </div>
@@ -2253,6 +2282,143 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances)
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function applyServiceFromCatalogue(selectElement) {
+  const selectedOpt = selectElement.options[selectElement.selectedIndex];
+  if (!selectedOpt || !selectedOpt.value) return;
+  const name = selectedOpt.getAttribute('data-name');
+  const price = selectedOpt.getAttribute('data-price');
+  if (name) document.getElementById('line-desc').value = name;
+  if (price) document.getElementById('line-price').value = price;
+}
+
+function filterServicesCategory(cat) {
+  currentServiceCategoryFilter = cat;
+  navigate('billing');
+}
+
+function renderBillingServicesContent(services) {
+  const categories = [
+    { key: 'ALL', label: 'Tous les actes' },
+    { key: 'CONSULTATION', label: 'Consultations' },
+    { key: 'TRAITEMENT', label: 'Traitements & Perfusion' },
+    { key: 'SOIN', label: 'Soins & Injections' },
+    { key: 'ANALYSE', label: 'Analyses & Imagerie' },
+    { key: 'CHIRURGIE', label: 'Chirurgies & Bloc' },
+    { key: 'AUTRE', label: 'Autres' }
+  ];
+
+  const filteredServices = currentServiceCategoryFilter === 'ALL' 
+    ? services 
+    : services.filter(s => (s.category || 'CONSULTATION') === currentServiceCategoryFilter);
+
+  const totalActs = services.length;
+  const totalConsultations = services.filter(s => (s.category || 'CONSULTATION') === 'CONSULTATION').length;
+  const totalTreatments = services.filter(s => (s.category || '') === 'TRAITEMENT' || (s.category || '') === 'SOIN').length;
+
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Total Actes & Prestations</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:5px;">${totalActs}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Types de Consultations</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--accent); margin-top:5px;">${totalConsultations}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Traitements & Soins</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--success); margin-top:5px;">${totalTreatments}</div>
+      </div>
+    </div>
+
+    <!-- Category Filters -->
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:15px;">
+      ${categories.map(c => `
+        <button class="btn ${currentServiceCategoryFilter === c.key ? 'btn-primary' : 'btn-secondary'}" 
+                onclick="filterServicesCategory('${c.key}')" 
+                style="font-size:0.82rem; padding:6px 16px; border-radius:20px;">
+          ${c.label}
+        </button>
+      `).join('')}
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-list-alt"></i> Référentiel des Prestations & Grille Tarifaire</span>
+        <button class="btn btn-primary btn-sm" onclick="openCreateServiceModal()">
+          <i class="fas fa-plus"></i> Nouvel Acte / Traitement
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Désignation de la Prestation / Acte</th>
+              <th>Catégorie</th>
+              <th>Code / Réf</th>
+              <th>Tarif Conventionné</th>
+              <th>Durée Estimée</th>
+              <th>Statut</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredServices.length > 0 ? filteredServices.map(s => {
+              let badgeColor = '#3498db';
+              if (s.category === 'TRAITEMENT') badgeColor = '#9b59b6';
+              else if (s.category === 'SOIN') badgeColor = '#27ae60';
+              else if (s.category === 'ANALYSE') badgeColor = '#e67e22';
+              else if (s.category === 'CHIRURGIE') badgeColor = '#e74c3c';
+
+              return `
+                <tr style="opacity: ${s.is_active ? 1 : 0.6}">
+                  <td>
+                    <strong style="color:var(--text-primary); font-size:0.95rem;">${s.name}</strong>
+                    ${s.description ? `<div style="font-size:0.75rem; color:var(--text-muted);">${s.description}</div>` : ''}
+                  </td>
+                  <td>
+                    <span class="badge" style="background:${badgeColor}; color:#fff; font-size:0.75rem; padding:4px 8px; border-radius:4px; font-weight:600;">
+                      ${s.category || 'CONSULTATION'}
+                    </span>
+                  </td>
+                  <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${s.code}</code></td>
+                  <td>
+                    <strong style="color:var(--text-primary); font-size:1rem;">${parseFloat(s.price).toLocaleString()} FCFA</strong>
+                  </td>
+                  <td><span style="font-size:0.85rem; color:var(--text-muted);"><i class="far fa-clock"></i> ${s.duration_minutes || 30} min</span></td>
+                  <td>
+                    <span class="badge ${s.is_active ? 'badge-success' : 'badge-danger'}" style="background-color:${s.is_active ? 'var(--success)' : 'var(--danger)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">
+                      ${s.is_active ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="openEditServiceModal('${s.id}')" style="padding:4px 8px; margin-right:4px;" title="Modifier">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleServiceStatus('${s.id}', ${s.is_active})" style="padding:4px 8px; margin-right:4px;" title="${s.is_active ? 'Désactiver' : 'Activer'}">
+                      <i class="fas ${s.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteServiceConfirm('${s.id}', '${s.name.replace(/'/g, "\\'")}')" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);" title="Supprimer">
+                      <i class="fas fa-trash-alt"></i>
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('') : `
+              <tr>
+                <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">
+                  Aucun acte trouvé dans cette catégorie.
+                </td>
+              </tr>
+            `}
+          </tbody>
+        </table>
       </div>
     </div>
   `;
@@ -2627,7 +2793,126 @@ async function simulateWebhook(provider, ref, amount, invoiceId) {
 }
 
 // ============================================================================
-// 4a. Insurance Companies & IPM Management CRUD
+// 4a. Medical Services, Consultations & Treatments CRUD
+// ============================================================================
+function openCreateServiceModal() {
+  const modal = document.getElementById('medical-service-modal');
+  const form = document.getElementById('medical-service-form');
+  if (!modal || !form) return;
+
+  form.reset();
+  document.getElementById('service-form-id').value = '';
+  document.getElementById('medical-service-modal-title').innerText = 'Ajouter un Acte / Traitement / Consultation';
+  document.getElementById('service-category').value = 'CONSULTATION';
+  document.getElementById('service-duration').value = '30';
+  document.getElementById('service-active').checked = true;
+
+  modal.style.display = 'flex';
+}
+
+async function openEditServiceModal(id) {
+  const modal = document.getElementById('medical-service-modal');
+  if (!modal) return;
+
+  try {
+    const services = await api.request('/medical-services');
+    const s = services.find(x => x.id === id);
+    if (!s) throw new Error('Prestation introuvable');
+
+    document.getElementById('service-form-id').value = s.id;
+    document.getElementById('medical-service-modal-title').innerText = 'Modifier l\'Acte / Traitement';
+    document.getElementById('service-name').value = s.name || '';
+    document.getElementById('service-category').value = s.category || 'CONSULTATION';
+    document.getElementById('service-code').value = s.code || '';
+    document.getElementById('service-price').value = s.price || 0;
+    document.getElementById('service-duration').value = s.duration_minutes || 30;
+    document.getElementById('service-description').value = s.description || '';
+    document.getElementById('service-active').checked = s.is_active !== false;
+
+    modal.style.display = 'flex';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function closeServiceModal() {
+  const modal = document.getElementById('medical-service-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitServiceForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('service-form-id').value;
+  
+  const payload = {
+    name: document.getElementById('service-name').value,
+    category: document.getElementById('service-category').value,
+    code: document.getElementById('service-code').value,
+    price: parseFloat(document.getElementById('service-price').value) || 0,
+    duration_minutes: parseInt(document.getElementById('service-duration').value, 10) || 30,
+    description: document.getElementById('service-description').value,
+    is_active: document.getElementById('service-active').checked
+  };
+
+  try {
+    if (id) {
+      await api.request(`/medical-services/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      showToast('Prestation mise à jour avec succès !');
+    } else {
+      await api.request('/medical-services', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      showToast('Prestation créée avec succès !');
+    }
+    
+    closeServiceModal();
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function toggleServiceStatus(id, currentActive) {
+  try {
+    const services = await api.request('/medical-services');
+    const s = services.find(x => x.id === id);
+    if (!s) return;
+
+    await api.request(`/medical-services/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...s,
+        is_active: !currentActive
+      })
+    });
+
+    showToast(`Prestation ${s.name} ${!currentActive ? 'activée' : 'désactivée'} avec succès.`);
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteServiceConfirm(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer ou désactiver la prestation "${name}" ?`)) return;
+
+  try {
+    const res = await api.request(`/medical-services/${id}`, {
+      method: 'DELETE'
+    });
+    showToast(res.message || 'Prestation supprimée avec succès !');
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================================
+// 4b. Insurance Companies & IPM Management CRUD
 // ============================================================================
 function openCreateInsuranceModal() {
   const modal = document.getElementById('insurance-modal');
@@ -4637,6 +4922,70 @@ function renderAppLayout() {
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
             <button class="btn btn-secondary" type="button" onclick="closeInsuranceModal()">Annuler</button>
             <button class="btn btn-primary" type="submit" id="insurance-submit-btn">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 8. Medical Service, Consultation & Treatment Create/Edit Modal -->
+    <div class="modal-overlay" id="medical-service-modal" style="display:none; justify-content:center; align-items:center; z-index:1150;">
+      <div class="modal-container" style="width:580px; max-width:95%; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="medical-service-modal-title">Ajouter un Acte / Traitement / Consultation</h4>
+          <button class="modal-close" onclick="closeServiceModal()">&times;</button>
+        </div>
+        <form id="medical-service-form" onsubmit="submitServiceForm(event)">
+          <input type="hidden" id="service-form-id" />
+          
+          <div class="form-group" style="margin-bottom:15px;">
+            <label class="form-label">Désignation de la Prestation / Traitement / Consultation *</label>
+            <input type="text" class="form-control" id="service-name" placeholder="ex: Perfusion sanguine, Consultation pédiatrique" required />
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Catégorie de l'acte *</label>
+              <select class="form-control" id="service-category" required>
+                <option value="CONSULTATION">🩺 Consultation Médicale</option>
+                <option value="TRAITEMENT">💉 Traitement / Perfusion</option>
+                <option value="SOIN">🩹 Soin Infirmier / Injection</option>
+                <option value="ANALYSE">🔬 Analyse / Bilan / Imagerie</option>
+                <option value="CHIRURGIE">✂️ Chirurgie / Geste technique</option>
+                <option value="AUTRE">📦 Autre Prestation</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Code / Référence Unique *</label>
+              <input type="text" class="form-control" id="service-code" placeholder="ex: PERF-SANG, CONS-GEN" required />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Tarif Conventionné (FCFA) *</label>
+              <input type="number" class="form-control" id="service-price" placeholder="ex: 10000" min="0" step="500" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Durée Estimée (minutes)</label>
+              <input type="number" class="form-control" id="service-duration" value="30" min="5" step="5" />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:15px;">
+            <label class="form-label">Description / Protocole associé (optionnel)</label>
+            <textarea class="form-control" id="service-description" rows="2" placeholder="Détails du traitement, matériel nécessaire ou protocole de soin..."></textarea>
+          </div>
+
+          <div class="form-group" style="display:flex; align-items:center; margin-bottom:15px;">
+            <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="service-active" checked style="width:18px; height:18px;" />
+              <span>Prestation active et disponible à la facturation</span>
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closeServiceModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="service-submit-btn">Enregistrer</button>
           </div>
         </form>
       </div>
