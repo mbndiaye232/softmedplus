@@ -5070,10 +5070,17 @@ async function renderHospital(container) {
         </div>
         <form onsubmit="saveAdmission(event)">
           <div class="form-group">
-            <label class="form-label">${fr ? 'Sélectionner le Patient' : 'اختر المريض'}</label>
+            <label class="form-label">${fr ? 'Sélectionner le Patient' : 'اختر المريض'} *</label>
             <select class="form-control" id="admit-patient-select" required>
               <option value="">-- ${fr ? 'Choisir un patient' : 'اختر مريضاً'} --</option>
             </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Date & Heure d\'Admission (Début)' : 'تاريخ ووقت بداية الإقامة'} *</label>
+            <input type="datetime-local" class="form-control" id="admit-date" required />
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+              <i class="fas fa-info-circle"></i> Vous pouvez modifier cette date si l'admission effective a eu lieu plus tôt.
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Notes d'admission (Motif / Diagnostic initial)</label>
@@ -5313,6 +5320,12 @@ async function openAdmitModal(bedId) {
       `).join('') : '<option value="" disabled>Aucun patient disponible (tous sont actuellement hospitalisés)</option>'}
     `;
 
+    // Pre-fill admit-date with current local ISO datetime (YYYY-MM-DDTHH:mm)
+    const now = new Date();
+    const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const dateInput = document.getElementById('admit-date');
+    if (dateInput) dateInput.value = localIso;
+
     document.getElementById('admit-modal').style.display = 'flex';
   } catch (err) {
     showToast('Erreur lors du chargement des patients : ' + err.message, 'error');
@@ -5328,6 +5341,7 @@ function closeAdmitModal() {
 async function saveAdmission(e) {
   e.preventDefault();
   const patientId = document.getElementById('admit-patient-select').value;
+  const admitted_at = document.getElementById('admit-date') ? document.getElementById('admit-date').value : null;
   const notes = document.getElementById('admit-notes').value;
 
   if (!patientId || !hospitalSelectedBedId) return;
@@ -5338,6 +5352,7 @@ async function saveAdmission(e) {
       body: JSON.stringify({
         patient_id: patientId,
         bed_id: hospitalSelectedBedId,
+        admitted_at,
         notes
       })
     });

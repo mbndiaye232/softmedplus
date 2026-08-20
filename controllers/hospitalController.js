@@ -170,7 +170,7 @@ const getHospitalizations = async (req, res) => {
 };
 
 const admitPatient = async (req, res) => {
-  const { patient_id, bed_id, notes } = req.body;
+  const { patient_id, bed_id, notes, admitted_at } = req.body;
   const tenantId = req.user.tenant_id;
 
   if (!patient_id || !bed_id) {
@@ -184,7 +184,7 @@ const admitPatient = async (req, res) => {
       [patient_id]
     );
     if (activeStay.rowCount > 0) {
-      return res.status(400).json({ error: 'Patient is already admitted in a stay' });
+      return res.status(400).json({ error: 'Le patient est déjà actuellement admis dans un séjour hospitalier' });
     }
 
     // Check if bed is available
@@ -193,20 +193,21 @@ const admitPatient = async (req, res) => {
       [bed_id]
     );
     if (bedCheck.rowCount === 0) {
-      return res.status(404).json({ error: 'Bed not found' });
+      return res.status(404).json({ error: 'Lit introuvable' });
     }
     if (bedCheck.rows[0].status !== 'AVAILABLE') {
-      return res.status(400).json({ error: 'Bed is not available' });
+      return res.status(400).json({ error: 'Ce lit n\'est pas disponible' });
     }
 
     const hospId = crypto.randomUUID();
+    const admissionDate = admitted_at ? new Date(admitted_at) : new Date();
     
     // A. Insert hospitalization stay record
     const hospRes = await req.dbClient.query(
       `INSERT INTO hospitalizations (id, tenant_id, patient_id, bed_id, admitted_at, status, notes)
-       VALUES ($1, $2, $3, $4, NOW(), 'ADMITTED', $5)
+       VALUES ($1, $2, $3, $4, $5, 'ADMITTED', $6)
        RETURNING *`,
-      [hospId, tenantId, patient_id, bed_id, notes || null]
+      [hospId, tenantId, patient_id, bed_id, admissionDate, notes || null]
     );
 
     // B. Mark bed as OCCUPIED
