@@ -5297,12 +5297,20 @@ async function openAdmitModal(bedId) {
   if (!select) return;
 
   try {
-    const patients = await api.request('/patients');
-    const availablePatients = patients.filter(p => p.status === 'Externe');
+    const [patients, stays] = await Promise.all([
+      api.request('/patients'),
+      api.request('/hospital/hospitalizations?status=ADMITTED').catch(() => [])
+    ]);
+
+    // Exclude only patients who are actively hospitalized in a bed
+    const admittedIds = new Set((stays || []).map(s => s.patient_id));
+    const availablePatients = (patients || []).filter(p => !admittedIds.has(p.id));
 
     select.innerHTML = `
       <option value="">-- Choisir un patient --</option>
-      ${availablePatients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code})</option>`).join('')}
+      ${availablePatients.length > 0 ? availablePatients.map(p => `
+        <option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code}) ${p.status ? `— [${p.status}]` : ''}</option>
+      `).join('') : '<option value="" disabled>Aucun patient disponible (tous sont actuellement hospitalisés)</option>'}
     `;
 
     document.getElementById('admit-modal').style.display = 'flex';
