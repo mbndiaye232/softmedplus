@@ -20,6 +20,7 @@ const tenantCtrl = require('./controllers/tenantController');
 const hospitalCtrl = require('./controllers/hospitalController');
 const patientStatusCtrl = require('./controllers/patientStatusController');
 const medicalHistoryCtrl = require('./controllers/medicalHistoryController');
+const practitionerCtrl = require('./controllers/practitionerController');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -112,7 +113,19 @@ app.post('/api/medical-services', apptCtrl.createMedicalService);
 app.get('/api/medical-services', apptCtrl.getMedicalServices);
 app.put('/api/medical-services/:id', apptCtrl.updateMedicalService);
 app.delete('/api/medical-services/:id', apptCtrl.deleteMedicalService);
-app.get('/api/practitioners', apptCtrl.getPractitioners);
+
+// 3b. Medical Specialties CRUD
+app.get('/api/specialties', practitionerCtrl.getSpecialties);
+app.post('/api/specialties', practitionerCtrl.createSpecialty);
+app.put('/api/specialties/:id', practitionerCtrl.updateSpecialty);
+app.delete('/api/specialties/:id', practitionerCtrl.deleteSpecialty);
+
+// 3c. Practitioners & Doctors CRUD (Grades & Multi-Specialties)
+app.get('/api/practitioners', practitionerCtrl.getPractitioners);
+app.post('/api/practitioners', practitionerCtrl.createPractitioner);
+app.put('/api/practitioners/:id', practitionerCtrl.updatePractitioner);
+app.delete('/api/practitioners/:id', practitionerCtrl.deletePractitioner);
+
 app.post('/api/appointments', apptCtrl.createAppointment);
 app.get('/api/appointments', apptCtrl.getAppointments);
 

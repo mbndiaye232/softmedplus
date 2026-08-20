@@ -794,98 +794,197 @@ async function simulateRecovery(invoiceId, phone) {
 }
 
 // ============================================================================
-// 2. Agenda & scheduling UI
+// 2. Agenda & scheduling UI (With Practitioners & Specialties CRUD)
 // ============================================================================
 let activePractitionerId = null;
+let activeAgendaSubTab = 'calendar'; // 'calendar', 'practitioners', 'specialties'
+let currentAgendaSpecialties = [];
+let currentAgendaPractitioners = [];
 
 async function renderAgenda(container) {
-  // Fetch services, patients, and real database practitioners
-  const [patients, services, dbPractitioners] = await Promise.all([
+  const fr = state.currentLang !== 'ar';
+
+  // Fetch all related entities in parallel
+  const [patients, services, dbPractitioners, dbSpecialties, rawAppointments] = await Promise.all([
     api.request('/patients').catch(() => []),
     api.request('/medical-services').catch(() => []),
-    api.request('/practitioners').catch(() => [])
+    api.request('/practitioners').catch(() => []),
+    api.request('/specialties').catch(() => []),
+    api.request('/appointments').catch(() => [])
   ]);
-  
-  const practitioners = dbPractitioners && dbPractitioners.length > 0
-    ? dbPractitioners.map(p => ({
-        id: p.id,
-        name: `${p.title || 'Dr.'} ${p.first_name} ${p.last_name}`,
-        specialty: p.specialty_name || 'Médecine',
-        color: p.color_code || '#4A90E2'
-      }))
-    : [];
 
-  if (!activePractitionerId && practitioners.length > 0) {
-    activePractitionerId = practitioners[0].id;
+  currentAgendaSpecialties = dbSpecialties || [];
+  currentAgendaPractitioners = dbPractitioners || [];
+
+  if (!activePractitionerId && dbPractitioners.length > 0) {
+    activePractitionerId = dbPractitioners[0].id;
   }
 
-  // Fetch appointments
-  const apptUrl = activePractitionerId 
-    ? `/appointments?practitioner_id=${activePractitionerId}`
-    : '/appointments';
-  const appointments = await api.request(apptUrl).catch(() => []);
-
   container.innerHTML = `
+    <!-- Top Subtabs Bar -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn ${activeAgendaSubTab === 'calendar' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('calendar')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-calendar-alt"></i> ${fr ? 'Calendrier & Rendez-vous' : 'المواعيد والجدول'}
+        </button>
+        <button class="btn ${activeAgendaSubTab === 'practitioners' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('practitioners')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-user-md"></i> ${fr ? `Praticiens & Médecins (${dbPractitioners.length})` : `الأطباء (${dbPractitioners.length})`}
+        </button>
+        <button class="btn ${activeAgendaSubTab === 'specialties' ? 'btn-primary' : 'btn-secondary'}" onclick="switchAgendaSubTab('specialties')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-stethoscope"></i> ${fr ? `Spécialités Médicales (${dbSpecialties.length})` : `التخصصات الطبية (${dbSpecialties.length})`}
+        </button>
+      </div>
+
+      ${activeAgendaSubTab === 'practitioners' ? `
+        <button class="btn btn-primary" onclick="openCreatePractitionerModal()" style="font-size:0.85rem;">
+          <i class="fas fa-user-plus"></i> ${fr ? 'Nouveau Praticien' : 'طبيب جديد'}
+        </button>
+      ` : ''}
+
+      ${activeAgendaSubTab === 'specialties' ? `
+        <button class="btn btn-primary" onclick="openCreateSpecialtyModal()" style="font-size:0.85rem;">
+          <i class="fas fa-plus-circle"></i> ${fr ? 'Nouvelle Spécialité' : 'تخصص جديد'}
+        </button>
+      ` : ''}
+    </div>
+
+    <div id="agenda-subtab-content">
+      ${activeAgendaSubTab === 'calendar' 
+        ? renderAgendaCalendarContent(patients, services, dbPractitioners, rawAppointments, fr)
+        : activeAgendaSubTab === 'practitioners'
+          ? renderAgendaPractitionersContent(dbPractitioners, dbSpecialties, fr)
+          : renderAgendaSpecialtiesContent(dbSpecialties, fr)
+      }
+    </div>
+  `;
+}
+
+function switchAgendaSubTab(subtab) {
+  activeAgendaSubTab = subtab;
+  navigate('agenda');
+}
+
+// ----------------------------------------------------------------------------
+// A. Calendar & Appointment Booking Subtab
+// ----------------------------------------------------------------------------
+function renderAgendaCalendarContent(patients, services, practitioners, appointments, fr) {
+  const activeDoc = practitioners.find(p => p.id === activePractitionerId) || practitioners[0];
+  const docColor = activeDoc ? (activeDoc.color_code || '#4A90E2') : '#4A90E2';
+
+  const filteredAppts = activePractitionerId 
+    ? appointments.filter(a => a.practitioner_id === activePractitionerId)
+    : appointments;
+
+  return `
     <div class="agenda-grid">
       <div>
         <div class="practitioner-list">
-          <h4 style="margin-bottom:15px;">Praticiens</h4>
-          ${practitioners.map(prac => `
-            <div class="practitioner-item ${activePractitionerId === prac.id ? 'active' : ''}" onclick="selectPractitioner('${prac.id}')">
-              <span class="color-dot" style="background-color: ${prac.color}"></span>
-              <div>
-                <strong>${prac.name}</strong>
-                <div style="font-size:0.75rem; color:var(--text-muted);">${prac.specialty}</div>
-              </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h4 style="margin:0; font-size:1.05rem; color:var(--text-primary);"><i class="fas fa-user-md" style="color:var(--primary);"></i> Praticiens</h4>
+            <button class="btn btn-secondary btn-sm" onclick="switchAgendaSubTab('practitioners')" title="Gérer les praticiens" style="padding:2px 8px; font-size:0.75rem;">
+              <i class="fas fa-cog"></i>
+            </button>
+          </div>
+          ${practitioners.length === 0 ? `
+            <div style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:15px;">
+              Aucun praticien enregistré.<br/>
+              <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="openCreatePractitionerModal()"><i class="fas fa-plus"></i> Ajouter</button>
             </div>
-          `).join('')}
+          ` : practitioners.map(prac => {
+            const isSelected = activePractitionerId === prac.id;
+            const docSpecialties = Array.isArray(prac.specialties) ? prac.specialties : [];
+            const specialtyLabels = prac.is_general_practitioner 
+              ? '<span class="badge" style="background:#10b981; color:#fff; font-size:0.7rem; padding:1px 6px;">Médecine Générale</span>'
+              : (docSpecialties.length > 0 
+                  ? docSpecialties.map(s => `<span class="badge" style="background:${s.color_code || '#4a90e2'}; color:#fff; font-size:0.68rem; padding:1px 5px; margin-right:3px;">${s.name}</span>`).join('')
+                  : `<span class="badge" style="background:#64748b; color:#fff; font-size:0.68rem; padding:1px 5px;">${prac.specialty_name || 'Généraliste'}</span>`
+                );
+
+            return `
+              <div class="practitioner-item ${isSelected ? 'active' : ''}" onclick="selectPractitioner('${prac.id}')" style="border-left: 4px solid ${prac.color_code || '#4a90e2'}; margin-bottom:10px;">
+                <span class="color-dot" style="background-color: ${prac.color_code || '#4A90E2'}"></span>
+                <div style="flex:1; min-width:0;">
+                  <div style="font-weight:600; font-size:0.92rem; color:var(--text-primary);">
+                    ${prac.title || 'Dr.'} ${prac.first_name} ${prac.last_name}
+                  </div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:3px;">
+                    ${prac.grade || 'Docteur'} • <span class="badge" style="background:${prac.status === 'Interne' ? 'var(--primary)' : '#64748b'}; color:#fff; font-size:0.65rem; padding:0 4px;">${prac.status || 'Interne'}</span>
+                  </div>
+                  <div style="display:flex; flex-wrap:wrap; gap:3px;">
+                    ${specialtyLabels}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
         </div>
         
         <div class="card" style="margin-top:20px;">
-          <div class="card-title">${t('bookAppt')}</div>
+          <div class="card-title" style="font-size:1.05rem;"><i class="fas fa-calendar-plus"></i> ${t('bookAppt')}</div>
           <form id="appt-booking-form" onsubmit="bookAppointment(event)">
             <div class="form-group">
-              <label class="form-label">${t('patient')}</label>
+              <label class="form-label">${t('patient')} *</label>
               <select class="form-control" id="book-patient-id" required>
                 <option value="">-- Sélectionner Patient --</option>
-                ${patients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code})</option>`).join('')}
+                ${patients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code}) ${p.insurance_name ? `— [${p.insurance_name}]` : ''}</option>`).join('')}
               </select>
             </div>
+
             <div class="form-group">
-              <label class="form-label">${t('service')}</label>
+              <label class="form-label">Praticien / Médecin Assigné *</label>
+              <select class="form-control" id="book-practitioner-id" required onchange="selectPractitioner(this.value)">
+                ${practitioners.map(prac => `
+                  <option value="${prac.id}" ${activePractitionerId === prac.id ? 'selected' : ''}>
+                    ${prac.title || 'Dr.'} ${prac.first_name} ${prac.last_name} (${prac.grade || 'Docteur'}) ${prac.is_general_practitioner ? '[Généraliste]' : (prac.specialty_names ? `[${prac.specialty_names.filter(Boolean).join(', ')}]` : '')}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">${t('service')} *</label>
               <select class="form-control" id="book-service-id" required>
-                <option value="">-- Sélectionner Acte --</option>
-                ${services.map(s => `<option value="${s.id}">${s.name} (${s.price} FCFA)</option>`).join('')}
+                <option value="">-- Sélectionner Acte ou Consultation --</option>
+                ${services.map(s => `<option value="${s.id}">[${s.category || 'ACTE'}] ${s.name} — ${parseFloat(s.price).toLocaleString()} FCFA</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">${t('dateTime')}</label>
+              <label class="form-label">${t('dateTime')} *</label>
               <input type="datetime-local" class="form-control" id="book-start-time" required />
             </div>
             <div class="form-group">
               <label class="form-label">${t('channel')}</label>
               <select class="form-control" id="book-channel">
-                <option value="DESK">Guichet</option>
-                <option value="WEB_PWA">PWA Web</option>
+                <option value="DESK">Guichet / Accueil Clinique</option>
+                <option value="WEB_PWA">PWA Web SoftMed</option>
                 <option value="VOICE_AGENT">Agent Vocal AI</option>
                 <option value="WHATSAPP">WhatsApp</option>
               </select>
             </div>
-            <button class="btn btn-primary" style="width:100%;"><i class="fas fa-plus"></i> ${t('bookBtn')}</button>
+            <button class="btn btn-primary" style="width:100%;"><i class="fas fa-calendar-check"></i> ${t('bookBtn')}</button>
           </form>
         </div>
       </div>
       
       <div class="calendar-view">
-        <div class="calendar-header">
-          <h3>${t('schedule')}</h3>
+        <div class="calendar-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:18px;">
+          <div>
+            <h3 style="margin:0; color:var(--text-primary); font-size:1.2rem;"><i class="fas fa-clock" style="color:var(--primary);"></i> ${t('schedule')}</h3>
+            ${activeDoc ? `
+              <div style="font-size:0.85rem; color:var(--text-muted); margin-top:4px;">
+                Consultations de <strong>${activeDoc.title || 'Dr.'} ${activeDoc.first_name} ${activeDoc.last_name}</strong> (${activeDoc.grade || 'Docteur'})
+              </div>
+            ` : ''}
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-muted); background:var(--bg-surface); padding:6px 12px; border-radius:8px; border:1px solid var(--border-color);">
+            <i class="fas fa-calendar-day"></i> Aujourd'hui : <strong>${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
+          </div>
         </div>
         
         <div class="calendar-slots">
-          ${[8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(hour => {
+          ${[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map(hour => {
             const hourStr = `${hour.toString().padStart(2, '0')}:00`;
-            // Find appointments scheduled during this hour
-            const appt = appointments.find(a => {
+            const appt = filteredAppts.find(a => {
               const date = new Date(a.start_time);
               return date.getHours() === hour;
             });
@@ -894,14 +993,17 @@ async function renderAgenda(container) {
               <div class="slot-hour">${hourStr}</div>
               <div class="slot-content">
                 ${appt ? `
-                  <div class="appt-pill" style="border-color:${practitioners[0].color};">
+                  <div class="appt-pill" style="border-color:${docColor};">
                     <div class="appt-pill-header">
-                      <span>${appt.patient_first} ${appt.patient_last}</span>
+                      <span><strong>${appt.patient_first} ${appt.patient_last}</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(${appt.patient_code})</span></span>
                       <span style="font-size:0.75rem;" class="status-badge ${appt.status.toLowerCase()}">${appt.status}</span>
                     </div>
-                    <div style="font-size:0.75rem; color:var(--text-muted);">${appt.service_name}</div>
+                    <div style="font-size:0.8rem; color:var(--text-primary); margin-top:2px;">
+                      <i class="fas fa-stethoscope" style="color:var(--primary); font-size:0.75rem;"></i> ${appt.service_name}
+                      <span style="margin-left:8px; color:var(--text-muted); font-size:0.75rem;">(${parseFloat(appt.price).toLocaleString()} FCFA)</span>
+                    </div>
                   </div>
-                ` : '<div style="color:rgba(255,255,255,0.03);">Aucun rendez-vous</div>'}
+                ` : '<div style="color:var(--text-muted); font-size:0.8rem; opacity:0.4;">Créneau libre</div>'}
               </div>
             `;
           }).join('')}
@@ -913,29 +1015,485 @@ async function renderAgenda(container) {
 
 function selectPractitioner(id) {
   activePractitionerId = id;
+  const pracSelect = document.getElementById('book-practitioner-id');
+  if (pracSelect) pracSelect.value = id;
+  renderAgendaCalendarContent(state.patients || [], state.medicalServices || [], currentAgendaPractitioners, [], true);
   navigate('agenda');
+}
+
+// ----------------------------------------------------------------------------
+// B. Practitioners & Doctors Management Subtab (Grades & Multi-Specialties)
+// ----------------------------------------------------------------------------
+function renderAgendaPractitionersContent(practitioners, specialties, fr) {
+  const total = practitioners.length;
+  const gpCount = practitioners.filter(p => p.is_general_practitioner).length;
+  const specialistsCount = practitioners.filter(p => !p.is_general_practitioner && Array.isArray(p.specialties) && p.specialties.length > 0).length;
+  const activeCount = practitioners.filter(p => p.is_active !== false).length;
+
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Total Corps Médical</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:5px;">${total}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Médecins Spécialistes</div>
+        <div style="font-size:1.6rem; font-weight:800; color:#8b5cf6; margin-top:5px;">${specialistsCount}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Médecins Généralistes</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--success); margin-top:5px;">${gpCount}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Praticiens Actifs</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--accent); margin-top:5px;">${activeCount}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-user-md"></i> Registre des Médecins & Praticiens</span>
+        <button class="btn btn-primary btn-sm" onclick="openCreatePractitionerModal()">
+          <i class="fas fa-plus"></i> Nouveau Praticien
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Praticien</th>
+              <th>Grade & Titre</th>
+              <th>Spécialités</th>
+              <th>Statut</th>
+              <th>Contact & N° Ordre</th>
+              <th>Tarif Consultation</th>
+              <th>Disponibilité</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${practitioners.length === 0 ? `
+              <tr>
+                <td colspan="8" style="text-align:center; padding:35px; color:var(--text-muted);">
+                  Aucun praticien enregistré pour cette clinique.
+                </td>
+              </tr>
+            ` : practitioners.map(p => {
+              const docSpecialties = Array.isArray(p.specialties) ? p.specialties : [];
+              const specialtyBadges = p.is_general_practitioner
+                ? '<span class="badge" style="background:#10b981; color:#fff; font-size:0.75rem; padding:3px 8px; border-radius:4px;"><i class="fas fa-stethoscope"></i> Médecin Généraliste</span>'
+                : (docSpecialties.length > 0
+                    ? docSpecialties.map(s => `<span class="badge" style="background:${s.color_code || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:3px 8px; border-radius:4px; margin-right:4px; margin-bottom:3px; display:inline-block;">${s.name}</span>`).join('')
+                    : `<span class="badge" style="background:#64748b; color:#fff; font-size:0.75rem; padding:3px 8px;">${p.specialty_name || 'Médecine Générale'}</span>`
+                  );
+
+              let gradeBadgeColor = '#3b82f6';
+              if ((p.grade || '').toLowerCase().includes('professeur')) gradeBadgeColor = '#8b5cf6';
+              else if ((p.grade || '').toLowerCase().includes('assistant')) gradeBadgeColor = '#06b6d4';
+              else if ((p.grade || '').toLowerCase().includes('interne')) gradeBadgeColor = '#f59e0b';
+
+              return `
+                <tr style="opacity: ${p.is_active ? 1 : 0.6}">
+                  <td>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <div style="width:38px; height:38px; border-radius:50%; background:${p.color_code || '#4a90e2'}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; border:2px solid #fff; box-shadow:0 2px 5px rgba(0,0,0,0.1);">
+                        ${(p.first_name || 'D')[0]}${(p.last_name || 'R')[0]}
+                      </div>
+                      <div>
+                        <strong style="color:var(--text-primary); font-size:0.95rem;">${p.title || 'Dr.'} ${p.first_name} ${p.last_name}</strong>
+                        ${p.license_number ? `<div style="font-size:0.75rem; color:var(--text-muted);">Ordre : <code>${p.license_number}</code></div>` : ''}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge" style="background:${gradeBadgeColor}; color:#fff; font-size:0.75rem; padding:4px 8px; border-radius:4px; font-weight:600;">
+                      ${p.grade || 'Docteur en Médecine'}
+                    </span>
+                  </td>
+                  <td>
+                    <div style="max-width:280px;">${specialtyBadges}</div>
+                  </td>
+                  <td>
+                    <span class="status-badge ${p.status === 'Interne' ? 'interne' : 'externe'}">
+                      ${p.status || 'Interne'}
+                    </span>
+                  </td>
+                  <td>
+                    ${p.phone_number ? `<div style="font-size:0.85rem;"><i class="fas fa-phone" style="color:var(--primary); width:14px;"></i> ${p.phone_number}</div>` : ''}
+                    ${p.email ? `<div style="font-size:0.8rem; color:var(--text-muted);"><i class="fas fa-envelope" style="width:14px;"></i> ${p.email}</div>` : ''}
+                    ${!p.phone_number && !p.email ? '<span style="color:var(--text-muted); font-size:0.85rem;">-</span>' : ''}
+                  </td>
+                  <td>
+                    <strong style="color:var(--text-primary); font-size:0.95rem;">${parseFloat(p.consultation_fee || 15000).toLocaleString()} FCFA</strong>
+                  </td>
+                  <td>
+                    <span class="badge ${p.is_active ? 'badge-success' : 'badge-danger'}" style="background-color:${p.is_active ? 'var(--success)' : 'var(--danger)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">
+                      ${p.is_active ? 'Actif' : 'Inactif'}
+                    </span>
+                  </td>
+                  <td style="text-align:right;">
+                    <button class="btn btn-secondary btn-sm" onclick="openEditPractitionerModal('${p.id}')" style="padding:4px 8px; margin-right:4px;" title="Modifier">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="togglePractitionerStatus('${p.id}', ${p.is_active})" style="padding:4px 8px; margin-right:4px;" title="${p.is_active ? 'Désactiver' : 'Activer'}">
+                      <i class="fas ${p.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deletePractitionerConfirm('${p.id}', '${(p.first_name + ' ' + p.last_name).replace(/'/g, "\\'")}')" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);" title="Supprimer">
+                      <i class="fas fa-trash-alt"></i>
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// C. Medical Specialties Management Subtab (CRUD)
+// ----------------------------------------------------------------------------
+function renderAgendaSpecialtiesContent(specialties, fr) {
+  const total = specialties.length;
+  const activeCount = specialties.filter(s => s.is_active !== false).length;
+
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Total Spécialités Médicales</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:5px;">${total}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Spécialités Actives</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--success); margin-top:5px;">${activeCount}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-stethoscope"></i> Référentiel des Spécialités Médicales</span>
+        <button class="btn btn-primary btn-sm" onclick="openCreateSpecialtyModal()">
+          <i class="fas fa-plus"></i> Nouvelle Spécialité
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Spécialité</th>
+              <th>Code / Sigle</th>
+              <th>Description / Champ d'intervention</th>
+              <th>Couleur d'identification</th>
+              <th>Praticiens Rattachés</th>
+              <th>Statut</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${specialties.length === 0 ? `
+              <tr>
+                <td colspan="7" style="text-align:center; padding:35px; color:var(--text-muted);">
+                  Aucune spécialité médicale enregistrée.
+                </td>
+              </tr>
+            ` : specialties.map(s => `
+              <tr style="opacity: ${s.is_active ? 1 : 0.6}">
+                <td>
+                  <strong style="color:var(--text-primary); font-size:0.95rem;">${s.name}</strong>
+                </td>
+                <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${s.code}</code></td>
+                <td>
+                  <div style="font-size:0.85rem; color:var(--text-muted); max-width:320px;">${s.description || '-'}</div>
+                </td>
+                <td>
+                  <span class="badge" style="background:${s.color_code || '#4a90e2'}; color:#fff; font-size:0.75rem; padding:4px 10px; border-radius:12px; font-weight:600;">
+                    ${s.color_code || '#4a90e2'}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge" style="background:var(--bg-surface); color:var(--text-primary); border:1px solid var(--border-color); font-size:0.85rem; font-weight:700;">
+                    <i class="fas fa-user-md" style="color:var(--primary);"></i> ${s.practitioners_count || 0}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge ${s.is_active ? 'badge-success' : 'badge-danger'}" style="background-color:${s.is_active ? 'var(--success)' : 'var(--danger)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">
+                    ${s.is_active ? 'Actif' : 'Inactif'}
+                  </span>
+                </td>
+                <td style="text-align:right;">
+                  <button class="btn btn-secondary btn-sm" onclick="openEditSpecialtyModal('${s.id}')" style="padding:4px 8px; margin-right:4px;" title="Modifier">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteSpecialtyConfirm('${s.id}', '${s.name.replace(/'/g, "\\'")}')" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);" title="Supprimer">
+                    <i class="fas fa-trash-alt"></i>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ----------------------------------------------------------------------------
+// D. Modal Handlers for Specialties
+// ----------------------------------------------------------------------------
+function openCreateSpecialtyModal() {
+  const modal = document.getElementById('specialty-modal');
+  const form = document.getElementById('specialty-form');
+  if (!modal || !form) return;
+
+  form.reset();
+  document.getElementById('specialty-form-id').value = '';
+  document.getElementById('specialty-modal-title').innerText = 'Ajouter une Spécialité Médicale';
+  document.getElementById('specialty-color').value = '#4a90e2';
+  document.getElementById('specialty-active').checked = true;
+  modal.style.display = 'flex';
+}
+
+function openEditSpecialtyModal(id) {
+  const spec = currentAgendaSpecialties.find(s => s.id === id);
+  if (!spec) return;
+
+  document.getElementById('specialty-form-id').value = spec.id;
+  document.getElementById('specialty-code').value = spec.code || '';
+  document.getElementById('specialty-name').value = spec.name || '';
+  document.getElementById('specialty-description').value = spec.description || '';
+  document.getElementById('specialty-color').value = spec.color_code || '#4a90e2';
+  document.getElementById('specialty-active').checked = spec.is_active !== false;
+
+  document.getElementById('specialty-modal-title').innerText = `Modifier : ${spec.name}`;
+  document.getElementById('specialty-modal').style.display = 'flex';
+}
+
+function closeSpecialtyModal() {
+  const modal = document.getElementById('specialty-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitSpecialtyForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('specialty-form-id').value;
+  const code = document.getElementById('specialty-code').value.trim();
+  const name = document.getElementById('specialty-name').value.trim();
+  const description = document.getElementById('specialty-description').value.trim();
+  const color_code = document.getElementById('specialty-color').value;
+  const is_active = document.getElementById('specialty-active').checked;
+
+  const payload = { code, name, description, color_code, is_active };
+
+  try {
+    if (id) {
+      await api.request(`/specialties/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      showToast('Spécialité mise à jour avec succès!');
+    } else {
+      await api.request('/specialties', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      showToast('Nouvelle spécialité créée avec succès!');
+    }
+    closeSpecialtyModal();
+    navigate('agenda');
+  } catch (err) {}
+}
+
+async function deleteSpecialtyConfirm(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer la spécialité "${name}" ?`)) return;
+
+  try {
+    const res = await api.request(`/specialties/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Spécialité supprimée !');
+    navigate('agenda');
+  } catch (err) {}
+}
+
+// ----------------------------------------------------------------------------
+// E. Modal Handlers for Practitioners
+// ----------------------------------------------------------------------------
+function openCreatePractitionerModal() {
+  const modal = document.getElementById('practitioner-modal');
+  const form = document.getElementById('practitioner-form');
+  if (!modal || !form) return;
+
+  form.reset();
+  document.getElementById('practitioner-form-id').value = '';
+  document.getElementById('practitioner-modal-title').innerText = 'Ajouter un Nouveau Praticien / Médecin';
+  document.getElementById('practitioner-color').value = '#0d3b66';
+  document.getElementById('practitioner-fee').value = '15000';
+  document.getElementById('practitioner-is-gp').checked = false;
+  document.getElementById('practitioner-active').checked = true;
+
+  renderSpecialtiesCheckboxes([]);
+  toggleGPFields();
+
+  modal.style.display = 'flex';
+}
+
+function openEditPractitionerModal(id) {
+  const prac = currentAgendaPractitioners.find(p => p.id === id);
+  if (!prac) return;
+
+  document.getElementById('practitioner-form-id').value = prac.id;
+  document.getElementById('practitioner-title').value = prac.title || 'Dr.';
+  document.getElementById('practitioner-first').value = prac.first_name || '';
+  document.getElementById('practitioner-last').value = prac.last_name || '';
+  document.getElementById('practitioner-grade').value = prac.grade || 'Docteur en Médecine';
+  document.getElementById('practitioner-phone').value = prac.phone_number || '';
+  document.getElementById('practitioner-email').value = prac.email || '';
+  document.getElementById('practitioner-license').value = prac.license_number || '';
+  document.getElementById('practitioner-status').value = prac.status || 'Interne';
+  document.getElementById('practitioner-color').value = prac.color_code || '#0d3b66';
+  document.getElementById('practitioner-fee').value = prac.consultation_fee || 15000;
+  document.getElementById('practitioner-is-gp').checked = Boolean(prac.is_general_practitioner);
+  document.getElementById('practitioner-active').checked = prac.is_active !== false;
+
+  const currentSpecIds = Array.isArray(prac.specialty_ids) ? prac.specialty_ids.filter(Boolean) : [];
+  renderSpecialtiesCheckboxes(currentSpecIds);
+  toggleGPFields();
+
+  document.getElementById('practitioner-modal-title').innerText = `Modifier : ${prac.title || 'Dr.'} ${prac.first_name} ${prac.last_name}`;
+  document.getElementById('practitioner-modal').style.display = 'flex';
+}
+
+function closePractitionerModal() {
+  const modal = document.getElementById('practitioner-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function renderSpecialtiesCheckboxes(selectedIds = []) {
+  const container = document.getElementById('practitioner-specialties-container');
+  if (!container) return;
+
+  const selSet = new Set(selectedIds);
+
+  container.innerHTML = (currentAgendaSpecialties || []).filter(s => s.is_active !== false).map(s => `
+    <label style="display:flex; align-items:center; gap:8px; background:var(--bg-surface); padding:6px 12px; border-radius:8px; border:1px solid var(--border-color); cursor:pointer; font-size:0.85rem;">
+      <input type="checkbox" name="practitioner_specialties" value="${s.id}" ${selSet.has(s.id) ? 'checked' : ''} style="width:16px; height:16px;" />
+      <span class="color-dot" style="background:${s.color_code || '#4a90e2'}; width:10px; height:10px; border-radius:50%;"></span>
+      <span>${s.name}</span>
+    </label>
+  `).join('');
+}
+
+function toggleGPFields() {
+  const isGP = document.getElementById('practitioner-is-gp').checked;
+  const specBlock = document.getElementById('practitioner-specialties-block');
+  if (specBlock) {
+    if (isGP) {
+      specBlock.style.opacity = '0.5';
+    } else {
+      specBlock.style.opacity = '1';
+    }
+  }
+}
+
+async function submitPractitionerForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('practitioner-form-id').value;
+  const title = document.getElementById('practitioner-title').value;
+  const first_name = document.getElementById('practitioner-first').value.trim();
+  const last_name = document.getElementById('practitioner-last').value.trim();
+  const grade = document.getElementById('practitioner-grade').value.trim();
+  const is_general_practitioner = document.getElementById('practitioner-is-gp').checked;
+  const phone_number = document.getElementById('practitioner-phone').value.trim();
+  const email = document.getElementById('practitioner-email').value.trim();
+  const license_number = document.getElementById('practitioner-license').value.trim();
+  const status = document.getElementById('practitioner-status').value;
+  const color_code = document.getElementById('practitioner-color').value;
+  const consultation_fee = parseFloat(document.getElementById('practitioner-fee').value) || 15000;
+  const is_active = document.getElementById('practitioner-active').checked;
+
+  const checkedBoxes = document.querySelectorAll('input[name="practitioner_specialties"]:checked');
+  const specialty_ids = Array.from(checkedBoxes).map(cb => cb.value);
+
+  if (!is_general_practitioner && specialty_ids.length === 0) {
+    showToast('Veuillez cocher au moins une spécialité médicale ou cocher "Médecin Généraliste"', 'warning');
+    return;
+  }
+
+  const payload = {
+    title,
+    first_name,
+    last_name,
+    grade,
+    is_general_practitioner,
+    specialty_ids,
+    phone_number,
+    email,
+    license_number,
+    status,
+    color_code,
+    consultation_fee,
+    is_active
+  };
+
+  try {
+    if (id) {
+      await api.request(`/practitioners/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      showToast('Praticien mis à jour avec succès!');
+    } else {
+      await api.request('/practitioners', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      showToast('Nouveau praticien créé avec succès!');
+    }
+    closePractitionerModal();
+    navigate('agenda');
+  } catch (err) {}
+}
+
+async function togglePractitionerStatus(id, currentActive) {
+  try {
+    const prac = currentAgendaPractitioners.find(p => p.id === id);
+    if (!prac) return;
+    await api.request(`/practitioners/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...prac, is_active: !currentActive })
+    });
+    showToast(`Praticien ${!currentActive ? 'activé' : 'désactivé'} !`);
+    navigate('agenda');
+  } catch (err) {}
+}
+
+async function deletePractitionerConfirm(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer le praticien "${name}" ?`)) return;
+
+  try {
+    const res = await api.request(`/practitioners/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Praticien supprimé !');
+    navigate('agenda');
+  } catch (err) {}
 }
 
 async function bookAppointment(e) {
   e.preventDefault();
   const patient_id = document.getElementById('book-patient-id').value;
+  const practitioner_id = document.getElementById('book-practitioner-id').value || activePractitionerId;
   const medical_service_id = document.getElementById('book-service-id').value;
   const start_time = document.getElementById('book-start-time').value;
   const booking_channel = document.getElementById('book-channel').value;
   
+  if (!practitioner_id) {
+    showToast('Veuillez sélectionner un praticien pour ce rendez-vous', 'warning');
+    return;
+  }
+
   try {
-    const serviceRes = await api.request('/medical-services').catch(() => []);
-    const targetedService = serviceRes.find(s => s.id === medical_service_id);
-    let practitioner_id = targetedService ? targetedService.practitioner_id : null;
-
-    if (!practitioner_id) {
-      const pracList = await api.request('/practitioners').catch(() => []);
-      if (pracList.length > 0) {
-        practitioner_id = pracList[0].id;
-      }
-    }
-
-    const result = await api.request('/appointments', {
+    await api.request('/appointments', {
       method: 'POST',
       body: JSON.stringify({
         practitioner_id,
@@ -948,9 +1506,7 @@ async function bookAppointment(e) {
 
     showToast('Rendez-vous planifié avec succès!');
     navigate('agenda');
-  } catch (err) {
-    // Overlapping conflicts are handles by 409
-  }
+  } catch (err) {}
 }
 
 // ============================================================================
@@ -5009,6 +5565,171 @@ function renderAppLayout() {
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
             <button class="btn btn-secondary" type="button" onclick="closeServiceModal()">Annuler</button>
             <button class="btn btn-primary" type="submit" id="service-submit-btn">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 9. Medical Specialty Create/Edit Modal -->
+    <div class="modal-overlay" id="specialty-modal" style="display:none; justify-content:center; align-items:center; z-index:1160;">
+      <div class="modal-container" style="width:520px; max-width:95%; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="specialty-modal-title">Ajouter une Spécialité Médicale</h4>
+          <button class="modal-close" onclick="closeSpecialtyModal()">&times;</button>
+        </div>
+        <form id="specialty-form" onsubmit="submitSpecialtyForm(event)">
+          <input type="hidden" id="specialty-form-id" />
+          
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Nom de la Spécialité *</label>
+              <input type="text" class="form-control" id="specialty-name" placeholder="ex: Cardiologie, Pédiatrie" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Code / Sigle *</label>
+              <input type="text" class="form-control" id="specialty-code" placeholder="ex: CARDIO" required />
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:15px;">
+            <label class="form-label">Description / Champ d'intervention (optionnel)</label>
+            <textarea class="form-control" id="specialty-description" rows="2" placeholder="Pathologies traitées, organes ciblés ou actes rattachés..."></textarea>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Couleur d'identification</label>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="color" id="specialty-color" value="#4a90e2" style="width:45px; height:38px; border:none; border-radius:6px; cursor:pointer; background:none;" />
+                <span style="font-size:0.85rem; color:var(--text-muted);">Badge agenda & DPI</span>
+              </div>
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; margin-top:25px;">
+              <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                <input type="checkbox" id="specialty-active" checked style="width:18px; height:18px;" />
+                <span>Spécialité active</span>
+              </label>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closeSpecialtyModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="specialty-submit-btn">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 10. Practitioner & Doctor Create/Edit Modal -->
+    <div class="modal-overlay" id="practitioner-modal" style="display:none; justify-content:center; align-items:center; z-index:1160;">
+      <div class="modal-container" style="width:650px; max-width:96%; max-height:92vh; overflow-y:auto; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="practitioner-modal-title">Ajouter un Praticien / Médecin</h4>
+          <button class="modal-close" onclick="closePractitionerModal()">&times;</button>
+        </div>
+        <form id="practitioner-form" onsubmit="submitPractitionerForm(event)">
+          <input type="hidden" id="practitioner-form-id" />
+          
+          <div style="display:grid; grid-template-columns:100px 1fr 1fr; gap:12px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Titre</label>
+              <select class="form-control" id="practitioner-title" required>
+                <option value="Dr.">Dr.</option>
+                <option value="Pr.">Pr.</option>
+                <option value="Mme">Mme</option>
+                <option value="M.">M.</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Prénom *</label>
+              <input type="text" class="form-control" id="practitioner-first" placeholder="ex: Fatou, Amadou" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nom de famille *</label>
+              <input type="text" class="form-control" id="practitioner-last" placeholder="ex: SOW, DIOP" required />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Grade Académique / Hospitalier *</label>
+              <select class="form-control" id="practitioner-grade" required>
+                <option value="Docteur en Médecine">Docteur en Médecine</option>
+                <option value="Professeur Titulaire">Professeur Titulaire de Chaire</option>
+                <option value="Professeur Agrégé">Professeur Agrégé (Val-de-Grâce / CAMES)</option>
+                <option value="Maître de Conférences">Maître de Conférences Agrégé</option>
+                <option value="Assistant Chef de Clinique">Assistant Chef de Clinique (CCA)</option>
+                <option value="Médecin Spécialiste">Médecin Spécialiste Qualifié</option>
+                <option value="Médecin Résident / Interne">Médecin Résident / Interne des Hôpitaux</option>
+                <option value="Infirmier Major / Cadre">Infirmier Major / Cadre de Santé</option>
+                <option value="Sage-Femme Major">Sage-Femme Major</option>
+                <option value="Praticien Hospitalier">Praticien Hospitalier (PH)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Statut Praticien</label>
+              <select class="form-control" id="practitioner-status" required>
+                <option value="Interne">Praticien Interne (Titulaire de la clinique)</option>
+                <option value="Externe">Praticien Externe (Consultant / Vacataire)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- General Practitioner switch & Specialties selector -->
+          <div style="background:var(--bg-surface); padding:15px; border-radius:10px; border:1px solid var(--border-color); margin-bottom:15px;">
+            <div class="form-group" style="margin-bottom:12px;">
+              <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:700; color:var(--text-primary);">
+                <input type="checkbox" id="practitioner-is-gp" onchange="toggleGPFields()" style="width:18px; height:18px;" />
+                <span>🩺 Médecin Généraliste (Consultations de médecine générale et soins primaires)</span>
+              </label>
+            </div>
+
+            <div id="practitioner-specialties-block" style="border-top:1px dashed var(--border-color); padding-top:10px; transition:opacity 0.2s;">
+              <label class="form-label" style="font-size:0.85rem; color:var(--text-primary); margin-bottom:8px; display:block;">
+                <strong>Spécialités Médicales attribuées :</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(Un praticien peut exercer plusieurs spécialités)</span>
+              </label>
+              <div id="practitioner-specialties-container" style="display:flex; flex-wrap:wrap; gap:8px;">
+                <!-- Dynamically filled with checkboxes -->
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Téléphone</label>
+              <input type="text" class="form-control" id="practitioner-phone" placeholder="+221 77 000 00 00" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email professionnel</label>
+              <input type="email" class="form-control" id="practitioner-email" placeholder="docteur@clinique.sn" />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">N° Ordre des Médecins</label>
+              <input type="text" class="form-control" id="practitioner-license" placeholder="ex: 1245/ONM" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tarif Consultation (FCFA)</label>
+              <input type="number" class="form-control" id="practitioner-fee" value="15000" min="0" step="500" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Couleur Planning</label>
+              <input type="color" id="practitioner-color" value="#0d3b66" style="width:100%; height:38px; border:none; border-radius:8px; cursor:pointer;" />
+            </div>
+          </div>
+
+          <div class="form-group" style="display:flex; align-items:center; margin-bottom:15px;">
+            <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+              <input type="checkbox" id="practitioner-active" checked style="width:18px; height:18px;" />
+              <span>Praticien actif et ouvert aux rendez-vous</span>
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closePractitionerModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="practitioner-submit-btn">Enregistrer Praticien</button>
           </div>
         </form>
       </div>

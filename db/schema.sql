@@ -95,6 +95,18 @@ CREATE TABLE users (
     CONSTRAINT unique_tenant_email UNIQUE (tenant_id, email)
 );
 
+CREATE TABLE medical_specialties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    code VARCHAR(50) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    color_code VARCHAR(7) DEFAULT '#4a90e2',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_tenant_specialty_code UNIQUE (tenant_id, code)
+);
+
 CREATE TABLE practitioners (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -102,11 +114,27 @@ CREATE TABLE practitioners (
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     title VARCHAR(50) DEFAULT 'Dr.',
-    specialty_name VARCHAR(100) NOT NULL,
+    grade VARCHAR(100) DEFAULT 'Docteur en Médecine', -- Pr. Titulaire, Agrégé, Assistant, etc.
+    specialty_name VARCHAR(100) DEFAULT 'Médecine Générale',
+    is_general_practitioner BOOLEAN NOT NULL DEFAULT false,
+    phone_number VARCHAR(30),
+    email VARCHAR(255),
     license_number VARCHAR(50), -- N° Ordre des Médecins
     color_code VARCHAR(7) DEFAULT '#0d3b66',
+    consultation_fee NUMERIC(10, 2) DEFAULT 15000,
     status VARCHAR(20) NOT NULL DEFAULT 'Interne' CHECK (status IN ('Interne', 'Externe')),
-    is_active BOOLEAN NOT NULL DEFAULT true
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE practitioner_specialties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    practitioner_id UUID NOT NULL REFERENCES practitioners(id) ON DELETE CASCADE,
+    specialty_id UUID NOT NULL REFERENCES medical_specialties(id) ON DELETE CASCADE,
+    is_primary BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_practitioner_specialty UNIQUE (practitioner_id, specialty_id)
 );
 
 -- ============================================================================
