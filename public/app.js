@@ -129,6 +129,7 @@ const i18n = {
     spiIban: "IBAN Récepteur SPI BCEAO",
     yasKey: "Clé Secrète API Yas",
     cardKey: "Clé Publique API Carte Bancaire",
+    hospital: "Hospitalisation",
     
     // Tenants CRUD & Landing Page
     tenants: "Gestion des Cliniques",
@@ -298,6 +299,7 @@ const i18n = {
     spiIban: "حساب IBAN المستلم للـ SPI",
     yasKey: "المفتاح السري لـ Yas API",
     cardKey: "المفتاح العام لـ Card Payment API",
+    hospital: "الاستشفاء والاقامة",
     
     // Tenants CRUD & Landing Page
     tenants: "إدارة العيادات",
@@ -614,6 +616,9 @@ async function navigate(tab) {
         break;
       case 'inventory':
         await renderInventory(body);
+        break;
+      case 'hospital':
+        await renderHospital(body);
         break;
       case 'settings':
         await renderSettings(body);
@@ -2507,6 +2512,9 @@ function renderAppLayout() {
           <li class="menu-item" data-tab="inventory" onclick="navigate('inventory')">
             <a class="menu-link"><i class="fas fa-box"></i> <span>${t('inventory')}</span></a>
           </li>
+          <li class="menu-item" data-tab="hospital" onclick="navigate('hospital')">
+            <a class="menu-link"><i class="fas fa-bed"></i> <span>${t('hospital')}</span></a>
+          </li>
           <li class="menu-item" data-tab="settings" onclick="navigate('settings')">
             <a class="menu-link"><i class="fas fa-credit-card"></i> <span>${t('settings')}</span></a>
           </li>
@@ -2814,6 +2822,413 @@ function initApp() {
   } else {
     renderAuthLayout();
   }
+}
+
+// ============================================================================
+// Hospitalization Tab (Bed & Occupancy Management)
+// ============================================================================
+let activeHospitalSubTab = 'beds';
+let hospitalSelectedBedId = null;
+
+async function renderHospital(container) {
+  const [buildings, rooms, beds, stays] = await Promise.all([
+    api.request('/hospital/buildings'),
+    api.request('/hospital/rooms'),
+    api.request('/hospital/beds'),
+    api.request('/hospital/hospitalizations?status=ADMITTED')
+  ]);
+
+  const fr = state.currentLang === 'fr';
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <h3 style="color:var(--text-primary); font-weight:600; margin:0;">${fr ? 'Gestion de l\'Hospitalisation' : 'إدارة الاستشفاء والإقامة'}</h3>
+    </div>
+
+    <!-- Sub-tab Selector -->
+    <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+      <button class="btn ${activeHospitalSubTab === 'beds' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('beds')" style="font-size:0.9rem; padding: 6px 15px;">
+        <i class="fas fa-bed"></i> ${fr ? 'Lits & Hospitalisations' : 'الأسرة والاقامات'}
+      </button>
+      <button class="btn ${activeHospitalSubTab === 'setup' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('setup')" style="font-size:0.9rem; padding: 6px 15px;">
+        <i class="fas fa-tools"></i> ${fr ? 'Configuration Structure' : 'إعداد الهيكل'}
+      </button>
+    </div>
+
+    <div id="hospital-subtab-content">
+      ${activeHospitalSubTab === 'beds' 
+        ? renderBedsDashboard(buildings, rooms, beds, stays, fr) 
+        : renderHospitalSetup(buildings, rooms, beds, fr)
+      }
+    </div>
+
+    <!-- Patient Admission Modal -->
+    <div class="modal-overlay" id="admit-modal" style="display:none; justify-content:center; align-items:center;">
+      <div class="modal-container" style="width:450px; max-width:95%; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;">${fr ? 'Admettre un Patient' : 'إدخال مريض جديد'}</h4>
+          <button class="modal-close" onclick="closeAdmitModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <form onsubmit="saveAdmission(event)">
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Sélectionner le Patient' : 'اختر المريض'}</label>
+            <select class="form-control" id="admit-patient-select" required>
+              <option value="">-- ${fr ? 'Choisir un patient' : 'اختر مريضاً'} --</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes d'admission (Motif / Diagnostic initial)</label>
+            <textarea class="form-control" id="admit-notes" rows="3" placeholder="Notes optionnelles..."></textarea>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:12px;">
+            <button class="btn btn-secondary" type="button" onclick="closeAdmitModal()">${fr ? 'Annuler' : 'إلغاء'}</button>
+            <button class="btn btn-primary" type="submit">${fr ? 'Confirmer l\'Admission' : 'تأكيد الدخول'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function switchHospitalSubTab(subtab) {
+  activeHospitalSubTab = subtab;
+  navigate('hospital');
+}
+
+function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
+  if (beds.length === 0) {
+    return `
+      <div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">
+        <i class="fas fa-bed fa-3x" style="margin-bottom:15px; opacity:0.5;"></i>
+        <h4>${fr ? 'Aucun lit configuré dans l\'établissement.' : 'لا توجد أسرة مجهزة بعد.'}</h4>
+        <p>${fr ? 'Veuillez utiliser l\'onglet "Configuration Structure" pour créer vos bâtiments, chambres et lits.' : 'يرجى الانتقال لعلامة التبويب إعداد الهيكل لإنشاء المباني والغرف والأسرة.'}</p>
+      </div>
+    `;
+  }
+
+  const structure = {};
+  for (const b of buildings) {
+    structure[b.id] = { name: b.name, code: b.code, rooms: {} };
+  }
+  for (const r of rooms) {
+    if (structure[r.building_id]) {
+      structure[r.building_id].rooms[r.id] = { number_or_name: r.number_or_name, room_type: r.room_type, beds: [] };
+    }
+  }
+  for (const b of beds) {
+    const roomRes = rooms.find(r => r.id === b.room_id);
+    if (roomRes && structure[roomRes.building_id] && structure[roomRes.building_id].rooms[b.room_id]) {
+      const stay = b.status === 'OCCUPIED' ? stays.find(s => s.bed_id === b.id) : null;
+      structure[roomRes.building_id].rooms[b.room_id].beds.push({ ...b, stay });
+    }
+  }
+
+  return Object.values(structure).map(b => {
+    const roomsHtml = Object.values(b.rooms).map(r => {
+      if (r.beds.length === 0) return '';
+      
+      const bedsHtml = r.beds.map(bed => {
+        const isOccupied = bed.status === 'OCCUPIED';
+        const isMaintenance = bed.status === 'MAINTENANCE';
+        
+        let statusBadge = '';
+        let colorTheme = 'var(--success)';
+        let btnHtml = '';
+        let occupantHtml = '';
+
+        if (isOccupied) {
+          colorTheme = 'var(--danger)';
+          statusBadge = `<span class="badge" style="background-color:var(--danger); color:white; font-size:0.7rem; padding:2px 6px; border-radius:12px;">${fr ? 'Occupé' : 'مشغول'}</span>`;
+          
+          if (bed.stay) {
+            const admittedDate = new Date(bed.stay.admitted_at);
+            const days = Math.max(1, Math.ceil((new Date() - admittedDate) / (1000 * 60 * 60 * 24)));
+            occupantHtml = `
+              <div style="font-size:0.8rem; margin-top:8px; border-top:1px dashed var(--border-color); padding-top:8px; color:var(--text-primary);">
+                <i class="fas fa-user-injured" style="color:var(--primary); margin-right:4px;"></i> <strong>${bed.stay.patient_first_name} ${bed.stay.patient_last_name}</strong>
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
+                  Admis: ${admittedDate.toLocaleDateString('fr-FR')} (${days} j)
+                </div>
+              </div>
+            `;
+            btnHtml = `<button class="btn btn-danger" style="width:100%; font-size:0.8rem; margin-top:10px; background-color:var(--danger);" onclick="dischargeAndInvoice('${bed.stay.id}', '${bed.name}')"><i class="fas fa-sign-out-alt"></i> Libérer & Facturer</button>`;
+          } else {
+            occupantHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:8px;">Occupé (Détails RLS masqués)</div>`;
+            btnHtml = `<button class="btn btn-secondary" style="width:100%; font-size:0.8rem; margin-top:10px;" disabled>Occupé</button>`;
+          }
+        } else if (isMaintenance) {
+          colorTheme = 'var(--warning)';
+          statusBadge = `<span class="badge" style="background-color:var(--warning); color:black; font-size:0.7rem; padding:2px 6px; border-radius:12px;">Entretien</span>`;
+          btnHtml = `<button class="btn btn-secondary" style="width:100%; font-size:0.8rem; margin-top:10px;" disabled>Entretien</button>`;
+        } else {
+          statusBadge = `<span class="badge" style="background-color:var(--primary); color:white; font-size:0.7rem; padding:2px 6px; border-radius:12px;">${fr ? 'Disponible' : 'متاح'}</span>`;
+          btnHtml = `<button class="btn btn-primary" style="width:100%; font-size:0.8rem; margin-top:10px;" onclick="openAdmitModal('${bed.id}')"><i class="fas fa-check"></i> Admettre</button>`;
+        }
+
+        return `
+          <div class="card" style="border-top: 4px solid ${colorTheme}; display:flex; flex-direction:column; justify-content:space-between; padding:12px; min-height:165px; background-color:var(--bg-surface);">
+            <div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <h5 style="margin:0; font-size:1rem; font-weight:600; color:var(--text-primary);"><i class="fas fa-bed"></i> ${bed.name}</h5>
+                ${statusBadge}
+              </div>
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">
+                ${bed.luxury_level} | <strong>${parseFloat(bed.daily_rate).toLocaleString()} XOF/j</strong>
+              </div>
+              ${occupantHtml}
+            </div>
+            ${btnHtml}
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div style="margin-bottom:20px;">
+          <h5 style="font-size:0.95rem; color:var(--text-primary); font-weight:600; border-bottom:1px dashed var(--border-color); padding-bottom:6px; margin-bottom:12px;">
+            <i class="fas fa-door-open" style="color:var(--primary);"></i> ${r.number_or_name} <span style="font-size:0.8rem; font-weight:400; color:var(--text-muted);">(${r.room_type})</span>
+          </h5>
+          <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap:15px;">
+            ${bedsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    if (roomsHtml.replace(/\s/g, '') === '') return '';
+
+    return `
+      <div class="card" style="margin-bottom:24px; padding:20px;">
+        <h4 style="margin-top:0; margin-bottom:15px; font-weight:700; color:var(--text-primary); font-size:1.15rem; display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-building" style="color:var(--primary);"></i> ${b.name} ${b.code ? `<span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">(${b.code})</span>` : ''}
+        </h4>
+        ${roomsHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderHospitalSetup(buildings, rooms, beds, fr) {
+  const buildingOptions = buildings.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+  const roomOptions = rooms.map(r => `<option value="${r.id}">${r.number_or_name} (${r.building_name})</option>`).join('');
+
+  return `
+    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px;">
+      <!-- A. Add Building -->
+      <div class="card" style="padding:15px;">
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-building"></i> Ajouter un Bâtiment</h4>
+        <form onsubmit="saveBuilding(event)">
+          <div class="form-group">
+            <label class="form-label">Nom du Bâtiment</label>
+            <input type="text" class="form-control" id="build-name" placeholder="ex: Pavillon A" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Code (facultatif)</label>
+            <input type="text" class="form-control" id="build-code" placeholder="ex: PAV-A" />
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Bâtiment</button>
+        </form>
+      </div>
+
+      <!-- B. Add Room -->
+      <div class="card" style="padding:15px;">
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-door-open"></i> Ajouter une Chambre</h4>
+        <form onsubmit="saveRoom(event)">
+          <div class="form-group">
+            <label class="form-label">Bâtiment</label>
+            <select class="form-control" id="room-building-id" required>
+              <option value="">-- Choisir un bâtiment --</option>
+              ${buildingOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nom / Numéro de Chambre</label>
+            <input type="text" class="form-control" id="room-number" placeholder="ex: Ch 101" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Type</label>
+            <select class="form-control" id="room-type" required>
+              <option value="STANDARD">STANDARD</option>
+              <option value="VIP">VIP</option>
+              <option value="SOINS_INTENSIFS">SOINS INTENSIFS (ICU)</option>
+              <option value="MATERNITE">MATERNITÉ</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Chambre</button>
+        </form>
+      </div>
+
+      <!-- C. Add Bed -->
+      <div class="card" style="padding:15px;">
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-bed"></i> Ajouter un Lit</h4>
+        <form onsubmit="saveBed(event)">
+          <div class="form-group">
+            <label class="form-label">Chambre / Salle</label>
+            <select class="form-control" id="bed-room-id" required>
+              <option value="">-- Choisir une chambre --</option>
+              ${roomOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nom / Numéro de Lit</label>
+            <input type="text" class="form-control" id="bed-name" placeholder="ex: Lit A" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Luxe / Classe</label>
+            <select class="form-control" id="bed-luxury" required>
+              <option value="STANDARD">STANDARD</option>
+              <option value="CONFORT">CONFORT</option>
+              <option value="VIP">VIP</option>
+              <option value="SUITE">SUITE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tarif journalier d'hébergement (XOF)</label>
+            <input type="number" class="form-control" id="bed-rate" placeholder="ex: 15000" min="0" required />
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Lit</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+async function openAdmitModal(bedId) {
+  hospitalSelectedBedId = bedId;
+  const select = document.getElementById('admit-patient-select');
+  if (!select) return;
+
+  try {
+    const patients = await api.request('/patients');
+    const availablePatients = patients.filter(p => p.status === 'Externe');
+
+    select.innerHTML = `
+      <option value="">-- Choisir un patient --</option>
+      ${availablePatients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code})</option>`).join('')}
+    `;
+
+    document.getElementById('admit-modal').style.display = 'flex';
+  } catch (err) {
+    showToast('Erreur lors du chargement des patients : ' + err.message, 'error');
+  }
+}
+
+function closeAdmitModal() {
+  document.getElementById('admit-modal').style.display = 'none';
+  document.getElementById('admit-notes').value = '';
+  hospitalSelectedBedId = null;
+}
+
+async function saveAdmission(e) {
+  e.preventDefault();
+  const patientId = document.getElementById('admit-patient-select').value;
+  const notes = document.getElementById('admit-notes').value;
+
+  if (!patientId || !hospitalSelectedBedId) return;
+
+  try {
+    await api.request('/hospital/hospitalizations', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: patientId,
+        bed_id: hospitalSelectedBedId,
+        notes
+      })
+    });
+
+    showToast('Admission enregistrée avec succès! Le patient est maintenant Hospitalisé.');
+    closeAdmitModal();
+    navigate('hospital');
+  } catch (err) {}
+}
+
+async function dischargeAndInvoice(stayId, bedName) {
+  if (!confirm(`Souhaitez-vous libérer le lit "${bedName}" et facturer le séjour ?`)) return;
+
+  try {
+    showToast('Traitement de la sortie et calcul des frais...', 'info');
+    
+    const res = await api.request(`/hospital/hospitalizations/${stayId}/discharge`, {
+      method: 'POST',
+      body: JSON.stringify({ notes: 'Sortie standard d\'hospitalisation' })
+    });
+
+    showToast(`Patient libéré! Séjour: ${res.duration_days} jours. Total: ${res.total_cost.toLocaleString()} FCFA.`);
+
+    if (!state.activeCashSession) {
+      showToast('Veuillez ouvrir une session de caisse dans "Caisse & Facturation" pour finaliser le règlement.', 'warning');
+    }
+
+    state.currentTab = 'billing';
+    
+    const stayLine = {
+      description: `Hébergement Lit ${res.bed_name} (${res.luxury_level || 'STANDARD'}) - ${res.duration_days} jours`,
+      quantity: 1,
+      unit_price: res.total_cost,
+      service_id: null
+    };
+
+    invoiceLines = [stayLine];
+    navigate('billing');
+    
+    setTimeout(() => {
+      const patientSelect = document.getElementById('inv-patient-id');
+      if (patientSelect) {
+        patientSelect.value = res.hospitalization.patient_id;
+      }
+      renderInvoiceLines();
+    }, 500);
+
+  } catch (err) {
+    showToast('Erreur lors de la libération : ' + err.message, 'error');
+  }
+}
+
+async function saveBuilding(e) {
+  e.preventDefault();
+  const name = document.getElementById('build-name').value;
+  const code = document.getElementById('build-code').value;
+
+  try {
+    await api.request('/hospital/buildings', {
+      method: 'POST',
+      body: JSON.stringify({ name, code })
+    });
+    showToast('Bâtiment créé avec succès!');
+    navigate('hospital');
+  } catch (err) {}
+}
+
+async function saveRoom(e) {
+  e.preventDefault();
+  const building_id = document.getElementById('room-building-id').value;
+  const number_or_name = document.getElementById('room-number').value;
+  const room_type = document.getElementById('room-type').value;
+
+  try {
+    await api.request('/hospital/rooms', {
+      method: 'POST',
+      body: JSON.stringify({ building_id, number_or_name, room_type })
+    });
+    showToast('Chambre créée avec succès!');
+    navigate('hospital');
+  } catch (err) {}
+}
+
+async function saveBed(e) {
+  e.preventDefault();
+  const room_id = document.getElementById('bed-room-id').value;
+  const name = document.getElementById('bed-name').value;
+  const luxury_level = document.getElementById('bed-luxury').value;
+  const daily_rate = parseFloat(document.getElementById('bed-rate').value);
+
+  try {
+    await api.request('/hospital/beds', {
+      method: 'POST',
+      body: JSON.stringify({ room_id, name, luxury_level, daily_rate })
+    });
+    showToast('Lit créé avec succès!');
+    navigate('hospital');
+  } catch (err) {}
 }
 
 // Run app init on load

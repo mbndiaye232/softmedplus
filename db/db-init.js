@@ -81,7 +81,7 @@ async function initDatabase() {
     const passwordHash = await bcrypt.hash('admin123', salt);
 
     // Bypass RLS for seeding by setting current_tenant_id session variable
-    await client.query(`SET LOCAL app.current_tenant_id = $1`, [tenantId]);
+    await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [tenantId]);
 
     // 1. Tenant
     console.log('- Seeding tenant...');

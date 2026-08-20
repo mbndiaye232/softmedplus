@@ -17,6 +17,7 @@ const paymentCtrl = require('./controllers/paymentController');
 const stockCtrl = require('./controllers/stockController');
 const reportCtrl = require('./controllers/reportController');
 const tenantCtrl = require('./controllers/tenantController');
+const hospitalCtrl = require('./controllers/hospitalController');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -102,6 +103,17 @@ app.post('/api/inventory/items', stockCtrl.createStockItem);
 app.get('/api/inventory/items', stockCtrl.getStockItems);
 app.post('/api/inventory/lots', stockCtrl.addStockLot);
 app.post('/api/inventory/deplete', stockCtrl.depleteStock);
+
+// 5b. Hospitalization (Bed & Occupancy Management)
+app.get('/api/hospital/buildings', hospitalCtrl.getBuildings);
+app.post('/api/hospital/buildings', hospitalCtrl.createBuilding);
+app.get('/api/hospital/rooms', hospitalCtrl.getRooms);
+app.post('/api/hospital/rooms', hospitalCtrl.createRoom);
+app.get('/api/hospital/beds', hospitalCtrl.getBeds);
+app.post('/api/hospital/beds', hospitalCtrl.createBed);
+app.get('/api/hospital/hospitalizations', hospitalCtrl.getHospitalizations);
+app.post('/api/hospital/hospitalizations', hospitalCtrl.admitPatient);
+app.post('/api/hospital/hospitalizations/:id/discharge', hospitalCtrl.dischargePatient);
 
 // 6. Aging Reports & Recovery Reminders
 app.get('/api/reports/aging-balance', reportCtrl.getAgingBalance);
