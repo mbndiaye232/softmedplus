@@ -2092,6 +2092,8 @@ async function renderBilling(container) {
     api.request('/medical-services').catch(() => [])
   ]);
 
+  state.patients = patients;
+
   container.innerHTML = `
     <!-- Subtabs Navigation -->
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px; flex-wrap:wrap; gap:10px;">
@@ -2183,9 +2185,9 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
           <form onsubmit="createInvoice(event)">
             <div class="form-group">
               <label class="form-label">${t('patient')}</label>
-              <select class="form-control" id="inv-patient-id" required>
+              <select class="form-control" id="inv-patient-id" onchange="onInvoicePatientChange(this.value)" required>
                 <option value="">-- Sélectionner Patient --</option>
-                ${patients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name}</option>`).join('')}
+                ${patients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code}) ${p.insurance_name ? `— [IPM: ${p.insurance_name}]` : ''}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -2287,6 +2289,20 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
   `;
 }
 
+function onInvoicePatientChange(patientId) {
+  const patient = (state.patients || []).find(p => p.id === patientId);
+  const insuranceSelect = document.getElementById('inv-insurance-id');
+  if (insuranceSelect) {
+    if (patient && patient.insurance_company_id) {
+      insuranceSelect.value = patient.insurance_company_id;
+      showToast(`IPM "${patient.insurance_name}" sélectionnée automatiquement`, 'info');
+    } else {
+      insuranceSelect.value = '';
+    }
+  }
+  renderInvoiceLines();
+}
+
 function applyServiceFromCatalogue(selectElement) {
   const selectedOpt = selectElement.options[selectElement.selectedIndex];
   if (!selectedOpt || !selectedOpt.value) return;
@@ -2305,6 +2321,7 @@ function renderBillingServicesContent(services) {
   const categories = [
     { key: 'ALL', label: 'Tous les actes' },
     { key: 'CONSULTATION', label: 'Consultations' },
+    { key: 'HOSPITALISATION', label: 'Hospitalisation & Séjours' },
     { key: 'TRAITEMENT', label: 'Traitements & Perfusion' },
     { key: 'SOIN', label: 'Soins & Injections' },
     { key: 'ANALYSE', label: 'Analyses & Imagerie' },
@@ -4952,6 +4969,7 @@ function renderAppLayout() {
               <label class="form-label">Catégorie de l'acte *</label>
               <select class="form-control" id="service-category" required>
                 <option value="CONSULTATION">🩺 Consultation Médicale</option>
+                <option value="HOSPITALISATION">🛏️ Hospitalisation & Séjour</option>
                 <option value="TRAITEMENT">💉 Traitement / Perfusion</option>
                 <option value="SOIN">🩹 Soin Infirmier / Injection</option>
                 <option value="ANALYSE">🔬 Analyse / Bilan / Imagerie</option>
@@ -5364,7 +5382,7 @@ async function saveAdmission(e) {
 }
 
 async function dischargeAndInvoice(stayId, bedName) {
-  if (!confirm(`Souhaitez-vous libérer le lit "${bedName}" et facturer le séjour ?`)) return;
+  if (!confirm(`Souhaitez-vous libérer le lit "${bedName}" et générer automatiquement la facture de séjour ?`)) return;
 
   try {
     showToast('Traitement de la sortie et calcul des frais...', 'info');
@@ -5376,32 +5394,37 @@ async function dischargeAndInvoice(stayId, bedName) {
 
     showToast(`Patient libéré! Séjour: ${res.duration_days} jours. Total: ${res.total_cost.toLocaleString()} FCFA.`);
 
-    if (!state.activeCashSession) {
-      showToast('Veuillez ouvrir une session de caisse dans "Caisse & Facturation" pour finaliser le règlement.', 'warning');
-    }
+    showToast('Génération automatique de la facture...', 'info');
 
-    state.currentTab = 'billing';
-    
     const stayLine = {
-      description: `Hébergement Lit ${res.bed_name} (${res.luxury_level || 'STANDARD'}) - ${res.duration_days} jours`,
-      quantity: 1,
-      unit_price: res.total_cost,
+      description: `Séjour Hospitalier - Lit ${res.bed_name} (${res.building_name || ''} - ${res.room_name || ''} / ${res.luxury_level || 'STANDARD'})`,
+      quantity: res.duration_days,
+      unit_price: res.daily_rate,
       service_id: null
     };
 
-    invoiceLines = [stayLine];
-    navigate('billing');
+    const createdInvoice = await api.request('/billing/invoices', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: res.patient_id,
+        insurance_company_id: res.insurance_company_id || null,
+        lines: [stayLine],
+        discount_amount: 0
+      })
+    });
+
+    showToast(`Facture ${createdInvoice.invoice_number} générée automatiquement avec succès !`);
+
+    invoiceLines = [];
+    activeBillingSubTab = 'invoices';
+    await navigate('billing');
     
     setTimeout(() => {
-      const patientSelect = document.getElementById('inv-patient-id');
-      if (patientSelect) {
-        patientSelect.value = res.hospitalization.patient_id;
-      }
-      renderInvoiceLines();
-    }, 500);
+      openInvoicePrintModal(createdInvoice.id, res.insurance_company_id ? 'IPM' : 'PATIENT');
+    }, 400);
 
   } catch (err) {
-    showToast('Erreur lors de la libération : ' + err.message, 'error');
+    showToast('Erreur lors de la facturation automatique : ' + err.message, 'error');
   }
 }
 

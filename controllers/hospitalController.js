@@ -237,17 +237,26 @@ const dischargePatient = async (req, res) => {
   const tenantId = req.user.tenant_id;
 
   try {
-    // Fetch active stay
+    // Fetch active stay with full room, building and patient insurance info
     const stayRes = await req.dbClient.query(
-      `SELECT h.*, b.daily_rate, b.name as bed_name 
+      `SELECT h.*, b.daily_rate, b.name as bed_name, b.luxury_level,
+              r.number_or_name as room_name, bl.name as building_name,
+              p.first_name as patient_first_name, p.last_name as patient_last_name, p.patient_code,
+              pip.insurance_company_id, pip.coverage_rate_percent,
+              ic.name as insurance_name
        FROM hospitalizations h
        JOIN hospital_beds b ON h.bed_id = b.id
+       JOIN hospital_rooms r ON b.room_id = r.id
+       JOIN hospital_buildings bl ON r.building_id = bl.id
+       JOIN patients p ON h.patient_id = p.id
+       LEFT JOIN patient_insurance_policies pip ON p.id = pip.patient_id AND pip.is_primary = true
+       LEFT JOIN insurance_companies ic ON pip.insurance_company_id = ic.id
        WHERE h.id = $1 AND h.status = 'ADMITTED'`,
       [id]
     );
 
     if (stayRes.rowCount === 0) {
-      return res.status(404).json({ error: 'Active hospitalization stay not found' });
+      return res.status(404).json({ error: 'Séjour d\'hospitalisation actif introuvable' });
     }
 
     const stay = stayRes.rows[0];
@@ -288,7 +297,15 @@ const dischargePatient = async (req, res) => {
       duration_days: diffDays,
       daily_rate: dailyRate,
       total_cost: totalAccommodationCost,
-      bed_name: stay.bed_name
+      bed_name: stay.bed_name,
+      room_name: stay.room_name,
+      building_name: stay.building_name,
+      luxury_level: stay.luxury_level,
+      patient_id: stay.patient_id,
+      patient_name: `${stay.patient_first_name} ${stay.patient_last_name}`,
+      insurance_company_id: stay.insurance_company_id,
+      insurance_name: stay.insurance_name,
+      coverage_rate_percent: stay.coverage_rate_percent
     });
 
   } catch (err) {

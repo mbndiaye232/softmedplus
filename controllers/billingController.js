@@ -119,19 +119,32 @@ const createInvoice = async (req, res) => {
     const discount = parseFloat(discount_amount || 0);
     const netAmount = totalGross - discount;
 
-    // B. Check insurance coverage if company is supplied
+    // B. Check insurance coverage (or auto-detect patient's primary IPM policy)
+    let finalInsuranceId = validInsuranceId;
     let coverageRate = 0;
-    if (validInsuranceId) {
+
+    if (finalInsuranceId) {
       const policyRes = await req.dbClient.query(
         `SELECT coverage_rate_percent FROM patient_insurance_policies 
          WHERE patient_id = $1 AND insurance_company_id = $2 AND is_primary = true`,
-        [patient_id, validInsuranceId]
+        [patient_id, finalInsuranceId]
       );
       if (policyRes.rowCount > 0) {
         coverageRate = parseFloat(policyRes.rows[0].coverage_rate_percent);
       } else {
         // Default standard IPM / Tiers-payant coverage rate of 80% if selected
         coverageRate = 80;
+      }
+    } else {
+      // Auto-detect patient's primary policy if any
+      const autoPolicyRes = await req.dbClient.query(
+        `SELECT insurance_company_id, coverage_rate_percent FROM patient_insurance_policies 
+         WHERE patient_id = $1 AND is_primary = true LIMIT 1`,
+        [patient_id]
+      );
+      if (autoPolicyRes.rowCount > 0) {
+        finalInsuranceId = autoPolicyRes.rows[0].insurance_company_id;
+        coverageRate = parseFloat(autoPolicyRes.rows[0].coverage_rate_percent || 80);
       }
     }
 
@@ -162,7 +175,7 @@ const createInvoice = async (req, res) => {
         invoiceNumber,
         patient_id,
         validAppointmentId,
-        validInsuranceId,
+        finalInsuranceId,
         totalGross,
         discount,
         netAmount,

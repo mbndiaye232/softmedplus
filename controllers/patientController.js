@@ -97,15 +97,20 @@ const registerPatient = async (req, res) => {
   }
 };
 
-// 2. Get Patients (isolated by RLS with joined Status)
+// 2. Get Patients (isolated by RLS with joined Status and Primary Insurance Policy)
 const getPatients = async (req, res) => {
   const { status, search, status_id } = req.query;
   const tenantId = req.user.tenant_id;
 
   let queryStr = `
-    SELECT p.*, ps.name AS status_name, ps.color_code AS status_color, ps.code AS status_code
+    SELECT p.*, 
+           ps.name AS status_name, ps.color_code AS status_color, ps.code AS status_code,
+           pip.insurance_company_id, pip.policy_number, pip.coverage_rate_percent,
+           ic.name AS insurance_name, ic.code AS insurance_code
     FROM patients p
     LEFT JOIN patient_statuses ps ON p.status_id = ps.id
+    LEFT JOIN patient_insurance_policies pip ON p.id = pip.patient_id AND pip.is_primary = true
+    LEFT JOIN insurance_companies ic ON pip.insurance_company_id = ic.id
     WHERE p.tenant_id = $1
   `;
   const params = [tenantId];
