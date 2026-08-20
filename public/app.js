@@ -2080,6 +2080,7 @@ async function deletePatientStatus(statusId) {
 // ============================================================================
 let invoiceLines = [];
 let activePaymentInvoice = null;
+let activeBillingSubTab = 'invoices'; // 'invoices' or 'insurances'
 
 async function renderBilling(container) {
   const [invoices, patients, registers, insurances] = await Promise.all([
@@ -2090,6 +2091,44 @@ async function renderBilling(container) {
   ]);
 
   container.innerHTML = `
+    <!-- Subtabs Navigation -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:12px;">
+      <div style="display:flex; gap:10px;">
+        <button class="btn ${activeBillingSubTab === 'invoices' ? 'btn-primary' : 'btn-secondary'}" onclick="switchBillingSubTab('invoices')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-cash-register"></i> Caisse & Facturation
+        </button>
+        <button class="btn ${activeBillingSubTab === 'insurances' ? 'btn-primary' : 'btn-secondary'}" onclick="switchBillingSubTab('insurances')" style="font-size:0.9rem; padding:7px 18px;">
+          <i class="fas fa-building"></i> Organismes IPM & Assurances (${insurances.length})
+        </button>
+      </div>
+
+      ${activeBillingSubTab === 'insurances' ? `
+        <button class="btn btn-primary" onclick="openCreateInsuranceModal()" style="font-size:0.85rem;">
+          <i class="fas fa-plus"></i> Nouvelle IPM / Assurance
+        </button>
+      ` : ''}
+    </div>
+
+    <div id="billing-subtab-content">
+      ${activeBillingSubTab === 'invoices' 
+        ? renderBillingInvoicesContent(invoices, patients, registers, insurances) 
+        : renderBillingInsurancesContent(insurances)
+      }
+    </div>
+  `;
+
+  if (activeBillingSubTab === 'invoices') {
+    renderInvoiceLines();
+  }
+}
+
+function switchBillingSubTab(tab) {
+  activeBillingSubTab = tab;
+  navigate('billing');
+}
+
+function renderBillingInvoicesContent(invoices, patients, registers, insurances) {
+  return `
     <div class="agenda-grid" style="grid-template-columns: 400px 1fr;">
       <div>
         <div class="card" id="cash-session-card">
@@ -2140,7 +2179,7 @@ async function renderBilling(container) {
               <label class="form-label">${t('insurance')}</label>
               <select class="form-control" id="inv-insurance-id" onchange="renderInvoiceLines()">
                 <option value="">Privé (Pas de couverture)</option>
-                ${insurances.map(ic => `<option value="${ic.id}">${ic.name} (${ic.code})</option>`).join('')}
+                ${insurances.filter(ic => ic.is_active !== false).map(ic => `<option value="${ic.id}">${ic.name} (${ic.code})</option>`).join('')}
               </select>
             </div>
             
@@ -2217,7 +2256,90 @@ async function renderBilling(container) {
       </div>
     </div>
   `;
-  renderInvoiceLines();
+}
+
+function renderBillingInsurancesContent(insurances) {
+  if (insurances.length === 0) {
+    return `
+      <div class="card" style="text-align:center; padding:50px 20px; color:var(--text-muted);">
+        <i class="fas fa-building fa-3x" style="margin-bottom:15px; opacity:0.4;"></i>
+        <h4>Aucun organisme IPM ou compagnie d'assurance configuré</h4>
+        <p style="margin-bottom:20px;">Ajoutez vos partenaires tiers-payant (ex: IPM SONATEL, AXA, ASKIA, SUNU, etc.) pour gérer la prise en charge des patients et la facturation automatique.</p>
+        <button class="btn btn-primary" onclick="openCreateInsuranceModal()">
+          <i class="fas fa-plus"></i> Ajouter une Première IPM
+        </button>
+      </div>
+    `;
+  }
+
+  const activeCount = insurances.filter(i => i.is_active).length;
+
+  return `
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Total Organismes</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--primary); margin-top:5px;">${insurances.length}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Organismes Actifs</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--success); margin-top:5px;">${activeCount}</div>
+      </div>
+      <div class="card" style="padding:15px; background:var(--bg-surface);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase;">Délai Moyen Conventionné</div>
+        <div style="font-size:1.6rem; font-weight:800; color:var(--accent); margin-top:5px;">30 Jours</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-shield-alt"></i> Répertoire des Organismes Tiers-Payant (IPM & Assurances)</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Nom de l'Organisme / IPM</th>
+              <th>Code / Sigle</th>
+              <th>Email Contact</th>
+              <th>Téléphone</th>
+              <th>Délai Règlement</th>
+              <th>Statut</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${insurances.map(ic => `
+              <tr style="opacity: ${ic.is_active ? 1 : 0.6}">
+                <td>
+                  <strong style="color:var(--text-primary); font-size:0.95rem;">${ic.name}</strong>
+                </td>
+                <td><code style="font-weight:700; color:var(--primary); font-size:0.85rem;">${ic.code}</code></td>
+                <td>${ic.contact_email ? `<a href="mailto:${ic.contact_email}" style="color:var(--text-muted); text-decoration:none;"><i class="fas fa-envelope"></i> ${ic.contact_email}</a>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+                <td>${ic.contact_phone ? `<span><i class="fas fa-phone"></i> ${ic.contact_phone}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>
+                <td><span class="badge" style="background:#2c3e50; color:#fff; font-size:0.75rem;">${ic.payment_terms_days || 30} jours</span></td>
+                <td>
+                  <span class="badge ${ic.is_active ? 'badge-success' : 'badge-danger'}" style="background-color:${ic.is_active ? 'var(--success)' : 'var(--danger)'}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; font-weight:600;">
+                    ${ic.is_active ? 'Conventionné (Actif)' : 'Inactif'}
+                  </span>
+                </td>
+                <td style="text-align:right;">
+                  <button class="btn btn-secondary btn-sm" onclick="openEditInsuranceModal('${ic.id}')" style="padding:4px 8px; margin-right:4px;" title="Modifier">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" onclick="toggleInsuranceStatus('${ic.id}', ${ic.is_active})" style="padding:4px 8px; margin-right:4px;" title="${ic.is_active ? 'Désactiver' : 'Activer'}">
+                    <i class="fas ${ic.is_active ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                  </button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteInsuranceConfirm('${ic.id}', '${ic.name.replace(/'/g, "\\'")}')" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);" title="Supprimer">
+                    <i class="fas fa-trash-alt"></i>
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 async function openSession(e) {
@@ -2499,6 +2621,122 @@ async function simulateWebhook(provider, ref, amount, invoiceId) {
     navigate('billing');
   } catch (err) {
     showToast(`Simulation failed: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// 4a. Insurance Companies & IPM Management CRUD
+// ============================================================================
+function openCreateInsuranceModal() {
+  const modal = document.getElementById('insurance-modal');
+  const form = document.getElementById('insurance-form');
+  if (!modal || !form) return;
+
+  form.reset();
+  document.getElementById('insurance-form-id').value = '';
+  document.getElementById('insurance-modal-title').innerText = 'Ajouter un Organisme IPM / Assurance';
+  document.getElementById('insurance-terms').value = '30';
+  document.getElementById('insurance-active').checked = true;
+
+  modal.style.display = 'flex';
+}
+
+async function openEditInsuranceModal(id) {
+  const modal = document.getElementById('insurance-modal');
+  if (!modal) return;
+
+  try {
+    const insurances = await api.request('/billing/insurances');
+    const ic = insurances.find(i => i.id === id);
+    if (!ic) throw new Error('IPM introuvable');
+
+    document.getElementById('insurance-form-id').value = ic.id;
+    document.getElementById('insurance-modal-title').innerText = 'Modifier l\'Organisme IPM / Assurance';
+    document.getElementById('insurance-name').value = ic.name || '';
+    document.getElementById('insurance-code').value = ic.code || '';
+    document.getElementById('insurance-email').value = ic.contact_email || '';
+    document.getElementById('insurance-phone').value = ic.contact_phone || '';
+    document.getElementById('insurance-terms').value = ic.payment_terms_days || 30;
+    document.getElementById('insurance-active').checked = ic.is_active !== false;
+
+    modal.style.display = 'flex';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function closeInsuranceModal() {
+  const modal = document.getElementById('insurance-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitInsuranceForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('insurance-form-id').value;
+  
+  const payload = {
+    name: document.getElementById('insurance-name').value,
+    code: document.getElementById('insurance-code').value,
+    contact_email: document.getElementById('insurance-email').value,
+    contact_phone: document.getElementById('insurance-phone').value,
+    payment_terms_days: parseInt(document.getElementById('insurance-terms').value, 10) || 30,
+    is_active: document.getElementById('insurance-active').checked
+  };
+
+  try {
+    if (id) {
+      await api.request(`/billing/insurances/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      showToast('IPM mise à jour avec succès !');
+    } else {
+      await api.request('/billing/insurances', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      showToast('Organisme IPM créé avec succès !');
+    }
+    
+    closeInsuranceModal();
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function toggleInsuranceStatus(id, currentActive) {
+  try {
+    const insurances = await api.request('/billing/insurances');
+    const ic = insurances.find(i => i.id === id);
+    if (!ic) return;
+
+    await api.request(`/billing/insurances/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...ic,
+        is_active: !currentActive
+      })
+    });
+
+    showToast(`IPM ${ic.name} ${!currentActive ? 'activée' : 'désactivée'} avec succès.`);
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteInsuranceConfirm(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer ou désactiver l'organisme "${name}" ?`)) return;
+
+  try {
+    const res = await api.request(`/billing/insurances/${id}`, {
+      method: 'DELETE'
+    });
+    showToast(res.message || 'IPM supprimée avec succès !');
+    navigate('billing');
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 }
 
@@ -4337,6 +4575,59 @@ function renderAppLayout() {
         <div id="invoice-print-content">
           <!-- Dynamically injected -->
         </div>
+      </div>
+    </div>
+
+    <!-- 7. Insurance / IPM Create & Edit Modal -->
+    <div class="modal-overlay" id="insurance-modal" style="display:none; justify-content:center; align-items:center; z-index:1150;">
+      <div class="modal-container" style="width:550px; max-width:95%; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="insurance-modal-title">Ajouter un Organisme IPM / Assurance</h4>
+          <button class="modal-close" onclick="closeInsuranceModal()">&times;</button>
+        </div>
+        <form id="insurance-form" onsubmit="submitInsuranceForm(event)">
+          <input type="hidden" id="insurance-form-id" />
+          
+          <div style="display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Nom de l'Organisme / Compagnie *</label>
+              <input type="text" class="form-control" id="insurance-name" placeholder="ex: IPM SONATEL, AXA Sénégal" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Code / Sigle *</label>
+              <input type="text" class="form-control" id="insurance-code" placeholder="ex: SONATEL" required />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Email de Contact / Facturation</label>
+              <input type="email" class="form-control" id="insurance-email" placeholder="contact@ipm.sn" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Téléphone</label>
+              <input type="text" class="form-control" id="insurance-phone" placeholder="+221 33 800 00 00" />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+            <div class="form-group">
+              <label class="form-label">Délai de règlement conventionné (jours)</label>
+              <input type="number" class="form-control" id="insurance-terms" value="30" min="1" max="180" required />
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; margin-top:25px;">
+              <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; margin:0;">
+                <input type="checkbox" id="insurance-active" checked style="width:18px; height:18px;" />
+                <span>Convention active</span>
+              </label>
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closeInsuranceModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="insurance-submit-btn">Enregistrer</button>
+          </div>
+        </form>
       </div>
     </div>
   `;

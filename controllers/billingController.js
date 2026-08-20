@@ -246,13 +246,123 @@ const getInsurances = async (req, res) => {
   const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT * FROM insurance_companies WHERE tenant_id = $1 AND is_active = true ORDER BY name ASC`,
+      `SELECT * FROM insurance_companies WHERE tenant_id = $1 ORDER BY is_active DESC, name ASC`,
       [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('Get insurances error:', err.message);
     return res.status(500).json({ error: 'Failed to retrieve insurances' });
+  }
+};
+
+// 6b. Create Insurance Company
+const createInsurance = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { name, code, contact_email, contact_phone, payment_terms_days } = req.body;
+
+  if (!name || !code) {
+    return res.status(400).json({ error: 'Le nom et le code de l\'IPM sont requis' });
+  }
+
+  try {
+    const result = await req.dbClient.query(
+      `INSERT INTO insurance_companies (tenant_id, name, code, contact_email, contact_phone, payment_terms_days)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        tenantId,
+        name.trim(),
+        code.trim().toUpperCase(),
+        contact_email ? contact_email.trim() : null,
+        contact_phone ? contact_phone.trim() : null,
+        parseInt(payment_terms_days, 10) || 30
+      ]
+    );
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Create insurance error:', err.message);
+    return res.status(500).json({ error: 'Échec de la création de l\'IPM: ' + err.message });
+  }
+};
+
+// 6c. Update Insurance Company
+const updateInsurance = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { id } = req.params;
+  const { name, code, contact_email, contact_phone, payment_terms_days, is_active } = req.body;
+
+  if (!name || !code) {
+    return res.status(400).json({ error: 'Le nom et le code de l\'IPM sont requis' });
+  }
+
+  try {
+    const result = await req.dbClient.query(
+      `UPDATE insurance_companies
+       SET name = $1,
+           code = $2,
+           contact_email = $3,
+           contact_phone = $4,
+           payment_terms_days = $5,
+           is_active = $6
+       WHERE id = $7 AND tenant_id = $8
+       RETURNING *`,
+      [
+        name.trim(),
+        code.trim().toUpperCase(),
+        contact_email ? contact_email.trim() : null,
+        contact_phone ? contact_phone.trim() : null,
+        parseInt(payment_terms_days, 10) || 30,
+        is_active !== undefined ? is_active : true,
+        id,
+        tenantId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'IPM introuvable' });
+    }
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update insurance error:', err.message);
+    return res.status(500).json({ error: 'Échec de la modification de l\'IPM: ' + err.message });
+  }
+};
+
+// 6d. Delete Insurance Company
+const deleteInsurance = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { id } = req.params;
+
+  try {
+    // Check if there are linked invoices or patient policies
+    const linkedInvoices = await req.dbClient.query(
+      `SELECT 1 FROM invoices WHERE insurance_company_id = $1 LIMIT 1`,
+      [id]
+    );
+    const linkedPolicies = await req.dbClient.query(
+      `SELECT 1 FROM patient_insurance_policies WHERE insurance_company_id = $1 LIMIT 1`,
+      [id]
+    );
+
+    if (linkedInvoices.rowCount > 0 || linkedPolicies.rowCount > 0) {
+      // Soft-delete to preserve billing history integrity
+      await req.dbClient.query(
+        `UPDATE insurance_companies SET is_active = false WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      return res.status(200).json({ message: 'IPM désactivée car elle est liée à des dossiers ou factures' });
+    }
+
+    await req.dbClient.query(
+      `DELETE FROM insurance_companies WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    return res.status(200).json({ message: 'IPM supprimée avec succès' });
+  } catch (err) {
+    console.error('Delete insurance error:', err.message);
+    return res.status(500).json({ error: 'Échec de la suppression de l\'IPM: ' + err.message });
   }
 };
 
@@ -330,5 +440,8 @@ module.exports = {
   getInvoices,
   getCashRegisters,
   getInsurances,
+  createInsurance,
+  updateInsurance,
+  deleteInsurance,
   getInvoiceDetails
 };

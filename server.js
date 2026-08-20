@@ -117,6 +117,9 @@ app.get('/api/appointments', apptCtrl.getAppointments);
 // 4. Cash Drawer Sessions & Billing
 app.get('/api/billing/cash-registers', billingCtrl.getCashRegisters);
 app.get('/api/billing/insurances', billingCtrl.getInsurances);
+app.post('/api/billing/insurances', billingCtrl.createInsurance);
+app.put('/api/billing/insurances/:id', billingCtrl.updateInsurance);
+app.delete('/api/billing/insurances/:id', billingCtrl.deleteInsurance);
 app.post('/api/billing/cash-sessions', billingCtrl.openCashSession);
 app.post('/api/billing/cash-sessions/:id/close', billingCtrl.closeCashSession);
 app.post('/api/billing/invoices', billingCtrl.createInvoice);
