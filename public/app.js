@@ -734,21 +734,15 @@ function closeDocumentViewerModal() {
 // ============================================================================
 async function handleLogin(e) {
   e.preventDefault();
-  const tenant_slug = document.getElementById('login-tenant-slug').value;
-  const email = document.getElementById('login-email').value;
+  const tenant_slug = document.getElementById('login-tenant-slug').value.trim();
+  const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
 
   try {
-    const response = await fetch('/api/auth/login', {
+    const data = await api.request('/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenant_slug, email, password })
     });
-    
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Login failed');
-    }
     
     state.token = data.token;
     state.user = data.user;
@@ -758,7 +752,7 @@ async function handleLogin(e) {
     localStorage.setItem('user', JSON.stringify(data.user));
     localStorage.setItem('tenant', JSON.stringify(data.tenant));
     
-    showToast(`Connexion réussie! Bienvenue ${data.user.first_name}`);
+    showToast(`Connexion réussie! Bienvenue ${data.user.first_name || ''}`);
     
     // Reset app shell
     initApp();
@@ -788,9 +782,8 @@ async function handleTenantSignup(e) {
   const payment_methods = signupPaymentMethods;
 
   try {
-    const response = await fetch('/api/auth/register-tenant', {
+    const data = await api.request('/auth/register-tenant', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenant_name,
         tenant_slug,
@@ -806,11 +799,6 @@ async function handleTenantSignup(e) {
         payment_methods
       })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || 'Registration failed');
-    }
 
     state.token = data.token;
     state.user = data.user;
@@ -6038,9 +6026,8 @@ async function processPayment(e) {
 // Simulated checkout webhook callback
 async function simulateWebhook(provider, ref, amount, invoiceId) {
   try {
-    const response = await fetch(`/api/payments/webhook/${provider.toLowerCase()}`, {
+    const data = await api.request(`/payments/webhook/${provider.toLowerCase()}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         transaction_reference: ref,
         amount,
@@ -6048,9 +6035,6 @@ async function simulateWebhook(provider, ref, amount, invoiceId) {
         status: 'SUCCESS'
       })
     });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error);
 
     showToast(`Webhook simulé reçu! Statut facture actualisé: ${data.invoice_status}`);
     closePaymentModal();
@@ -6938,9 +6922,19 @@ async function handleInvoiceCustomAttachmentUpload(inputEl) {
   const formData = new FormData();
   formData.append('file', file);
 
+  let baseUrl = window.API_BASE_URL;
+  if (!baseUrl) {
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      baseUrl = 'https://softmed-backend.onrender.com/api';
+    } else {
+      baseUrl = '/api';
+    }
+  }
+  const uploadUrl = `${baseUrl.replace(/\/$/, '')}/upload`;
+
   try {
     showToast(`Téléversement de ${file.name}...`, 'info');
-    const response = await fetch('/api/upload', {
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {})
