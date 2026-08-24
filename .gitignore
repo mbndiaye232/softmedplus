@@ -36,3 +36,7 @@ firestore-debug.log
 
 # Netlify
 .netlify
+
+# Angular Cache & Scratch
+.angular/
+scratch/

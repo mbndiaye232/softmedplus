@@ -1,4 +1,5 @@
 const { logAudit } = require('../middleware/audit');
+const { sendInvoiceEmail } = require('../utils/mailer');
 const crypto = require('crypto');
 
 // 1. Open Cash Session
@@ -449,6 +450,323 @@ const getInvoiceDetails = async (req, res) => {
   }
 };
 
+// 8. Get Available Attachments & Metadata for an Invoice (Prescriptions, Lab Scans, Receipts)
+const getInvoiceAvailableAttachments = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const invRes = await req.dbClient.query(
+      `SELECT i.*, 
+              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.email AS patient_email, p.phone_number AS patient_phone,
+              ic.name AS insurance_name, ic.code AS insurance_code, ic.contact_email AS insurance_email
+       FROM invoices i
+       JOIN patients p ON i.patient_id = p.id
+       LEFT JOIN insurance_companies ic ON i.insurance_company_id = ic.id
+       WHERE i.id = $1 AND i.tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (invRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+
+    const inv = invRes.rows[0];
+    const patientId = inv.patient_id;
+
+    // A. Patient Prescriptions with items (optional)
+    const rxRes = await req.dbClient.query(
+      `SELECT rx.*, rx.issued_at AS created_at,
+              COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json) AS items
+       FROM prescriptions rx
+       WHERE rx.patient_id = $1 AND rx.tenant_id = $2
+       ORDER BY rx.issued_at DESC LIMIT 5`,
+      [patientId, tenantId]
+    ).catch(err => {
+      console.warn('Prescriptions fetch warning:', err.message);
+      return { rows: [] };
+    });
+
+    // B. Patient Lab Orders & Scans (optional)
+    const labRes = await req.dbClient.query(
+      `SELECT lo.*
+       FROM patient_lab_orders lo
+       WHERE lo.patient_id = $1 AND lo.tenant_id = $2
+       ORDER BY lo.created_at DESC LIMIT 10`,
+      [patientId, tenantId]
+    ).catch(err => {
+      console.warn('Lab orders fetch warning:', err.message);
+      return { rows: [] };
+    });
+
+    // C. Payment receipts for this invoice (optional)
+    const payRes = await req.dbClient.query(
+      `SELECT p.* FROM payments p WHERE p.invoice_id = $1 AND p.tenant_id = $2 ORDER BY p.payment_date ASC`,
+      [id, tenantId]
+    ).catch(err => {
+      console.warn('Payments fetch warning:', err.message);
+      return { rows: [] };
+    });
+
+    // D. Configured SMTP Accounts for sender selection (optional)
+    const smtpRes = await req.dbClient.query(
+      `SELECT id, account_name, from_name, from_email, is_default 
+       FROM tenant_smtp_accounts 
+       WHERE tenant_id = $1 AND is_active = true 
+       ORDER BY is_default DESC, created_at ASC`,
+      [tenantId]
+    ).catch(err => {
+      console.warn('SMTP accounts fetch warning:', err.message);
+      return { rows: [] };
+    });
+
+    return res.status(200).json({
+      invoice: inv,
+      patient_email: inv.patient_email || '',
+      insurance_email: inv.insurance_email || '',
+      prescriptions: rxRes.rows || [],
+      lab_orders: labRes.rows || [],
+      payments: payRes.rows || [],
+      smtp_accounts: smtpRes.rows || []
+    });
+  } catch (err) {
+    console.error('Get available attachments error:', err.message);
+    return res.status(500).json({ error: 'Échec de chargement des données de facturation : ' + err.message });
+  }
+};
+
+// 9. Send Invoice with Attached Justifications via Email (to Patient or IPM)
+const sendInvoiceEmailController = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+  const userId = req.user.id;
+  const {
+    recipient_type = 'PATIENT',
+    recipient_email,
+    subject,
+    message,
+    include_prescriptions = true,
+    include_lab_results = true,
+    custom_attachments = [],
+    selected_prescription_ids = [],
+    selected_lab_ids = []
+  } = req.body;
+
+  if (!recipient_email || !recipient_email.includes('@')) {
+    return res.status(400).json({ error: 'Une adresse email valide est requise' });
+  }
+
+  try {
+    // 1. Fetch complete invoice details
+    const invRes = await req.dbClient.query(
+      `SELECT i.*, 
+              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone, p.email AS patient_email, p.date_of_birth, p.gender,
+              ic.name AS insurance_name, ic.code AS insurance_code, ic.address AS insurance_address, ic.contact_email AS insurance_email, ic.contact_phone AS insurance_phone,
+              pip.policy_number, pip.coverage_rate_percent AS policy_coverage_rate
+       FROM invoices i
+       JOIN patients p ON i.patient_id = p.id
+       LEFT JOIN insurance_companies ic ON i.insurance_company_id = ic.id
+       LEFT JOIN patient_insurance_policies pip ON (pip.patient_id = p.id AND pip.insurance_company_id = ic.id AND pip.is_primary = true)
+       WHERE i.id = $1 AND i.tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (invRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+
+    const invoice = invRes.rows[0];
+    const patientId = invoice.patient_id;
+
+    // 2. Fetch tenant header
+    const tenantRes = await req.dbClient.query(`SELECT * FROM tenants WHERE id = $1`, [tenantId]);
+    const tenant = tenantRes.rows[0] || {};
+
+    // 3. Fetch lines
+    const linesRes = await req.dbClient.query(
+      `SELECT il.*, ms.name AS service_name, ms.code AS service_code
+       FROM invoice_lines il
+       LEFT JOIN medical_services ms ON il.service_id = ms.id
+       WHERE il.invoice_id = $1 ORDER BY il.id ASC`,
+      [id]
+    );
+
+    // 4. Fetch payments
+    const paymentsRes = await req.dbClient.query(
+      `SELECT * FROM payments WHERE invoice_id = $1 ORDER BY payment_date ASC`,
+      [id]
+    );
+
+    // 5. Gather attachments to include
+    const attachedDocuments = [];
+
+    // Always include Invoice reference / official link
+    attachedDocuments.push({
+      name: `Facture_${invoice.invoice_number || 'FAC'}.pdf`,
+      type: 'Facture Médicale Officielle',
+      url: `${req.protocol}://${req.get('host')}/api/billing/invoices/${id}/details`
+    });
+
+    // Attached Prescriptions
+    if (include_prescriptions) {
+      let rxQuery = `SELECT rx.*, COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json) AS items
+                     FROM prescriptions rx WHERE rx.patient_id = $1 AND rx.tenant_id = $2`;
+      const rxParams = [patientId, tenantId];
+      if (selected_prescription_ids && selected_prescription_ids.length > 0) {
+        rxQuery += ` AND rx.id = ANY($3::uuid[])`;
+        rxParams.push(selected_prescription_ids);
+      }
+      rxQuery += ` ORDER BY rx.issued_at DESC LIMIT 3`;
+
+      const rxRes = await req.dbClient.query(rxQuery, rxParams);
+      for (const rx of rxRes.rows) {
+        attachedDocuments.push({
+          name: `Ordonnance_${rx.prescription_code}.pdf`,
+          type: 'Ordonnance Sécurisée Anti-Fraude',
+          url: `${req.protocol}://${req.get('host')}/api/rx/verify/${rx.prescription_code}?h=${rx.qr_cryptographic_hash}`
+        });
+      }
+    }
+
+    // Attached Lab Reports & Scans
+    if (include_lab_results) {
+      let labQuery = `SELECT * FROM patient_lab_orders WHERE patient_id = $1 AND tenant_id = $2`;
+      const labParams = [patientId, tenantId];
+      if (selected_lab_ids && selected_lab_ids.length > 0) {
+        labQuery += ` AND id = ANY($3::uuid[])`;
+        labParams.push(selected_lab_ids);
+      }
+      labQuery += ` ORDER BY created_at DESC LIMIT 5`;
+
+      const labRes = await req.dbClient.query(labQuery, labParams);
+      for (const lo of labRes.rows) {
+        if (lo.document_url) {
+          const isRemote = lo.document_url.startsWith('http');
+          const docFullUrl = isRemote ? lo.document_url : `${req.protocol}://${req.get('host')}${lo.document_url}`;
+          attachedDocuments.push({
+            name: `Resultats_${lo.test_name.replace(/[^a-zA-Z0-9_-]/g, '_')}${lo.document_url.toLowerCase().endsWith('.pdf') ? '.pdf' : '.png'}`,
+            type: `Scan d'Analyse (${lo.category || 'Biologie'})`,
+            url: docFullUrl
+          });
+        }
+      }
+    }
+
+    // Custom user attachments
+    if (Array.isArray(custom_attachments)) {
+      for (const ca of custom_attachments) {
+        if (ca && ca.url) {
+          const isRemote = ca.url.startsWith('http');
+          const caUrl = isRemote ? ca.url : `${req.protocol}://${req.get('host')}${ca.url}`;
+          attachedDocuments.push({
+            name: ca.name || 'Justificatif_Medical.pdf',
+            type: ca.type || 'Pièce Justificative Complémentaire',
+            url: caUrl
+          });
+        }
+      }
+    }
+
+    // 6. Fetch Tenant SMTP Account (Selected or Default)
+    let smtpAccount = null;
+    if (req.body.smtp_account_id) {
+      const smtpRes = await req.dbClient.query(
+        `SELECT * FROM tenant_smtp_accounts WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+        [req.body.smtp_account_id, tenantId]
+      );
+      if (smtpRes.rowCount > 0) smtpAccount = smtpRes.rows[0];
+    }
+    if (!smtpAccount) {
+      const defaultSmtpRes = await req.dbClient.query(
+        `SELECT * FROM tenant_smtp_accounts WHERE tenant_id = $1 AND is_default = true AND is_active = true LIMIT 1`,
+        [tenantId]
+      );
+      if (defaultSmtpRes.rowCount > 0) smtpAccount = defaultSmtpRes.rows[0];
+    }
+
+    // 7. Dispatch Email via mailer service
+    const mailResult = await sendInvoiceEmail({
+      tenant,
+      invoice,
+      patient: {
+        first_name: invoice.patient_first,
+        last_name: invoice.patient_last,
+        patient_code: invoice.patient_code,
+        phone_number: invoice.patient_phone,
+        email: invoice.patient_email
+      },
+      insurance: invoice.insurance_name ? {
+        name: invoice.insurance_name,
+        code: invoice.insurance_code,
+        email: invoice.insurance_email,
+        phone: invoice.insurance_phone
+      } : null,
+      lines: linesRes.rows,
+      payments: paymentsRes.rows,
+      recipientEmail: recipient_email.trim(),
+      recipientType,
+      customSubject: subject,
+      customMessage: message,
+      attachedDocuments,
+      smtpAccount
+    });
+
+    // 8. Record dispatch in invoice_email_logs
+    const logRes = await req.dbClient.query(
+      `INSERT INTO invoice_email_logs (
+        tenant_id, invoice_id, recipient_type, recipient_email, subject, custom_message, attachments_json, sent_by, message_id, is_simulated, status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'SENT')
+      RETURNING *`,
+      [
+        tenantId,
+        id,
+        recipientType,
+        recipient_email.trim(),
+        subject || `Facture N° ${invoice.invoice_number}`,
+        message || null,
+        JSON.stringify(attachedDocuments),
+        userId,
+        mailResult.messageId || null,
+        !!mailResult.simulated
+      ]
+    );
+
+    await logAudit(req, 'SEND_INVOICE_EMAIL', 'invoices', id);
+
+    return res.status(200).json({
+      success: true,
+      message: `Facture et ${attachedDocuments.length} pièce(s) jointe(s) envoyées avec succès à ${recipient_email}`,
+      mailResult,
+      log: logRes.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Send invoice email error:', err.message);
+    return res.status(500).json({ error: 'Échec de l\'envoi de l\'email: ' + err.message });
+  }
+};
+
+// 10. Get Email Logs for an Invoice
+const getInvoiceEmailLogs = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const logsRes = await req.dbClient.query(
+      `SELECT l.*, u.first_name AS sender_first, u.last_name AS sender_last
+       FROM invoice_email_logs l
+       LEFT JOIN users u ON l.sent_by = u.id
+       WHERE l.invoice_id = $1 AND l.tenant_id = $2
+       ORDER BY l.created_at DESC`,
+      [id, tenantId]
+    );
+    return res.status(200).json(logsRes.rows);
+  } catch (err) {
+    console.error('Get invoice email logs error:', err.message);
+    return res.status(500).json({ error: 'Failed to retrieve email logs' });
+  }
+};
+
 module.exports = {
   openCashSession,
   closeCashSession,
@@ -459,5 +777,9 @@ module.exports = {
   createInsurance,
   updateInsurance,
   deleteInsurance,
-  getInvoiceDetails
+  getInvoiceDetails,
+  getInvoiceAvailableAttachments,
+  sendInvoiceEmailController,
+  getInvoiceEmailLogs
 };
+

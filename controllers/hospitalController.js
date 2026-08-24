@@ -3,9 +3,11 @@ const { logAudit } = require('../middleware/audit');
 
 // 1. Buildings CRUD
 const getBuildings = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT * FROM hospital_buildings ORDER BY name`
+      `SELECT * FROM hospital_buildings WHERE tenant_id = $1 ORDER BY name`,
+      [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -39,16 +41,18 @@ const createBuilding = async (req, res) => {
 // 2. Rooms CRUD
 const getRooms = async (req, res) => {
   const { building_id } = req.query;
+  const tenantId = req.user.tenant_id;
   try {
     let query = `
       SELECT r.*, b.name as building_name 
       FROM hospital_rooms r
       JOIN hospital_buildings b ON r.building_id = b.id
+      WHERE r.tenant_id = $1
     `;
-    const params = [];
+    const params = [tenantId];
     if (building_id) {
-      query += ` WHERE r.building_id = $1`;
       params.push(building_id);
+      query += ` AND r.building_id = $${params.length}`;
     }
     query += ` ORDER BY r.number_or_name`;
 
@@ -85,28 +89,26 @@ const createRoom = async (req, res) => {
 // 3. Beds CRUD
 const getBeds = async (req, res) => {
   const { room_id, status } = req.query;
+  const tenantId = req.user.tenant_id;
   try {
     let query = `
       SELECT b.*, r.number_or_name as room_name, bl.name as building_name 
       FROM hospital_beds b
       JOIN hospital_rooms r ON b.room_id = r.id
       JOIN hospital_buildings bl ON r.building_id = bl.id
+      WHERE b.tenant_id = $1
     `;
-    const params = [];
-    const conditions = [];
+    const params = [tenantId];
 
     if (room_id) {
       params.push(room_id);
-      conditions.push(`b.room_id = $${params.length}`);
+      query += ` AND b.room_id = $${params.length}`;
     }
     if (status) {
       params.push(status);
-      conditions.push(`b.status = $${params.length}`);
+      query += ` AND b.status = $${params.length}`;
     }
 
-    if (conditions.length > 0) {
-      query += ` WHERE ` + conditions.join(' AND ');
-    }
     query += ` ORDER BY b.name`;
 
     const result = await req.dbClient.query(query, params);
@@ -142,6 +144,7 @@ const createBed = async (req, res) => {
 // 4. Stays (Hospitalizations)
 const getHospitalizations = async (req, res) => {
   const { status } = req.query;
+  const tenantId = req.user.tenant_id;
   try {
     let query = `
       SELECT h.*, 
@@ -153,11 +156,12 @@ const getHospitalizations = async (req, res) => {
       JOIN hospital_beds b ON h.bed_id = b.id
       JOIN hospital_rooms r ON b.room_id = r.id
       JOIN hospital_buildings bl ON r.building_id = bl.id
+      WHERE h.tenant_id = $1
     `;
-    const params = [];
+    const params = [tenantId];
     if (status) {
-      query += ` WHERE h.status = $1`;
       params.push(status);
+      query += ` AND h.status = $${params.length}`;
     }
     query += ` ORDER BY h.admitted_at DESC`;
 
@@ -180,8 +184,8 @@ const admitPatient = async (req, res) => {
   try {
     // Check if patient is already admitted
     const activeStay = await req.dbClient.query(
-      `SELECT id FROM hospitalizations WHERE patient_id = $1 AND status = 'ADMITTED'`,
-      [patient_id]
+      `SELECT id FROM hospitalizations WHERE patient_id = $1 AND tenant_id = $2 AND status = 'ADMITTED'`,
+      [patient_id, tenantId]
     );
     if (activeStay.rowCount > 0) {
       return res.status(400).json({ error: 'Le patient est déjà actuellement admis dans un séjour hospitalier' });
@@ -189,8 +193,8 @@ const admitPatient = async (req, res) => {
 
     // Check if bed is available
     const bedCheck = await req.dbClient.query(
-      `SELECT status FROM hospital_beds WHERE id = $1`,
-      [bed_id]
+      `SELECT status FROM hospital_beds WHERE id = $1 AND tenant_id = $2`,
+      [bed_id, tenantId]
     );
     if (bedCheck.rowCount === 0) {
       return res.status(404).json({ error: 'Lit introuvable' });
@@ -212,14 +216,14 @@ const admitPatient = async (req, res) => {
 
     // B. Mark bed as OCCUPIED
     await req.dbClient.query(
-      `UPDATE hospital_beds SET status = 'OCCUPIED' WHERE id = $1`,
-      [bed_id]
+      `UPDATE hospital_beds SET status = 'OCCUPIED' WHERE id = $1 AND tenant_id = $2`,
+      [bed_id, tenantId]
     );
 
     // C. Mark patient status as Interne (Inpatient)
     await req.dbClient.query(
-      `UPDATE patients SET status = 'Interne' WHERE id = $1`,
-      [patient_id]
+      `UPDATE patients SET status = 'Interne' WHERE id = $1 AND tenant_id = $2`,
+      [patient_id, tenantId]
     );
 
     await logAudit(req, 'ADMIT_PATIENT', 'hospitalizations', hospId);
@@ -251,8 +255,8 @@ const dischargePatient = async (req, res) => {
        JOIN patients p ON h.patient_id = p.id
        LEFT JOIN patient_insurance_policies pip ON p.id = pip.patient_id AND pip.is_primary = true
        LEFT JOIN insurance_companies ic ON pip.insurance_company_id = ic.id
-       WHERE h.id = $1 AND h.status = 'ADMITTED'`,
-      [id]
+       WHERE h.id = $1 AND h.tenant_id = $2 AND h.status = 'ADMITTED'`,
+      [id, tenantId]
     );
 
     if (stayRes.rowCount === 0) {

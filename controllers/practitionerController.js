@@ -29,7 +29,7 @@ const getSpecialties = async (req, res) => {
 
 const createSpecialty = async (req, res) => {
   const tenantId = req.user.tenant_id;
-  const { code, name, description, color_code } = req.body;
+  const { code, name, description, color_code, default_duration_minutes } = req.body;
 
   if (!code || !name) {
     return res.status(400).json({ error: 'Le code et le nom de la spécialité sont obligatoires' });
@@ -37,15 +37,16 @@ const createSpecialty = async (req, res) => {
 
   try {
     const result = await req.dbClient.query(
-      `INSERT INTO medical_specialties (tenant_id, code, name, description, color_code, is_active)
-       VALUES ($1, $2, $3, $4, $5, true)
+      `INSERT INTO medical_specialties (tenant_id, code, name, description, color_code, default_duration_minutes, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, true)
        RETURNING *`,
       [
         tenantId,
         code.trim().toUpperCase(),
         name.trim(),
         description ? description.trim() : null,
-        color_code || '#4a90e2'
+        color_code || '#4a90e2',
+        parseInt(default_duration_minutes) || 15
       ]
     );
 
@@ -63,7 +64,7 @@ const createSpecialty = async (req, res) => {
 const updateSpecialty = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const { id } = req.params;
-  const { code, name, description, color_code, is_active } = req.body;
+  const { code, name, description, color_code, default_duration_minutes, is_active } = req.body;
 
   if (!code || !name) {
     return res.status(400).json({ error: 'Le code et le nom sont obligatoires' });
@@ -76,14 +77,16 @@ const updateSpecialty = async (req, res) => {
            name = $2,
            description = $3,
            color_code = $4,
-           is_active = $5
-       WHERE id = $6 AND tenant_id = $7
+           default_duration_minutes = COALESCE($5, default_duration_minutes, 15),
+           is_active = $6
+       WHERE id = $7 AND tenant_id = $8
        RETURNING *`,
       [
         code.trim().toUpperCase(),
         name.trim(),
         description ? description.trim() : null,
         color_code || '#4a90e2',
+        default_duration_minutes ? parseInt(default_duration_minutes) : null,
         is_active !== undefined ? is_active : true,
         id,
         tenantId
@@ -715,6 +718,95 @@ const deletePractitioner = async (req, res) => {
   }
 };
 
+// ============================================================================
+// 4. PRACTITIONER UNAVAILABILITIES & ABSENCES
+// ============================================================================
+
+const getPractitionerUnavailabilities = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { practitionerId } = req.params;
+  try {
+    let query = `
+      SELECT pu.*, 
+             p.first_name, p.last_name, p.title
+      FROM practitioner_unavailabilities pu
+      JOIN practitioners p ON pu.practitioner_id = p.id
+      WHERE pu.tenant_id = $1
+    `;
+    const params = [tenantId];
+    if (practitionerId && practitionerId !== 'all') {
+      query += ` AND pu.practitioner_id = $2`;
+      params.push(practitionerId);
+    }
+    query += ` ORDER BY pu.start_time DESC`;
+
+    const result = await req.dbClient.query(query, params);
+    return res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Get unavailabilities error:', err.message);
+    return res.status(500).json({ error: 'Échec de récupération des indisponibilités' });
+  }
+};
+
+const createPractitionerUnavailability = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { practitioner_id, start_time, end_time, reason, all_day } = req.body;
+
+  if (!practitioner_id || !start_time || !end_time) {
+    return res.status(400).json({ error: 'Le médecin, la date de début et la date de fin sont obligatoires' });
+  }
+
+  const sDate = new Date(start_time);
+  const eDate = new Date(end_time);
+  if (eDate <= sDate) {
+    return res.status(400).json({ error: 'La date de fin doit être postérieure à la date de début' });
+  }
+
+  try {
+    const result = await req.dbClient.query(
+      `INSERT INTO practitioner_unavailabilities (tenant_id, practitioner_id, start_time, end_time, reason, all_day)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        tenantId,
+        practitioner_id,
+        sDate.toISOString(),
+        eDate.toISOString(),
+        reason ? reason.trim() : 'Congé / Indisponibilité',
+        all_day === true
+      ]
+    );
+
+    await logAudit(req, 'CREATE_UNAVAILABILITY', 'practitioner_unavailabilities', result.rows[0].id);
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Create unavailability error:', err.message);
+    return res.status(500).json({ error: 'Échec de création de l\'indisponibilité: ' + err.message });
+  }
+};
+
+const deletePractitionerUnavailability = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+  const { id } = req.params;
+
+  try {
+    const result = await req.dbClient.query(
+      `DELETE FROM practitioner_unavailabilities WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+      [id, tenantId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Indisponibilité introuvable' });
+    }
+
+    await logAudit(req, 'DELETE_UNAVAILABILITY', 'practitioner_unavailabilities', id);
+    return res.status(200).json({ message: 'Période d\'indisponibilité supprimée' });
+  } catch (err) {
+    console.error('Delete unavailability error:', err.message);
+    return res.status(500).json({ error: 'Échec de suppression de l\'indisponibilité' });
+  }
+};
+
 module.exports = {
   getSpecialties,
   createSpecialty,
@@ -727,5 +819,8 @@ module.exports = {
   getPractitioners,
   createPractitioner,
   updatePractitioner,
-  deletePractitioner
+  deletePractitioner,
+  getPractitionerUnavailabilities,
+  createPractitionerUnavailability,
+  deletePractitionerUnavailability
 };

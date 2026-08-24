@@ -37,8 +37,8 @@ const processPaymentReconciliation = async (dbClient, req, paymentData) => {
 
   // B. Lock and Fetch current invoice status
   const invoiceRes = await dbClient.query(
-    `SELECT * FROM invoices WHERE id = $1 FOR UPDATE`,
-    [invoice_id]
+    `SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+    [invoice_id, tenant_id]
   );
 
   if (invoiceRes.rowCount === 0) {
@@ -202,9 +202,11 @@ const configurePaymentMethod = async (req, res) => {
 
 // 3. Get Tenant's Configured Payment Methods
 const getPaymentMethods = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT id, provider, name, credentials, is_active, qr_code_template FROM tenant_payment_methods`
+      `SELECT id, provider, name, credentials, is_active, qr_code_template FROM tenant_payment_methods WHERE tenant_id = $1`,
+      [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {
@@ -216,6 +218,7 @@ const getPaymentMethods = async (req, res) => {
 // 4. Initialize Online Payment (Returns checkouts / dynamic QR data)
 const initializeOnlinePayment = async (req, res) => {
   const { invoice_id, tenant_payment_method_id, amount, payer_type } = req.body;
+  const tenantId = req.user.tenant_id;
 
   if (!invoice_id || !tenant_payment_method_id || !amount || !payer_type) {
     return res.status(400).json({ error: 'Required fields missing: invoice_id, tenant_payment_method_id, amount, payer_type' });
@@ -224,8 +227,8 @@ const initializeOnlinePayment = async (req, res) => {
   try {
     // Fetch payment gateway configuration
     const pmRes = await req.dbClient.query(
-      `SELECT * FROM tenant_payment_methods WHERE id = $1 AND is_active = true`,
-      [tenant_payment_method_id]
+      `SELECT * FROM tenant_payment_methods WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+      [tenant_payment_method_id, tenantId]
     );
 
     if (pmRes.rowCount === 0) {

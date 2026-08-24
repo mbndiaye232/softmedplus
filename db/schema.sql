@@ -660,3 +660,71 @@ JOIN patients p ON i.patient_id = p.id
 LEFT JOIN insurance_companies ic ON i.insurance_company_id = ic.id
 WHERE i.status NOT IN ('PAID', 'CANCELED');
 
+-- ============================================================================
+-- 11. MULTI-TENANT SMTP ACCOUNTS & EMAIL LOGS
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS tenant_smtp_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_name VARCHAR(100) NOT NULL,
+    from_name VARCHAR(150) NOT NULL,
+    from_email VARCHAR(255) NOT NULL,
+    reply_to_email VARCHAR(255),
+    smtp_host VARCHAR(255) NOT NULL,
+    smtp_port INT NOT NULL DEFAULT 465,
+    smtp_secure BOOLEAN NOT NULL DEFAULT true,
+    smtp_user VARCHAR(255) NOT NULL,
+    smtp_password VARCHAR(255) NOT NULL,
+    is_default BOOLEAN NOT NULL DEFAULT false,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    last_tested_at TIMESTAMPTZ,
+    last_test_status VARCHAR(50),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE tenant_smtp_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_smtp_accounts FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_smtp_accounts_tenant_isolation ON tenant_smtp_accounts
+    FOR ALL USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid OR current_setting('app.bypass_rls', true) = 'true');
+
+CREATE TABLE IF NOT EXISTS invoice_email_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    recipient_type VARCHAR(20) NOT NULL,
+    recipient_email VARCHAR(255) NOT NULL,
+    subject VARCHAR(500) NOT NULL,
+    custom_message TEXT,
+    attachments_json JSONB DEFAULT '[]'::jsonb,
+    sent_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    message_id VARCHAR(255),
+    is_simulated BOOLEAN DEFAULT false,
+    status VARCHAR(50) DEFAULT 'SENT',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE invoice_email_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_email_logs FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY invoice_email_logs_tenant_isolation ON invoice_email_logs
+    FOR ALL USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid OR current_setting('app.bypass_rls', true) = 'true');
+
+-- ============================================================================
+-- 12. PASSWORD RESET TOKENS
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token);
+

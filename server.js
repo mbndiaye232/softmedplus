@@ -21,15 +21,25 @@ const hospitalCtrl = require('./controllers/hospitalController');
 const patientStatusCtrl = require('./controllers/patientStatusController');
 const medicalHistoryCtrl = require('./controllers/medicalHistoryController');
 const practitionerCtrl = require('./controllers/practitionerController');
+const publicBookingCtrl = require('./controllers/publicBookingController');
+const userCtrl = require('./controllers/userController');
+const aiCopilotCtrl = require('./controllers/aiCopilotController');
+const smtpCtrl = require('./controllers/smtpController');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB limit for high-res scans & multi-page PDFs
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    if (
+      file.mimetype.startsWith('image/') ||
+      file.mimetype === 'application/pdf' ||
+      file.mimetype.includes('document') ||
+      file.mimetype.includes('octet-stream') ||
+      file.originalname.match(/\.(jpg|jpeg|png|gif|webp|pdf|bmp|tiff|doc|docx)$/i)
+    ) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'), false);
+      cb(new Error('Format de fichier non supporté. Veuillez sélectionner un scan, une photo (JPG, PNG) ou un PDF.'), false);
     }
   }
 });
@@ -44,14 +54,24 @@ app.use(express.json());
 // PUBLIC ROUTES (No Auth, handles RLS bypass internally within query connection)
 // ============================================================================
 
-// A. Self-service tenant signup & user login
+// A. Self-service tenant signup & user login & Password Reset
 app.post('/api/auth/register-tenant', authCtrl.registerTenant);
 app.post('/api/auth/login', authCtrl.login);
+app.post('/api/auth/forgot-password', authCtrl.forgotPassword);
+app.get('/api/auth/verify-reset-token', authCtrl.verifyResetToken);
+app.post('/api/auth/reset-password', authCtrl.resetPassword);
 
-// B. Public Cryptographic Prescription Verification (QR scanning endpoint)
+// B. Public Patient Online Booking Portal (Direct Links & QR codes)
+app.get('/api/public/clinics', publicBookingCtrl.getPublicClinics);
+app.get('/api/public/clinics/:slug', publicBookingCtrl.getPublicClinic);
+app.get('/api/public/clinics/:slug/available-slots', publicBookingCtrl.getPublicAvailableSlots);
+app.post('/api/public/verify-patient', publicBookingCtrl.publicVerifyPatient);
+app.post('/api/public/book', publicBookingCtrl.publicBookAppointment);
+
+// C. Public Cryptographic Prescription Verification (QR scanning endpoint)
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 
-// C. Public Payment Webhook (from Wave/OM/Yas/SPI checkouts)
+// D. Public Payment Webhook (from Wave/OM/Yas/SPI checkouts)
 app.post('/api/payments/webhook/:provider', paymentCtrl.handleWebhook);
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
@@ -89,6 +109,9 @@ app.post('/api/patients', patientCtrl.registerPatient);
 app.get('/api/patients', patientCtrl.getPatients);
 app.put('/api/patients/:id', patientCtrl.updatePatient);
 app.post('/api/clinical/consultations', patientCtrl.createConsultation);
+app.put('/api/clinical/consultations/:id', patientCtrl.updateConsultation);
+app.delete('/api/clinical/consultations/:id', patientCtrl.deleteConsultation);
+app.get('/api/clinical/prescriptions/:id', patientCtrl.getPrescriptionDetails);
 
 // 2b. Patient Statuses CRUD
 app.get('/api/patient-statuses', patientStatusCtrl.getStatuses);
@@ -96,8 +119,12 @@ app.post('/api/patient-statuses', patientStatusCtrl.createStatus);
 app.put('/api/patient-statuses/:id', patientStatusCtrl.updateStatus);
 app.delete('/api/patient-statuses/:id', patientStatusCtrl.deleteStatus);
 
-// 2c. Patient Medical 360° Dossier, Treatments & Lab Orders
+// 2c. Patient Medical 360° Dossier, Confidential Access Grants, Treatments & Lab Orders
 app.get('/api/patients/:patientId/dossier', medicalHistoryCtrl.getPatientDossier);
+app.get('/api/patients/:patientId/access-grants', medicalHistoryCtrl.getPatientAccessGrants);
+app.post('/api/patients/:patientId/access-grants', medicalHistoryCtrl.grantPatientAccess);
+app.delete('/api/patients/:patientId/access-grants/:grantId', medicalHistoryCtrl.revokePatientAccess);
+
 app.get('/api/patients/:patientId/treatments', medicalHistoryCtrl.getTreatments);
 app.post('/api/patients/:patientId/treatments', medicalHistoryCtrl.createTreatment);
 app.put('/api/patients/treatments/:id', medicalHistoryCtrl.updateTreatment);
@@ -107,6 +134,10 @@ app.get('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.getLabOrders);
 app.post('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.createLabOrder);
 app.put('/api/patients/lab-orders/:id', medicalHistoryCtrl.updateLabOrder);
 app.delete('/api/patients/lab-orders/:id', medicalHistoryCtrl.deleteLabOrder);
+
+// 2d. Patient Verification by Unique Code & Cross-Check Identity
+app.get('/api/patients/verify-code', patientCtrl.verifyPatientCode);
+app.post('/api/patients/verify-code', patientCtrl.verifyPatientCode);
 
 // 3. Appointments & Scheduling catalog (Medical Services / Consultations & Treatments CRUD)
 app.post('/api/medical-services', apptCtrl.createMedicalService);
@@ -132,7 +163,13 @@ app.post('/api/practitioners', practitionerCtrl.createPractitioner);
 app.put('/api/practitioners/:id', practitionerCtrl.updatePractitioner);
 app.delete('/api/practitioners/:id', practitionerCtrl.deletePractitioner);
 
+// 3e. Practitioner Unavailabilities & Absences
+app.get('/api/practitioners/:practitionerId/unavailabilities', practitionerCtrl.getPractitionerUnavailabilities);
+app.post('/api/practitioners-unavailabilities', practitionerCtrl.createPractitionerUnavailability);
+app.delete('/api/practitioners-unavailabilities/:id', practitionerCtrl.deletePractitionerUnavailability);
+
 app.post('/api/appointments', apptCtrl.createAppointment);
+app.post('/api/appointments/request-booking', apptCtrl.requestAppointmentBooking);
 app.get('/api/appointments', apptCtrl.getAppointments);
 
 // 4. Cash Drawer Sessions & Billing
@@ -146,6 +183,9 @@ app.post('/api/billing/cash-sessions/:id/close', billingCtrl.closeCashSession);
 app.post('/api/billing/invoices', billingCtrl.createInvoice);
 app.get('/api/billing/invoices', billingCtrl.getInvoices);
 app.get('/api/billing/invoices/:id/details', billingCtrl.getInvoiceDetails);
+app.get('/api/billing/invoices/:id/available-attachments', billingCtrl.getInvoiceAvailableAttachments);
+app.post('/api/billing/invoices/:id/send-email', billingCtrl.sendInvoiceEmailController);
+app.get('/api/billing/invoices/:id/email-logs', billingCtrl.getInvoiceEmailLogs);
 
 // 5. Inventory & Pharmacy Lots
 app.post('/api/inventory/items', stockCtrl.createStockItem);
@@ -164,26 +204,52 @@ app.get('/api/hospital/hospitalizations', hospitalCtrl.getHospitalizations);
 app.post('/api/hospital/hospitalizations', hospitalCtrl.admitPatient);
 app.post('/api/hospital/hospitalizations/:id/discharge', hospitalCtrl.dischargePatient);
 
-// 6. Aging Reports & Recovery Reminders
+// 6. Aging Reports, Financial Analytics & Recovery Reminders
 app.get('/api/reports/aging-balance', reportCtrl.getAgingBalance);
+app.get('/api/reports/dashboard-analytics', reportCtrl.getDashboardAnalytics);
 app.post('/api/reports/recovery-action', reportCtrl.triggerRecoveryAction);
 
 // 7. Tenant profile metadata management (logo, address, email, gps)
 app.get('/api/tenant/profile', tenantCtrl.getTenantProfile);
 app.put('/api/tenant/profile', tenantCtrl.updateTenantProfile);
 
-// 8. Administrative Tenant CRUD (restricted to SUPER_ADMIN)
+// 7b. Tenant Custom SMTP Email Accounts Management
+app.get('/api/settings/smtp-accounts', smtpCtrl.getSmtpAccounts);
+app.post('/api/settings/smtp-accounts', smtpCtrl.createSmtpAccount);
+app.put('/api/settings/smtp-accounts/:id', smtpCtrl.updateSmtpAccount);
+app.delete('/api/settings/smtp-accounts/:id', smtpCtrl.deleteSmtpAccount);
+app.post('/api/settings/smtp-accounts/:id/test', smtpCtrl.testSmtpAccount);
+app.post('/api/settings/smtp-accounts/test-direct', smtpCtrl.testSmtpAccount);
+app.post('/api/settings/smtp-accounts/:id/set-default', smtpCtrl.setDefaultSmtpAccount);
+
+// 8. User Management & Permissions Matrix (RBAC)
+app.get('/api/users', userCtrl.getUsers);
+app.post('/api/users', userCtrl.createUser);
+app.put('/api/users/:id', userCtrl.updateUser);
+app.delete('/api/users/:id', userCtrl.deleteUser);
+
+// 9. Administrative Tenant CRUD (restricted to SUPER_ADMIN)
 app.get('/api/tenants', tenantCtrl.getAllTenants);
 app.post('/api/tenants', tenantCtrl.createTenant);
 app.put('/api/tenants/:id', tenantCtrl.updateTenant);
 app.delete('/api/tenants/:id', tenantCtrl.deleteTenant);
 
+// 10. AI Clinical Voice Copilot & Consultation Dictation
+app.post('/api/ai/copilot/query', aiCopilotCtrl.handleCopilotQuery);
+app.post('/api/ai/copilot/dictate', aiCopilotCtrl.handleDictationConsultation);
+
 // ============================================================================
 // STATIC ASSET HOSTING (Serves compiled React frontend)
 // ============================================================================
 
+// Set no-cache headers so client always receives the latest updates
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+
 // Serve static React files if build folder is populated
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), { etag: false, maxAge: 0 }));
 
 // Catch-all route to redirect non-API page hits back to SPA index router
 app.get('*', (req, res) => {
@@ -195,5 +261,5 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`SoftMed Enterprise API server running on port ${PORT}`);
+  console.log(`SoftMed API server running on port ${PORT}`);
 });
