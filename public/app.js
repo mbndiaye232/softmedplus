@@ -481,7 +481,12 @@ const api = {
           }
         }
 
-        if (response.status === 401 || (response.status === 403 && (errMsg.toLowerCase().includes('token') || errMsg.toLowerCase().includes('authentifié')))) {
+        const isAuthRoute = path.includes('/auth/login') || path.includes('/auth/register');
+        if (response.status === 401 && !isAuthRoute && state.token) {
+          handleSessionExpired();
+          throw new Error('Session expirée');
+        }
+        if (response.status === 403 && !isAuthRoute && state.token && (errMsg.toLowerCase().includes('token') || errMsg.toLowerCase().includes('authentifié'))) {
           handleSessionExpired();
           throw new Error('Session expirée');
         }
