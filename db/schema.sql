@@ -137,6 +137,56 @@ CREATE TABLE practitioner_specialties (
     CONSTRAINT unique_practitioner_specialty UNIQUE (practitioner_id, specialty_id)
 );
 
+-- ============================================================================
+-- HOSPITALIZATION & INFRASTRUCTURE TABLES
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS hospital_buildings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    code VARCHAR(50) NULL,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS hospital_rooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    building_id UUID NOT NULL REFERENCES hospital_buildings(id) ON DELETE CASCADE,
+    room_number VARCHAR(100) NOT NULL,
+    number_or_name VARCHAR(100),
+    room_type VARCHAR(50) NOT NULL DEFAULT 'STANDARD',
+    daily_rate NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS hospital_beds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    room_id UUID NOT NULL REFERENCES hospital_rooms(id) ON DELETE CASCADE,
+    bed_number VARCHAR(100),
+    name VARCHAR(100),
+    luxury_level VARCHAR(50) NOT NULL DEFAULT 'STANDARD',
+    daily_rate NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    status VARCHAR(20) NOT NULL DEFAULT 'AVAILABLE' CHECK (status IN ('AVAILABLE', 'OCCUPIED', 'MAINTENANCE')),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS hospitalizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    bed_id UUID NOT NULL REFERENCES hospital_beds(id) ON DELETE RESTRICT,
+    admitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    discharged_at TIMESTAMPTZ NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ADMITTED' CHECK (status IN ('ADMITTED', 'DISCHARGED')),
+    notes TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE medical_departments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
