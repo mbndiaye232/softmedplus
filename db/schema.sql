@@ -1,42 +1,56 @@
 -- ClinicOS PostgreSQL Database Schema
 
 -- Drop tables in reverse order of dependencies if they exist
-DROP VIEW IF EXISTS view_aging_balance;
-DROP TABLE IF EXISTS medical_audit_logs;
-DROP TABLE IF EXISTS stock_movements;
-DROP TABLE IF EXISTS stock_lots;
-DROP TABLE IF EXISTS stock_items;
-DROP TABLE IF EXISTS debt_recovery_actions;
-DROP TABLE IF EXISTS ipm_claims_items;
-DROP TABLE IF EXISTS ipm_claims_batches;
-DROP TABLE IF EXISTS payments;
-DROP TABLE IF EXISTS invoice_lines;
-DROP TABLE IF EXISTS invoices;
-DROP TABLE IF EXISTS cash_sessions;
-DROP TABLE IF EXISTS cash_registers;
-DROP TABLE IF EXISTS appointments;
-DROP TABLE IF EXISTS medical_services;
-DROP TABLE IF EXISTS medical_documents;
-DROP TABLE IF EXISTS prescription_items;
-DROP TABLE IF EXISTS prescriptions;
-DROP TABLE IF EXISTS consultation_notes;
-DROP TABLE IF EXISTS medical_records;
-DROP TABLE IF EXISTS patient_insurance_policies;
-DROP TABLE IF EXISTS insurance_companies;
-DROP TABLE IF EXISTS patients;
-DROP TABLE IF EXISTS practitioners;
-DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS tenant_payment_methods;
-DROP TABLE IF EXISTS tenants;
+DROP VIEW IF EXISTS view_aging_balance CASCADE;
+DROP TABLE IF EXISTS hospitalizations CASCADE;
+DROP TABLE IF EXISTS hospital_beds CASCADE;
+DROP TABLE IF EXISTS hospital_rooms CASCADE;
+DROP TABLE IF EXISTS hospital_buildings CASCADE;
+DROP TABLE IF EXISTS practitioner_departments CASCADE;
+DROP TABLE IF EXISTS medical_departments CASCADE;
+DROP TABLE IF EXISTS practitioner_specialties CASCADE;
+DROP TABLE IF EXISTS medical_specialties CASCADE;
+DROP TABLE IF EXISTS patient_lab_orders CASCADE;
+DROP TABLE IF EXISTS patient_treatments CASCADE;
+DROP TABLE IF EXISTS patient_statuses CASCADE;
+DROP TABLE IF EXISTS medical_audit_logs CASCADE;
+DROP TABLE IF EXISTS stock_movements CASCADE;
+DROP TABLE IF EXISTS stock_lots CASCADE;
+DROP TABLE IF EXISTS stock_items CASCADE;
+DROP TABLE IF EXISTS debt_recovery_actions CASCADE;
+DROP TABLE IF EXISTS ipm_claims_items CASCADE;
+DROP TABLE IF EXISTS ipm_claims_batches CASCADE;
+DROP TABLE IF EXISTS payments CASCADE;
+DROP TABLE IF EXISTS invoice_lines CASCADE;
+DROP TABLE IF EXISTS invoices CASCADE;
+DROP TABLE IF EXISTS cash_sessions CASCADE;
+DROP TABLE IF EXISTS cash_registers CASCADE;
+DROP TABLE IF EXISTS appointments CASCADE;
+DROP TABLE IF EXISTS medical_services CASCADE;
+DROP TABLE IF EXISTS medical_documents CASCADE;
+DROP TABLE IF EXISTS prescription_items CASCADE;
+DROP TABLE IF EXISTS prescriptions CASCADE;
+DROP TABLE IF EXISTS consultation_notes CASCADE;
+DROP TABLE IF EXISTS medical_records CASCADE;
+DROP TABLE IF EXISTS patient_insurance_policies CASCADE;
+DROP TABLE IF EXISTS insurance_companies CASCADE;
+DROP TABLE IF EXISTS patients CASCADE;
+DROP TABLE IF EXISTS practitioners CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS tenant_payment_methods CASCADE;
+DROP TABLE IF EXISTS tenant_smtp_accounts CASCADE;
+DROP TABLE IF EXISTS invoice_email_logs CASCADE;
+DROP TABLE IF EXISTS password_reset_tokens CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
 
 -- Drop Enums if they exist
-DROP TYPE IF EXISTS stock_movement_type;
-DROP TYPE IF EXISTS claim_status;
-DROP TYPE IF EXISTS payment_method;
-DROP TYPE IF EXISTS invoice_status;
-DROP TYPE IF EXISTS booking_channel;
-DROP TYPE IF EXISTS appointment_status;
-DROP TYPE IF EXISTS user_role;
+DROP TYPE IF EXISTS stock_movement_type CASCADE;
+DROP TYPE IF EXISTS claim_status CASCADE;
+DROP TYPE IF EXISTS payment_method CASCADE;
+DROP TYPE IF EXISTS invoice_status CASCADE;
+DROP TYPE IF EXISTS booking_channel CASCADE;
+DROP TYPE IF EXISTS appointment_status CASCADE;
+DROP TYPE IF EXISTS user_role CASCADE;
 
 -- Extensions requises
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -89,7 +103,9 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role user_role NOT NULL DEFAULT 'SECRETARY',
+    role VARCHAR(50) NOT NULL DEFAULT 'TENANT_USER',
+    preset_name VARCHAR(50) DEFAULT 'CUSTOM',
+    permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_tenant_email UNIQUE (tenant_id, email)
@@ -380,13 +396,18 @@ CREATE TABLE medical_documents (
 CREATE TABLE medical_services (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    practitioner_id UUID REFERENCES practitioners(id) ON DELETE CASCADE,
+    practitioner_id UUID REFERENCES practitioners(id) ON DELETE SET NULL,
+    specialty_id UUID REFERENCES medical_specialties(id) ON DELETE SET NULL,
     code VARCHAR(50) NOT NULL,
     name VARCHAR(200) NOT NULL,
+    category VARCHAR(100) DEFAULT 'CONSULTATION',
+    description TEXT,
     duration_minutes INT NOT NULL DEFAULT 30,
-    price NUMERIC(12, 2) NOT NULL,
+    price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    standard_fee NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     deposit_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    is_active BOOLEAN NOT NULL DEFAULT true
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE appointments (

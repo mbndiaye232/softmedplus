@@ -23,8 +23,10 @@ SET app.bypass_rls = 'true';
     if (tenants.rowCount > 0) {
       sqlOutput += `-- 1. TENANTS (${tenants.rowCount})\n`;
       for (const t of tenants.rows) {
-        sqlOutput += `INSERT INTO tenants (id, name, slug, email, phone, address, tax_id, logo_url, stamp_url, is_active, created_at)
-VALUES ('${t.id}', ${esc(t.name)}, ${esc(t.slug)}, ${esc(t.email)}, ${esc(t.phone)}, ${esc(t.address)}, ${esc(t.tax_id)}, ${esc(t.logo_url)}, ${esc(t.stamp_url)}, ${t.is_active}, '${t.created_at.toISOString()}')
+        const phone = t.phone_number || t.phone || '+221330000000';
+        const ninea = t.ninea_rc || t.tax_id || null;
+        sqlOutput += `INSERT INTO tenants (id, name, slug, email, phone_number, address, ninea_rc, logo_url, stamp_url, is_active, created_at)
+VALUES ('${t.id}', ${esc(t.name)}, ${esc(t.slug)}, ${esc(t.email)}, ${esc(phone)}, ${esc(t.address)}, ${esc(ninea)}, ${esc(t.logo_url)}, ${esc(t.stamp_url)}, ${t.is_active}, '${t.created_at.toISOString()}')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, logo_url = EXCLUDED.logo_url;\n`;
       }
       sqlOutput += '\n';

@@ -1,23 +1,23 @@
 -- ============================================================================
 -- SOFTMED PRODUCTION CLEAN SEED DATA
 -- Baseline configuration, reference data, practitioners, and services
--- Generated on: 2026-08-24T21:13:04.226Z
+-- Generated on: 2026-08-24T22:33:15.430Z
 -- ============================================================================
 
 SET app.bypass_rls = 'true';
 
 -- 1. TENANTS (4)
-INSERT INTO tenants (id, name, slug, email, phone, address, tax_id, logo_url, stamp_url, is_active, created_at)
-VALUES ('ae405816-e93b-4d99-a25f-d1c5745bb896', 'Clinique de l''Espoir', 'espoir', 'contact@espoir.com', NULL, '12, Avenue Cheikh Anta Diop, Dakar, Sénégal', NULL, '/logo-espoir.png', '/stamp-default.png', true, '2026-08-20T12:01:59.989Z')
+INSERT INTO tenants (id, name, slug, email, phone_number, address, ninea_rc, logo_url, stamp_url, is_active, created_at)
+VALUES ('ae405816-e93b-4d99-a25f-d1c5745bb896', 'Clinique de l''Espoir', 'espoir', 'contact@espoir.com', '+221338000000', '12, Avenue Cheikh Anta Diop, Dakar, Sénégal', 'N01234567-RC', '/logo-espoir.png', '/stamp-default.png', true, '2026-08-20T12:01:59.989Z')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, logo_url = EXCLUDED.logo_url;
-INSERT INTO tenants (id, name, slug, email, phone, address, tax_id, logo_url, stamp_url, is_active, created_at)
-VALUES ('96a5b7a6-f067-4ec2-a28b-54fdcd47f013', 'Clinique de la paix', 'paix', 'mbndiaye@sst.best', NULL, '12 rue AmadouAssane NDOYE', NULL, '/uploads/5192e7b3-f574-4018-ab50-5ed46175390d.png', '/uploads/a71482c3-0a55-4a77-9795-80ba6f7f7c40.jpg', true, '2026-08-20T12:28:56.322Z')
+INSERT INTO tenants (id, name, slug, email, phone_number, address, ninea_rc, logo_url, stamp_url, is_active, created_at)
+VALUES ('96a5b7a6-f067-4ec2-a28b-54fdcd47f013', 'Clinique de la paix', 'paix', 'mbndiaye@sst.best', '+221776473506', '12 rue AmadouAssane NDOYE', 'SD3332', '/uploads/5192e7b3-f574-4018-ab50-5ed46175390d.png', '/uploads/a71482c3-0a55-4a77-9795-80ba6f7f7c40.jpg', true, '2026-08-20T12:28:56.322Z')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, logo_url = EXCLUDED.logo_url;
-INSERT INTO tenants (id, name, slug, email, phone, address, tax_id, logo_url, stamp_url, is_active, created_at)
-VALUES ('854246a0-392a-475c-b0db-b34b5cc4dfe7', 'Clinique Test 360', 'test-dpi-1787398551002', 'admin@test-dpi-1787398551002.sn', NULL, NULL, NULL, '/logo-espoir.png', NULL, true, '2026-08-22T11:35:51.157Z')
+INSERT INTO tenants (id, name, slug, email, phone_number, address, ninea_rc, logo_url, stamp_url, is_active, created_at)
+VALUES ('854246a0-392a-475c-b0db-b34b5cc4dfe7', 'Clinique Test 360', 'test-dpi-1787398551002', 'admin@test-dpi-1787398551002.sn', '+221770000000', NULL, NULL, '/logo-espoir.png', NULL, true, '2026-08-22T11:35:51.157Z')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, logo_url = EXCLUDED.logo_url;
-INSERT INTO tenants (id, name, slug, email, phone, address, tax_id, logo_url, stamp_url, is_active, created_at)
-VALUES ('10b0e5e8-1bca-4260-b883-0ab3066fac56', 'Clinique Horizon', 'clinique-test-1787405991341', 'admin.horizon@gmail.com', NULL, 'Mermoz, Dakar', NULL, '/logo-espoir.png', NULL, true, '2026-08-22T13:39:51.945Z')
+INSERT INTO tenants (id, name, slug, email, phone_number, address, ninea_rc, logo_url, stamp_url, is_active, created_at)
+VALUES ('10b0e5e8-1bca-4260-b883-0ab3066fac56', 'Clinique Horizon', 'clinique-test-1787405991341', 'admin.horizon@gmail.com', '+221771234567', 'Mermoz, Dakar', 'SN-DKR-2026-B-999', '/logo-espoir.png', NULL, true, '2026-08-22T13:39:51.945Z')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, logo_url = EXCLUDED.logo_url;
 
 -- 2. USERS (9)
