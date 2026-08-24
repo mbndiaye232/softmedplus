@@ -52,8 +52,8 @@ const addStockLot = async (req, res) => {
   try {
     // Start by locking and verifying the stock item
     const itemRes = await req.dbClient.query(
-      `SELECT * FROM stock_items WHERE id = $1 FOR UPDATE`,
-      [stock_item_id]
+      `SELECT * FROM stock_items WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [stock_item_id, tenantId]
     );
 
     if (itemRes.rowCount === 0) {
@@ -127,8 +127,8 @@ const depleteStock = async (req, res) => {
   try {
     // A. Lock stock item row to prevent concurrent race conditions
     const itemRes = await req.dbClient.query(
-      `SELECT * FROM stock_items WHERE id = $1 FOR UPDATE`,
-      [stock_item_id]
+      `SELECT * FROM stock_items WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+      [stock_item_id, tenantId]
     );
 
     if (itemRes.rowCount === 0) {
@@ -141,9 +141,9 @@ const depleteStock = async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     const lotsRes = await req.dbClient.query(
       `SELECT * FROM stock_lots 
-       WHERE stock_item_id = $1 AND expiration_date >= $2 AND quantity_remaining > 0
+       WHERE stock_item_id = $1 AND tenant_id = $2 AND expiration_date >= $3 AND quantity_remaining > 0
        ORDER BY expiration_date ASC FOR UPDATE`,
-      [stock_item_id, today]
+      [stock_item_id, tenantId, today]
     );
 
     let totalAvailable = 0;
@@ -167,8 +167,8 @@ const depleteStock = async (req, res) => {
 
       // Update lot remaining quantity
       await req.dbClient.query(
-        `UPDATE stock_lots SET quantity_remaining = quantity_remaining - $1 WHERE id = $2`,
-        [deductFromThisLot, lot.id]
+        `UPDATE stock_lots SET quantity_remaining = quantity_remaining - $1 WHERE id = $2 AND tenant_id = $3`,
+        [deductFromThisLot, lot.id, tenantId]
       );
 
       // Log movement (negative value for stock output)
@@ -185,9 +185,9 @@ const depleteStock = async (req, res) => {
     const updatedItemRes = await req.dbClient.query(
       `UPDATE stock_items 
        SET current_stock_quantity = current_stock_quantity - $1
-       WHERE id = $2
+       WHERE id = $2 AND tenant_id = $3
        RETURNING *`,
-      [qtyToDeplete, stock_item_id]
+      [qtyToDeplete, stock_item_id, tenantId]
     );
 
     await logAudit(req, 'DEPLETE_STOCK', 'stock_items', stock_item_id);
@@ -205,9 +205,11 @@ const depleteStock = async (req, res) => {
 
 // 4. Get Stock items list
 const getStockItems = async (req, res) => {
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT * FROM stock_items ORDER BY name ASC`
+      `SELECT * FROM stock_items WHERE tenant_id = $1 ORDER BY name ASC`,
+      [tenantId]
     );
     return res.status(200).json(result.rows);
   } catch (err) {

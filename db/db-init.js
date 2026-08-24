@@ -12,43 +12,51 @@ const dbPassword = process.env.DB_PASSWORD || 'postgres';
 const dbName = process.env.DB_NAME || 'clinicos';
 
 async function initDatabase() {
-  // Step 1: Connect to default 'postgres' database to create target db
-  console.log(`Connecting to default postgres database to check/create '${dbName}'...`);
-  const adminClient = new Client({
-    host: dbHost,
-    port: dbPort,
-    user: dbUser,
-    password: dbPassword,
-    database: 'postgres',
-  });
+  let client;
 
-  try {
-    await adminClient.connect();
-    const res = await adminClient.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [dbName]);
-    if (res.rowCount === 0) {
-      console.log(`Database '${dbName}' does not exist. Creating it...`);
-      // CREATE DATABASE cannot run inside a transaction block, so we execute it directly
-      await adminClient.query(`CREATE DATABASE "${dbName}"`);
-      console.log(`Database '${dbName}' created.`);
-    } else {
-      console.log(`Database '${dbName}' already exists.`);
+  if (process.env.DATABASE_URL) {
+    console.log('Connecting via DATABASE_URL to Render Postgres...');
+    client = new Client({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    });
+  } else {
+    // Step 1: Connect to default 'postgres' database to check/create target db locally
+    console.log(`Connecting to default postgres database to check/create '${dbName}'...`);
+    const adminClient = new Client({
+      host: dbHost,
+      port: parseInt(dbPort, 10) || 5432,
+      user: dbUser,
+      password: dbPassword,
+      database: 'postgres',
+    });
+
+    try {
+      await adminClient.connect();
+      const res = await adminClient.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [dbName]);
+      if (res.rowCount === 0) {
+        console.log(`Database '${dbName}' does not exist. Creating it...`);
+        await adminClient.query(`CREATE DATABASE "${dbName}"`);
+        console.log(`Database '${dbName}' created.`);
+      } else {
+        console.log(`Database '${dbName}' already exists.`);
+      }
+    } catch (err) {
+      console.error('Error verifying/creating database:', err.message);
+    } finally {
+      await adminClient.end().catch(() => {});
     }
-  } catch (err) {
-    console.error('Error verifying/creating database:', err.message);
-    process.exit(1);
-  } finally {
-    await adminClient.end();
-  }
 
-  // Step 2: Connect to target database and execute schema.sql
-  console.log(`Connecting directly to database '${dbName}'...`);
-  const client = new Client({
-    host: dbHost,
-    port: dbPort,
-    user: dbUser,
-    password: dbPassword,
-    database: dbName,
-  });
+    // Step 2: Connect directly to target database
+    console.log(`Connecting directly to database '${dbName}'...`);
+    client = new Client({
+      host: dbHost,
+      port: parseInt(dbPort, 10) || 5432,
+      user: dbUser,
+      password: dbPassword,
+      database: dbName,
+    });
+  }
 
   try {
     await client.connect();
@@ -61,7 +69,16 @@ async function initDatabase() {
     await client.query(schemaSql);
     console.log('Schema executed successfully. Tables, enums, extensions, and RLS policies created!');
 
-    // Step 3: Seed data (using app.current_tenant_id bypass for superuser or just standard insert since superuser bypasses RLS)
+    // Step 3: Check and load clean production seed if present
+    const prodSeedPath = path.join(__dirname, 'production_seed.sql');
+    if (fs.existsSync(prodSeedPath)) {
+      console.log('Reading and executing clean production seed (production_seed.sql)...');
+      const prodSeedSql = fs.readFileSync(prodSeedPath, 'utf8');
+      await client.query(prodSeedSql);
+      console.log('✅ Clean production baseline data loaded successfully (Tenants, Users, Practitioners, Services, IPM, Beds)!');
+      return;
+    }
+
     console.log('Seeding sample data...');
 
     const tenantId = crypto.randomUUID();

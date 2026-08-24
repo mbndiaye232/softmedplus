@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'clinicos-jwt-super-secret-key-2026';
 
-// Verify JWT Token and attach user details to request
+// 1. Verify JWT Token and attach user details to request
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -14,47 +14,98 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // Contains id, tenant_id, role, email
+    req.user = decoded; // Contains id, tenant_id, role, preset_name, permissions, email
+
+    // Allow SaaS Super Administrator to switch tenant context via X-Tenant-ID header
+    if ((req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com') && req.headers['x-tenant-id']) {
+      req.user.tenant_id = req.headers['x-tenant-id'];
+    }
     next();
   } catch (err) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
 };
 
-// Check if user is an Administrator (SUPER_ADMIN)
+// 2. Check if user is an Administrator (SaaS Super Admin or Tenant Admin)
 const requireAdmin = (req, res, next) => {
-  if (!req.user || req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Require Administrator role' });
+  if (!req.user || !['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé : Droits Administrateur requis' });
   }
   next();
 };
 
-// Restrict simple users to read-only (GET) requests
-// If user is SUPER_ADMIN, they have full access.
-// If user is not SUPER_ADMIN (e.g., a simple reader or staff member), they can only use GET requests.
-const checkWriteAccess = (req, res, next) => {
-  if (req.method !== 'GET' && (!req.user || req.user.role !== 'SUPER_ADMIN')) {
-    // Specific clinical/financial operations can be performed by designated roles
-    const path = req.path;
-    const role = req.user.role;
-
-    if (path.startsWith('/clinical') && role === 'DOCTOR') {
-      return next(); // Doctors can write clinical notes/prescriptions
-    }
-    if (path.startsWith('/billing/payments') && role === 'CASHIER') {
-      return next(); // Cashiers can record payments
-    }
-    if (path.startsWith('/inventory') && role === 'PHARMACIST') {
-      return next(); // Pharmacists can update stock
-    }
-
-    return res.status(403).json({ error: 'Forbidden: Simple users are restricted to read-only consultation' });
+// 3. Check if user is SaaS Super Administrator
+const requireSaasAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'SUPER_ADMIN_SAAS') {
+    return res.status(403).json({ error: 'Accès refusé : Droits Super Administrateur SaaS requis' });
   }
   next();
+};
+
+// 4. Granular Permission Checker (module, action: 'view' | 'create' | 'update' | 'delete')
+const checkPermission = (moduleName, action = 'view') => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Non authentifié' });
+    }
+
+    // Admins have bypass on all permissions
+    if (['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
+      return next();
+    }
+
+    const permissions = req.user.permissions || {};
+    const modulePerms = permissions[moduleName];
+
+    // Determine required action based on HTTP method if not explicitly specified
+    let requiredAction = action;
+    if (!requiredAction) {
+      if (req.method === 'GET') requiredAction = 'view';
+      else if (req.method === 'POST') requiredAction = 'create';
+      else if (req.method === 'PUT' || req.method === 'PATCH') requiredAction = 'update';
+      else if (req.method === 'DELETE') requiredAction = 'delete';
+    }
+
+    if (modulePerms && modulePerms[requiredAction] === true) {
+      return next();
+    }
+
+    const actionLabels = {
+      view: 'consulter',
+      create: 'créer',
+      update: 'modifier',
+      delete: 'supprimer'
+    };
+
+    return res.status(403).json({
+      error: `Accès refusé : Vous n'avez pas l'autorisation de ${actionLabels[requiredAction] || requiredAction} dans le module "${moduleName}".`
+    });
+  };
+};
+
+// 5. General Write Access Check
+const checkWriteAccess = (req, res, next) => {
+  if (req.method === 'GET') {
+    return next();
+  }
+
+  // Admins always have write access
+  if (req.user && ['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    return next();
+  }
+
+  // Check general permissions for tenant users
+  if (req.user && req.user.role === 'TENANT_USER') {
+    return next(); // Let specific controllers / permission middleware validate
+  }
+
+  return res.status(403).json({ error: 'Accès refusé : Opération d\'écriture non autorisée' });
 };
 
 module.exports = {
   verifyToken,
   requireAdmin,
+  requireSaasAdmin,
+  checkPermission,
   checkWriteAccess
 };

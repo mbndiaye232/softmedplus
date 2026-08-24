@@ -2,36 +2,38 @@ services:
   - type: web
     name: softmed-backend
     env: node
+    plan: free
     buildCommand: npm install
     startCommand: node server.js
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: PORT
         value: 5000
       - key: JWT_SECRET
         generateValue: true
       - key: HMAC_SECRET
         generateValue: true
-      - key: DB_HOST
+      - key: DATABASE_URL
         fromDatabase:
           name: softmed-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: softmed-db
-          property: port
-      - key: DB_USER
-        fromDatabase:
-          name: softmed-db
-          property: database
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: softmed-db
-          property: password
-      - key: DB_NAME
-        fromDatabase:
-          name: softmed-db
-          property: database
+          property: connectionString
+      - key: DB_SSL
+        value: "true"
+      # Cloudflare R2 Storage Bucket Settings (Set these in Render Dashboard)
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_BUCKET_NAME
+        value: softmed-storage
+      - key: R2_PUBLIC_URL
+        sync: false
 
 databases:
   - name: softmed-db
     plan: free
+    databaseName: clinicos
+    user: softmed

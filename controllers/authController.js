@@ -15,33 +15,56 @@ const login = async (req, res) => {
   }
 
   try {
-    // A. Fetch tenant by slug (un-isolated query to pool directly)
-    const tenantRes = await pool.query(
-      `SELECT id, name, is_active FROM tenants WHERE slug = $1`,
-      [tenant_slug.toLowerCase().trim()]
-    );
+    const slugLower = tenant_slug.toLowerCase().trim();
+    let tenant;
+    let user;
 
-    if (tenantRes.rowCount === 0) {
-      return res.status(404).json({ error: 'Clinic/Tenant not found' });
+    // A. Check if global SaaS Super-Admin login (e.g. slug = 'saas', 'admin', 'global')
+    if (['saas', 'admin', 'global', 'master', 'superadmin'].includes(slugLower)) {
+      const superAdminRes = await pool.query(
+        `SELECT u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.preset_name, u.permissions, u.is_active,
+                t.name as tenant_name, t.slug as tenant_slug, t.is_active as tenant_active
+         FROM users u
+         LEFT JOIN tenants t ON u.tenant_id = t.id
+         WHERE (u.role = 'SUPER_ADMIN_SAAS' OR u.email = 'mbndiaye@gmail.com') AND u.email = $1`,
+        [email.toLowerCase().trim()]
+      );
+
+      if (superAdminRes.rowCount > 0) {
+        user = superAdminRes.rows[0];
+        tenant = { id: user.tenant_id, name: user.tenant_name || 'Plateforme SaaS', slug: user.tenant_slug || 'saas', is_active: true };
+      }
     }
 
-    const tenant = tenantRes.rows[0];
-    if (!tenant.is_active) {
-      return res.status(403).json({ error: 'This tenant account has been deactivated' });
+    if (!user) {
+      // Regular clinic tenant lookup
+      const tenantRes = await pool.query(
+        `SELECT id, name, is_active FROM tenants WHERE slug = $1`,
+        [slugLower]
+      );
+
+      if (tenantRes.rowCount === 0) {
+        return res.status(404).json({ error: 'Clinique ou identifiant introuvable' });
+      }
+
+      tenant = tenantRes.rows[0];
+      if (!tenant.is_active) {
+        return res.status(403).json({ error: 'Le compte de cette clinique a été désactivé' });
+      }
+
+      // Fetch user within the tenant
+      const userRes = await pool.query(
+        `SELECT id, tenant_id, email, password_hash, first_name, last_name, role, preset_name, permissions, is_active 
+         FROM users WHERE (tenant_id = $1 OR role = 'SUPER_ADMIN_SAAS' OR email = 'mbndiaye@gmail.com') AND email = $2`,
+        [tenant.id, email.toLowerCase().trim()]
+      );
+
+      if (userRes.rowCount === 0) {
+        return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
+      }
+
+      user = userRes.rows[0];
     }
-
-    // B. Fetch user within the tenant (un-isolated query to pool directly)
-    const userRes = await pool.query(
-      `SELECT id, tenant_id, email, password_hash, first_name, last_name, role, is_active 
-       FROM users WHERE tenant_id = $1 AND email = $2`,
-      [tenant.id, email.toLowerCase().trim()]
-    );
-
-    if (userRes.rowCount === 0) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
-
-    const user = userRes.rows[0];
     if (!user.is_active) {
       return res.status(403).json({ error: 'User account is deactivated' });
     }
@@ -59,11 +82,13 @@ const login = async (req, res) => {
         tenant_id: user.tenant_id,
         email: user.email,
         role: user.role,
+        preset_name: user.preset_name || 'CUSTOM',
+        permissions: user.permissions || {},
         first_name: user.first_name,
         last_name: user.last_name
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     return res.status(200).json({
@@ -72,6 +97,8 @@ const login = async (req, res) => {
         id: user.id,
         email: user.email,
         role: user.role,
+        preset_name: user.preset_name || 'CUSTOM',
+        permissions: user.permissions || {},
         first_name: user.first_name,
         last_name: user.last_name
       },
@@ -151,20 +178,26 @@ const registerTenant = async (req, res) => {
       }
     }
 
-    // D. Hash Super Admin password and Insert User
+    // D. Hash Admin password and Insert User
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
+    const isSaasSuperAdmin = email.toLowerCase().trim() === 'mbndiaye@gmail.com';
+    const assignedRole = isSaasSuperAdmin ? 'SUPER_ADMIN_SAAS' : 'TENANT_ADMIN';
+    const assignedPreset = isSaasSuperAdmin ? 'SUPER_ADMIN_SAAS' : 'ADMIN';
+
     await client.query(
-      `INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role) 
-       VALUES ($1, $2, $3, $4, $5, $6, 'SUPER_ADMIN')`,
+      `INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role, preset_name) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         userId,
         tenantId,
         email.toLowerCase().trim(),
         passwordHash,
         first_name,
-        last_name
+        last_name,
+        assignedRole,
+        assignedPreset
       ]
     );
 
@@ -226,18 +259,19 @@ const registerTenant = async (req, res) => {
 
     await client.query('COMMIT');
 
-    // E. Generate JWT for the newly registered super-admin
+    // J. Generate JWT for the newly registered user
     const token = jwt.sign(
       {
         id: userId,
         tenant_id: tenantId,
         email: email.toLowerCase().trim(),
-        role: 'SUPER_ADMIN',
+        role: assignedRole,
+        preset_name: assignedPreset,
         first_name,
         last_name
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '7d' }
     );
 
     return res.status(201).json({
@@ -245,7 +279,8 @@ const registerTenant = async (req, res) => {
       user: {
         id: userId,
         email: email.toLowerCase().trim(),
-        role: 'SUPER_ADMIN',
+        role: assignedRole,
+        preset_name: assignedPreset,
         first_name,
         last_name
       },
@@ -265,7 +300,200 @@ const registerTenant = async (req, res) => {
   }
 };
 
+// 3. Forgot Password — Request reset link via email
+const forgotPassword = async (req, res) => {
+  const { email, tenant_slug } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Veuillez renseigner votre adresse email.' });
+  }
+
+  const cleanEmail = email.toLowerCase().trim();
+  const cleanSlug = tenant_slug ? tenant_slug.toLowerCase().trim() : null;
+
+  try {
+    let query = `
+      SELECT u.id, u.email, u.first_name, u.last_name, u.tenant_id,
+             t.name as tenant_name, t.slug as tenant_slug
+      FROM users u
+      LEFT JOIN tenants t ON u.tenant_id = t.id
+      WHERE u.email = $1 AND u.is_active = true
+    `;
+    const params = [cleanEmail];
+
+    if (cleanSlug && !['saas', 'admin', 'global'].includes(cleanSlug)) {
+      query += ` AND t.slug = $2`;
+      params.push(cleanSlug);
+    }
+
+    const userRes = await pool.query(query, params);
+
+    // Generic response for security if user not found
+    if (userRes.rowCount === 0) {
+      return res.status(200).json({
+        message: 'Si cette adresse email correspond à un compte actif, un lien de réinitialisation vous a été envoyé.'
+      });
+    }
+
+    const user = userRes.rows[0];
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 3600000); // 1 hour validity
+
+    // Invalidate any existing unused reset tokens for this user
+    await pool.query(
+      `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
+      [user.id]
+    );
+
+    // Insert new reset token
+    await pool.query(
+      `INSERT INTO password_reset_tokens (user_id, tenant_id, token, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [user.id, user.tenant_id, resetToken, expiresAt]
+    );
+
+    // Find active SMTP account for this tenant if available
+    let smtpConfig = null;
+    try {
+      const smtpRes = await pool.query(
+        `SELECT * FROM tenant_smtp_accounts WHERE tenant_id = $1 AND is_active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`,
+        [user.tenant_id]
+      );
+      if (smtpRes.rowCount > 0) {
+        smtpConfig = smtpRes.rows[0];
+      }
+    } catch (e) {
+      // Table might not be present in old setup, fallback to environment
+    }
+
+    // Build reset URL
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5000';
+    const resetUrl = `${protocol}://${host}/?reset_token=${resetToken}`;
+
+    const { sendPasswordResetEmail } = require('../utils/mailer');
+    const emailResult = await sendPasswordResetEmail({
+      recipientEmail: user.email,
+      userName: `${user.first_name || ''} ${user.last_name || ''}`.trim(),
+      resetUrl,
+      tenantName: user.tenant_name || 'SoftMed',
+      customConfig: smtpConfig
+    });
+
+    return res.status(200).json({
+      message: 'Un email contenant votre lien de réinitialisation sécurisé vient de vous être envoyé.',
+      simulated: emailResult.simulated || false,
+      resetUrl: emailResult.simulated ? resetUrl : undefined
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    return res.status(500).json({ error: 'Échec du traitement de la demande de réinitialisation.' });
+  }
+};
+
+// 4. Verify Reset Token validity
+const verifyResetToken = async (req, res) => {
+  const token = req.query.token || req.body.token;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Jeton de réinitialisation manquant' });
+  }
+
+  try {
+    const tokenRes = await pool.query(
+      `SELECT prt.*, u.email, u.first_name, u.last_name, t.name as tenant_name
+       FROM password_reset_tokens prt
+       JOIN users u ON prt.user_id = u.id
+       JOIN tenants t ON prt.tenant_id = t.id
+       WHERE prt.token = $1 AND prt.used_at IS NULL AND prt.expires_at > NOW()`,
+      [token.trim()]
+    );
+
+    if (tokenRes.rowCount === 0) {
+      return res.status(400).json({
+        valid: false,
+        error: 'Ce lien de réinitialisation est invalide ou a expiré. Veuillez refaire une demande.'
+      });
+    }
+
+    const row = tokenRes.rows[0];
+    return res.status(200).json({
+      valid: true,
+      email: row.email,
+      user_name: `${row.first_name} ${row.last_name}`,
+      tenant_name: row.tenant_name
+    });
+  } catch (err) {
+    console.error('Verify reset token error:', err);
+    return res.status(500).json({ error: 'Erreur lors de la vérification du lien' });
+  }
+};
+
+// 5. Reset Password with new password
+const resetPassword = async (req, res) => {
+  const { token, new_password } = req.body;
+
+  if (!token || !new_password) {
+    return res.status(400).json({ error: 'Jeton et nouveau mot de passe requis.' });
+  }
+
+  if (new_password.length < 6) {
+    return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const tokenRes = await client.query(
+      `SELECT prt.*, u.email, u.tenant_id
+       FROM password_reset_tokens prt
+       JOIN users u ON prt.user_id = u.id
+       WHERE prt.token = $1 AND prt.used_at IS NULL AND prt.expires_at > NOW()
+       FOR UPDATE`,
+      [token.trim()]
+    );
+
+    if (tokenRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'Ce lien de réinitialisation est invalide ou a expiré. Veuillez renouveler votre demande.'
+      });
+    }
+
+    const record = tokenRes.rows[0];
+    const passwordHash = await bcrypt.hash(new_password, 10);
+
+    // Update user password
+    await client.query(
+      `UPDATE users SET password_hash = $1 WHERE id = $2`,
+      [passwordHash, record.user_id]
+    );
+
+    // Mark token as used
+    await client.query(
+      `UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1`,
+      [record.id]
+    );
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({
+      message: 'Votre mot de passe a été modifié avec succès ! Vous pouvez maintenant vous connecter.'
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Reset password error:', err);
+    return res.status(500).json({ error: 'Échec de la réinitialisation du mot de passe.' });
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   login,
-  registerTenant
+  registerTenant,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword
 };

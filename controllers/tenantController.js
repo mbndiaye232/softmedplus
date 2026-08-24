@@ -1,5 +1,10 @@
 const { logAudit } = require('../middleware/audit');
 
+// Helper to check if user is the SaaS Super Administrator
+const isSaasAdmin = (user) => {
+  return user && (user.role === 'SUPER_ADMIN_SAAS' || user.email === 'mbndiaye@gmail.com');
+};
+
 // 1. Get current tenant profile
 const getTenantProfile = async (req, res) => {
   const tenantId = req.user.tenant_id;
@@ -19,10 +24,10 @@ const getTenantProfile = async (req, res) => {
   }
 };
 
-// 2. Update tenant profile (restricted to SUPER_ADMIN)
+// 2. Update tenant profile (allowed for Clinic Admins and SaaS Super Admin)
 const updateTenantProfile = async (req, res) => {
-  if (req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Forbidden: Only administrators can modify clinic profiles' });
+  if (!isSaasAdmin(req.user) && !['SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Accès refusé : Seuls les administrateurs de la clinique peuvent modifier les paramètres' });
   }
 
   const tenantId = req.user.tenant_id;
@@ -69,10 +74,10 @@ const updateTenantProfile = async (req, res) => {
   }
 };
 
-// 3. Get all tenants (restricted to SUPER_ADMIN)
+// 3. Get all tenants (STRICTLY restricted to SaaS Super Administrator)
 const getAllTenants = async (req, res) => {
-  if (req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Forbidden: Only administrators can view all tenants' });
+  if (!isSaasAdmin(req.user)) {
+    return res.status(403).json({ error: 'Accès refusé : Seul le Super-Administrateur SaaS peut voir toutes les cliniques' });
   }
 
   try {
@@ -90,10 +95,10 @@ const getAllTenants = async (req, res) => {
   }
 };
 
-// 4. Create new tenant (restricted to SUPER_ADMIN)
+// 4. Create new tenant (STRICTLY restricted to SaaS Super Administrator)
 const createTenant = async (req, res) => {
-  if (req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Forbidden: Only administrators can create tenants' });
+  if (!isSaasAdmin(req.user)) {
+    return res.status(403).json({ error: 'Accès refusé : Seul le Super-Administrateur SaaS peut créer de nouvelles cliniques depuis ce panneau' });
   }
 
   const { name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings, admin_email, admin_password, admin_first_name, admin_last_name } = req.body;
@@ -155,21 +160,26 @@ const createTenant = async (req, res) => {
       );
     }
 
-    // Insert super admin user if credentials provided
+    // Insert tenant admin user if credentials provided
     if (admin_email && admin_password) {
       const salt = await bcrypt.genSalt(10);
       const passwordHash = await bcrypt.hash(admin_password, salt);
 
+      const isSaasSuper = admin_email.toLowerCase().trim() === 'mbndiaye@gmail.com';
+      const roleToAssign = isSaasSuper ? 'SUPER_ADMIN_SAAS' : 'TENANT_ADMIN';
+
       await req.dbClient.query(
-        `INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role) 
-         VALUES ($1, $2, $3, $4, $5, $6, 'SUPER_ADMIN')`,
+        `INSERT INTO users (id, tenant_id, email, password_hash, first_name, last_name, role, preset_name) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           crypto.randomUUID(),
           tenantId,
           admin_email.toLowerCase().trim(),
           passwordHash,
           admin_first_name || 'Admin',
-          admin_last_name || name
+          admin_last_name || name,
+          roleToAssign,
+          isSaasSuper ? 'SUPER_ADMIN_SAAS' : 'ADMIN'
         ]
       );
     }
@@ -183,10 +193,10 @@ const createTenant = async (req, res) => {
   }
 };
 
-// 5. Update tenant by ID (restricted to SUPER_ADMIN)
+// 5. Update tenant by ID (STRICTLY restricted to SaaS Super Administrator)
 const updateTenant = async (req, res) => {
-  if (req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Forbidden: Only administrators can modify tenants' });
+  if (!isSaasAdmin(req.user)) {
+    return res.status(403).json({ error: 'Accès refusé : Seul le Super-Administrateur SaaS peut modifier les cliniques' });
   }
 
   const { id } = req.params;
@@ -235,10 +245,10 @@ const updateTenant = async (req, res) => {
   }
 };
 
-// 6. Delete tenant (restricted to SUPER_ADMIN)
+// 6. Delete tenant (STRICTLY restricted to SaaS Super Administrator)
 const deleteTenant = async (req, res) => {
-  if (req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Forbidden: Only administrators can delete tenants' });
+  if (!isSaasAdmin(req.user)) {
+    return res.status(403).json({ error: 'Accès refusé : Seul le Super-Administrateur SaaS peut supprimer des cliniques' });
   }
 
   const { id } = req.params;
@@ -262,6 +272,15 @@ const deleteTenant = async (req, res) => {
     console.error('Delete tenant error:', err.message);
     return res.status(500).json({ error: 'Failed to delete tenant: ' + err.message });
   }
+};
+
+module.exports = {
+  getTenantProfile,
+  updateTenantProfile,
+  getAllTenants,
+  createTenant,
+  updateTenant,
+  deleteTenant
 };
 
 module.exports = {
