@@ -441,17 +441,47 @@ const api = {
     
     try {
       const response = await fetch(url, opts);
-      const data = await response.json();
       
+      let data = null;
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (contentType.includes('application/json')) {
+        try {
+          data = await response.json();
+        } catch (e) {
+          data = null;
+        }
+      } else {
+        const text = await response.text();
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            data = { error: text.slice(0, 200) };
+          }
+        }
+      }
+
       if (!response.ok) {
-        const errMsg = data.error || 'Server request failed';
+        let errMsg = data?.error;
+        if (!errMsg) {
+          if (response.status === 502 || response.status === 503 || response.status === 504) {
+            errMsg = 'Le serveur backend sur Render est en cours de réveil ou inaccessible. Veuillez patienter 20 à 30 secondes et réessayer.';
+          } else if (response.status === 404) {
+            errMsg = `L'adresse du serveur backend (${url}) est introuvable (404). Vérifiez l'URL de votre backend Render.`;
+          } else {
+            errMsg = `Erreur serveur (${response.status}): ${response.statusText || 'Vérifiez la connexion au backend'}`;
+          }
+        }
+
         if (response.status === 401 || (response.status === 403 && (errMsg.toLowerCase().includes('token') || errMsg.toLowerCase().includes('authentifié')))) {
           handleSessionExpired();
           throw new Error('Session expirée');
         }
         throw new Error(errMsg);
       }
-      return data;
+
+      return data || {};
     } catch (err) {
       if (err.message !== 'Session expirée' && !err.message?.toLowerCase().includes('token')) {
         showToast(err.message, 'error');
