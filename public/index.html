@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SoftMed — Solution de Gestion Médicale Multi-Tenant</title>
   
+  <!-- Global Backend API Config -->
+  <script>
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      window.API_BASE_URL = 'https://softmed-backend.onrender.com/api';
+    }
+  </script>
+
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="shortcut icon" href="/favicon.ico">
@@ -13,7 +20,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- App Stylesheet -->
-  <link rel="stylesheet" href="app.css?v=4.5">
+  <link rel="stylesheet" href="app.css?v=5.1">
 </head>
 <body>
   <!-- Primary React-like viewport mounting point -->
@@ -23,6 +30,6 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- App engine script -->
-  <script src="app.js?v=4.4"></script>
+  <script src="app.js?v=5.1"></script>
 </body>
 </html>
