@@ -47,7 +47,11 @@ const upload = multer({
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID']
+}));
 app.use(express.json());
 
 // ============================================================================

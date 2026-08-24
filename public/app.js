@@ -426,7 +426,14 @@ const api = {
   },
   
   async request(path, options = {}) {
-    const baseUrl = window.API_BASE_URL || '/api';
+    let baseUrl = window.API_BASE_URL;
+    if (!baseUrl) {
+      if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        baseUrl = 'https://softmed-backend.onrender.com/api';
+      } else {
+        baseUrl = '/api';
+      }
+    }
     const cleanBase = baseUrl.replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const url = path.startsWith('http') ? path : `${cleanBase}${cleanPath}`;
@@ -524,7 +531,14 @@ async function uploadImage(inputEl, targetInputId) {
   const formData = new FormData();
   formData.append('file', file);
 
-  const baseUrl = window.API_BASE_URL || '/api';
+  let baseUrl = window.API_BASE_URL;
+  if (!baseUrl) {
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      baseUrl = 'https://softmed-backend.onrender.com/api';
+    } else {
+      baseUrl = '/api';
+    }
+  }
   const cleanBase = baseUrl.replace(/\/$/, '');
   const uploadUrl = `${cleanBase}/upload`;
 

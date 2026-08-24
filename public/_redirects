@@ -1,5 +1,2 @@
-# Cloudflare Pages Proxy to Render Backend
-/api/*  https://softmed-backend.onrender.com/api/:splat  200
-
-# SPA Routing Fallback
+# SPA Routing Fallback for Cloudflare Pages
 /*      /index.html                                       200
