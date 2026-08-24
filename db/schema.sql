@@ -175,18 +175,6 @@ CREATE TABLE IF NOT EXISTS hospital_beds (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS hospitalizations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    bed_id UUID NOT NULL REFERENCES hospital_beds(id) ON DELETE RESTRICT,
-    admitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    discharged_at TIMESTAMPTZ NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'ADMITTED' CHECK (status IN ('ADMITTED', 'DISCHARGED')),
-    notes TEXT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE medical_departments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -252,6 +240,18 @@ CREATE TABLE patients (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_tenant_patient_code UNIQUE (tenant_id, patient_code),
     CONSTRAINT unique_tenant_phone UNIQUE (tenant_id, phone_number)
+);
+
+CREATE TABLE IF NOT EXISTS hospitalizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    bed_id UUID NOT NULL REFERENCES hospital_beds(id) ON DELETE RESTRICT,
+    admitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    discharged_at TIMESTAMPTZ NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'ADMITTED' CHECK (status IN ('ADMITTED', 'DISCHARGED')),
+    notes TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE patient_treatments (
