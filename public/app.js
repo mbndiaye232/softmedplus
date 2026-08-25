@@ -7313,11 +7313,11 @@ async function renderSettings(container) {
       </div>
 
       <!-- AI Configuration Form -->
-      <form onsubmit="saveAIConfigForm(event)">
+      <form onsubmit="saveAIConfigForm(event)" autocomplete="off">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
           <div class="form-group">
             <label class="form-label" style="font-weight:700;">Fournisseur IA (Provider)</label>
-            <select class="form-control" id="ai-provider" onchange="onAIProviderChange(this.value)" required>
+            <select class="form-control" id="ai-provider" name="ai_provider_select" onchange="onAIProviderChange(this.value)" required>
               <option value="openrouter" ${aiCfg.provider_name === 'openrouter' ? 'selected' : ''}>🌐 OpenRouter (DeepSeek, Claude, Gemini, Llama via clé unique)</option>
               <option value="aimlapi" ${aiCfg.provider_name === 'aimlapi' ? 'selected' : ''}>✨ AIML API (api.aimlapi.com • Multi-modèles)</option>
               <option value="gemini" ${aiCfg.provider_name === 'gemini' ? 'selected' : ''}>🌟 Google Gemini (Direct API / AI Studio)</option>
@@ -7329,7 +7329,7 @@ async function renderSettings(container) {
           </div>
           <div class="form-group">
             <label class="form-label" style="font-weight:700;">Modèle LLM Identifiant</label>
-            <input type="text" class="form-control" id="ai-model" value="${aiCfg.model_name || 'deepseek/deepseek-chat'}" placeholder="ex: deepseek/deepseek-chat ou google/gemini-2.0-flash-001" required />
+            <input type="text" class="form-control" id="ai-model" name="ai_llm_model_identifier" autocomplete="off" data-lpignore="true" value="${aiCfg.model_name || 'deepseek/deepseek-chat'}" placeholder="ex: deepseek/deepseek-chat ou google/gemini-2.0-flash-001" required />
             <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
               Exemples : <code>deepseek/deepseek-chat</code>, <code>anthropic/claude-3.5-sonnet</code>, <code>gemini-2.0-flash-001</code>
             </div>
@@ -7340,19 +7340,19 @@ async function renderSettings(container) {
           <div class="form-group">
             <label class="form-label" style="font-weight:700;">Clé API Secrète (API Key)</label>
             <div style="display:flex; gap:6px;">
-              <input type="password" class="form-control" id="ai-api-key" value="${aiCfg.masked_key || ''}" placeholder="sk-or-v1-... ou AIzaSy..." style="flex:1;" />
+              <input type="password" class="form-control" id="ai-api-key" name="ai_llm_secret_key" autocomplete="new-password" data-lpignore="true" value="${aiCfg.masked_key || ''}" placeholder="sk-or-v1-... ou AIzaSy..." style="flex:1;" />
               <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ai-api-key')" style="padding:0 12px;" title="Afficher/Masquer"><i class="fas fa-eye"></i></button>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label" style="font-weight:700;">URL de Base Endpoint (facultatif / Mammouth / Ollama)</label>
-            <input type="text" class="form-control" id="ai-base-url" value="${aiCfg.base_url || ''}" placeholder="ex: https://api.mammouth.ai/v1 ou http://localhost:11434/v1" />
+            <input type="text" class="form-control" id="ai-base-url" name="ai_llm_endpoint_base_url" autocomplete="off" value="${aiCfg.base_url || ''}" placeholder="ex: https://api.mammouth.ai/v1 ou http://localhost:11434/v1" />
           </div>
         </div>
 
         <div class="form-group" style="margin-bottom:16px;">
           <label class="form-label" style="font-weight:700;">Consigne Système Globale (System Prompt)</label>
-          <textarea class="form-control" id="ai-system-prompt" rows="2" style="font-size:0.85rem;" placeholder="Instructions pour l'assistant médical...">${aiCfg.system_prompt || 'Tu es un assistant médical IA expert et bienveillant pour la plateforme de santé SoftMed. Tu rédiges en français clair, précis et professionnel.'}</textarea>
+          <textarea class="form-control" id="ai-system-prompt" name="ai_llm_system_instructions" rows="2" style="font-size:0.85rem;" placeholder="Instructions pour l'assistant médical...">${aiCfg.system_prompt || 'Tu es un assistant médical IA expert et bienveillant pour la plateforme de santé SoftMed. Tu rédiges en français clair, précis et professionnel.'}</textarea>
         </div>
 
         <!-- Connection Test Result Area -->
@@ -9538,7 +9538,17 @@ function switchAuthTab(tab) {
     if (loginBtn) loginBtn.style.borderBottom = 'none';
     if (signupBtn) signupBtn.style.borderBottom = '2px solid var(--primary)';
     renderSignupPaymentMethodsList();
-    if (title) title.innerText = state.currentLang === 'ar' ? 'سجل عiادة جديدة' : "S'enregistrer (Clinique)";
+    if (title) title.innerText = state.currentLang === 'ar' ? 'سجل هيكل صحي جديد' : "Créer une Structure Sanitaire";
+
+    // Clear any invalid browser autofill (such as AI model names) from the email/password fields
+    setTimeout(() => {
+      const sEmail = document.getElementById('signup-email');
+      const sPass = document.getElementById('signup-password');
+      if (sEmail && (!sEmail.value.includes('@') || sEmail.value.toLowerCase().includes('deepseek') || sEmail.value.toLowerCase().includes('claude') || sEmail.value.toLowerCase().includes('gemini') || sEmail.value.toLowerCase().includes('openai') || sEmail.value.toLowerCase().includes('llama') || sEmail.value.toLowerCase().includes('aiml'))) {
+        sEmail.value = '';
+        if (sPass) sPass.value = '';
+      }
+    }, 60);
   } else if (tab === 'forgot') {
     if (tabSelector) tabSelector.style.display = 'none';
     if (loginForm) loginForm.style.display = 'none';
