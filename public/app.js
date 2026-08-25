@@ -739,14 +739,13 @@ function closeDocumentViewerModal() {
 // ============================================================================
 async function handleLogin(e) {
   e.preventDefault();
-  const tenant_slug = document.getElementById('login-tenant-slug').value.trim();
   const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
 
   try {
     const data = await api.request('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ tenant_slug, email, password })
+      body: JSON.stringify({ email, password })
     });
     
     state.token = data.token;
@@ -9001,16 +9000,12 @@ function renderAuthLayout() {
         <!-- Login Form -->
         <form id="login-form" onsubmit="handleLogin(event)">
           <div class="form-group">
-            <label class="form-label">Identifiant Clinique (Tenant Slug)</label>
-            <input type="text" class="form-control" id="login-tenant-slug" value="espoir" placeholder="ex: espoir" required />
-          </div>
-          <div class="form-group">
             <label class="form-label">Adresse Email</label>
-            <input type="email" class="form-control" id="login-email" value="admin@espoir.com" placeholder="nom@espoir.com" required />
+            <input type="email" class="form-control" id="login-email" placeholder="votre-email@domaine.com" required />
           </div>
           <div class="form-group">
             <label class="form-label">Mot de passe</label>
-            <input type="password" class="form-control" id="login-password" value="admin123" placeholder="••••••••" required />
+            <input type="password" class="form-control" id="login-password" placeholder="••••••••" required />
           </div>
 
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:-4px; margin-bottom:14px;">
@@ -9035,15 +9030,11 @@ function renderAuthLayout() {
         <!-- Forgot Password Form -->
         <form id="forgot-form" onsubmit="handleForgotPassword(event)" style="display:none;">
           <p style="font-size:0.88rem; color:var(--text-muted); line-height:1.5; margin-bottom:16px;">
-            Saisissez votre adresse email et l'identifiant de votre clinique. Un lien sécurisé vous sera instantanément envoyé par email pour réinitialiser votre mot de passe.
+            Saisissez votre adresse email. Un lien sécurisé vous sera instantanément envoyé par email pour réinitialiser votre mot de passe.
           </p>
           <div class="form-group">
-            <label class="form-label">Identifiant Clinique (Tenant Slug)</label>
-            <input type="text" class="form-control" id="forgot-tenant-slug" value="espoir" placeholder="ex: espoir" required />
-          </div>
-          <div class="form-group">
             <label class="form-label">Adresse Email Professionnelle</label>
-            <input type="email" class="form-control" id="forgot-email" placeholder="nom@espoir.com" required />
+            <input type="email" class="form-control" id="forgot-email" placeholder="nom@domaine.com" required />
           </div>
           <button type="submit" id="btn-submit-forgot" class="btn btn-primary" style="width:100%; height:45px; margin-top:10px; font-weight:700;">
             <i class="fas fa-paper-plane"></i> Envoyer le lien de réinitialisation
@@ -9250,7 +9241,6 @@ function switchAuthTab(tab) {
 async function handleForgotPassword(e) {
   e.preventDefault();
   const email = document.getElementById('forgot-email').value.trim();
-  const tenant_slug = document.getElementById('forgot-tenant-slug').value.trim();
   const submitBtn = document.getElementById('btn-submit-forgot');
 
   if (!email) {
@@ -9264,7 +9254,7 @@ async function handleForgotPassword(e) {
   try {
     const res = await api.request('/auth/forgot-password', {
       method: 'POST',
-      body: JSON.stringify({ email, tenant_slug })
+      body: JSON.stringify({ email })
     });
 
     showToast(res.message || 'Lien de réinitialisation envoyé avec succès !', 'success');

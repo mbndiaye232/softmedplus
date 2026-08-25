@@ -10,8 +10,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'clinicos-jwt-super-secret-key-2026
 const login = async (req, res) => {
   const { tenant_slug, email, password } = req.body;
 
-  if (!tenant_slug || !email || !password) {
-    return res.status(400).json({ error: 'Tenant slug, email, and password are required' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email et mot de passe requis' });
   }
 
   const client = await pool.connect();
@@ -19,75 +19,57 @@ const login = async (req, res) => {
     await client.query('BEGIN');
     await client.query("SET LOCAL app.bypass_rls = 'true'");
 
-    const slugLower = tenant_slug.toLowerCase().trim();
-    let tenant;
-    let user;
+    const emailLower = email.toLowerCase().trim();
 
-    // A. Check if global SaaS Super-Admin login (e.g. slug = 'saas', 'admin', 'global')
-    if (['saas', 'admin', 'global', 'master', 'superadmin'].includes(slugLower)) {
-      const superAdminRes = await client.query(
-        `SELECT u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.is_active,
-                t.name as tenant_name, t.slug as tenant_slug, t.is_active as tenant_active
-         FROM users u
-         LEFT JOIN tenants t ON u.tenant_id = t.id
-         WHERE (u.role = 'SUPER_ADMIN_SAAS' OR u.email = 'mbndiaye@gmail.com') AND u.email = $1`,
-        [email.toLowerCase().trim()]
-      );
+    // Query user by email, joining tenants to retrieve tenant information and slug
+    let userQuery = `
+      SELECT u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.is_active,
+             t.id as t_id, t.name as tenant_name, t.slug as tenant_slug, t.is_active as tenant_active
+      FROM users u
+      LEFT JOIN tenants t ON u.tenant_id = t.id
+      WHERE u.email = $1
+    `;
+    let userParams = [emailLower];
 
-      if (superAdminRes.rowCount > 0) {
-        user = superAdminRes.rows[0];
-        tenant = { id: user.tenant_id, name: user.tenant_name || 'Plateforme SaaS', slug: user.tenant_slug || 'saas', is_active: true };
-      }
+    if (tenant_slug && !['saas', 'admin', 'global', 'master', 'superadmin'].includes(tenant_slug.toLowerCase().trim())) {
+      userQuery += ` AND (t.slug = $2 OR u.role = 'SUPER_ADMIN_SAAS' OR u.email = 'mbndiaye@gmail.com')`;
+      userParams.push(tenant_slug.toLowerCase().trim());
     }
 
-    if (!user) {
-      // Regular clinic tenant lookup
-      const tenantRes = await client.query(
-        `SELECT id, name, is_active FROM tenants WHERE slug = $1`,
-        [slugLower]
-      );
+    userQuery += ` ORDER BY (u.role = 'SUPER_ADMIN_SAAS' OR u.email = 'mbndiaye@gmail.com') DESC, u.created_at ASC`;
 
-      if (tenantRes.rowCount === 0) {
-        await client.query('COMMIT');
-        client.release();
-        return res.status(404).json({ error: 'Clinique ou identifiant introuvable' });
-      }
+    const userRes = await client.query(userQuery, userParams);
 
-      tenant = tenantRes.rows[0];
-      if (!tenant.is_active) {
-        await client.query('COMMIT');
-        client.release();
-        return res.status(403).json({ error: 'Le compte de cette clinique a été désactivé' });
-      }
+    if (userRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
+    }
 
-      // Fetch user within the tenant
-      const userRes = await client.query(
-        `SELECT id, tenant_id, email, password_hash, first_name, last_name, role, is_active 
-         FROM users WHERE (tenant_id = $1 OR role = 'SUPER_ADMIN_SAAS' OR email = 'mbndiaye@gmail.com') AND email = $2`,
-        [tenant.id, email.toLowerCase().trim()]
-      );
+    const user = userRes.rows[0];
 
-      if (userRes.rowCount === 0) {
-        await client.query('COMMIT');
-        client.release();
-        return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
-      }
+    if (!user.is_active) {
+      await client.query('COMMIT');
+      return res.status(403).json({ error: 'Votre compte utilisateur a été désactivé' });
+    }
 
-      user = userRes.rows[0];
+    if (user.tenant_active === false) {
+      await client.query('COMMIT');
+      return res.status(403).json({ error: 'Le compte de cette clinique a été désactivé' });
+    }
+
+    // Verify password
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      await client.query('COMMIT');
+      return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
     }
 
     await client.query('COMMIT');
-    if (!user.is_active) {
-      return res.status(403).json({ error: 'User account is deactivated' });
-    }
 
-    // C. Verify password
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
+    const tenantSlug = user.tenant_slug || (tenant_slug ? tenant_slug.toLowerCase().trim() : 'paix');
+    const tenantName = user.tenant_name || (user.role === 'SUPER_ADMIN_SAAS' ? 'Plateforme SaaS' : 'Clinique');
 
-    // D. Generate JWT
+    // Generate JWT
     const token = jwt.sign(
       {
         id: user.id,
@@ -111,9 +93,9 @@ const login = async (req, res) => {
         last_name: user.last_name
       },
       tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant_slug
+        id: user.tenant_id,
+        name: tenantName,
+        slug: tenantSlug
       }
     });
   } catch (err) {
