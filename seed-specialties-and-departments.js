@@ -151,6 +151,29 @@ async function seedData() {
       END $$;
     `);
 
+    // 6. Table practitioner_unavailabilities
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS practitioner_unavailabilities (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        practitioner_id UUID NOT NULL REFERENCES practitioners(id) ON DELETE CASCADE,
+        start_time TIMESTAMPTZ NOT NULL,
+        end_time TIMESTAMPTZ NOT NULL,
+        reason VARCHAR(255) NOT NULL DEFAULT 'Indisponibilité / Congé',
+        all_day BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE practitioner_unavailabilities ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE practitioner_unavailabilities FORCE ROW LEVEL SECURITY;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='practitioner_unavailabilities' AND policyname='tenant_isolation_practitioner_unavailabilities') THEN
+          CREATE POLICY tenant_isolation_practitioner_unavailabilities ON practitioner_unavailabilities FOR ALL USING (
+            tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid OR current_setting('app.bypass_rls', true) = 'true'
+          );
+        END IF;
+      END $$;
+    `);
+
     console.log('--- Récupération des cliniques (tenants) ---');
     const tenantsRes = await client.query('SELECT id, name, slug FROM tenants WHERE is_active = true');
     console.log(`Trouvé ${tenantsRes.rowCount} clinique(s)`);

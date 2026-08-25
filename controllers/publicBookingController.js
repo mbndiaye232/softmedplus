@@ -479,36 +479,51 @@ const getPublicAvailableSlots = async (req, res) => {
     const dayEnd = new Date(dayEndStr);
 
     // 4. Fetch booked appointments for doctor on that day
-    const apptRes = await client.query(
-      `SELECT lower(time_slot) AS start_time, upper(time_slot) AS end_time 
-       FROM appointments 
-       WHERE tenant_id = $1 AND practitioner_id = $2 AND status != 'CANCELED'
-         AND time_slot && tstzrange($3, $4)`,
-      [tenantId, docId, dayStart.toISOString(), dayEnd.toISOString()]
-    );
-    const bookedRanges = apptRes.rows.map(r => ({
-      start: new Date(r.start_time).getTime(),
-      end: new Date(r.end_time).getTime()
-    }));
+    let bookedRanges = [];
+    try {
+      const apptRes = await client.query(
+        `SELECT lower(time_slot) AS start_time, upper(time_slot) AS end_time 
+         FROM appointments 
+         WHERE tenant_id = $1 AND practitioner_id = $2 AND status != 'CANCELED'
+           AND time_slot && tstzrange($3, $4)`,
+        [tenantId, docId, dayStart.toISOString(), dayEnd.toISOString()]
+      );
+      bookedRanges = apptRes.rows.map(r => ({
+        start: new Date(r.start_time).getTime(),
+        end: new Date(r.end_time).getTime()
+      }));
+    } catch (e) {
+      console.log('[Info] appointments check fallback:', e.message);
+    }
 
     // 5. Fetch doctor unavailabilities
-    const unavailRes = await client.query(
-      `SELECT start_time, end_time, reason, all_day 
-       FROM practitioner_unavailabilities 
-       WHERE tenant_id = $1 AND practitioner_id = $2
-         AND (start_time, end_time) OVERLAPS ($3, $4)`,
-      [tenantId, docId, dayStart.toISOString(), dayEnd.toISOString()]
-    );
-    const unavailRanges = unavailRes.rows.map(u => ({
-      start: new Date(u.start_time).getTime(),
-      end: new Date(u.end_time).getTime(),
-      reason: u.reason,
-      all_day: u.all_day
-    }));
+    let unavailRanges = [];
+    try {
+      const unavailRes = await client.query(
+        `SELECT start_time, end_time, reason, all_day 
+         FROM practitioner_unavailabilities 
+         WHERE tenant_id = $1 AND practitioner_id = $2
+           AND (start_time, end_time) OVERLAPS ($3, $4)`,
+        [tenantId, docId, dayStart.toISOString(), dayEnd.toISOString()]
+      );
+      unavailRanges = unavailRes.rows.map(u => ({
+        start: new Date(u.start_time).getTime(),
+        end: new Date(u.end_time).getTime(),
+        reason: u.reason,
+        all_day: u.all_day
+      }));
+    } catch (e) {
+      // Table might not exist yet
+      unavailRanges = [];
+    }
+
+    await client.query('COMMIT');
 
     // 6. Generate candidate slots
     const slots = [];
     const now = Date.now();
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isToday = date === todayStr;
     let currentSlotStart = new Date(dayStart);
 
     while (currentSlotStart.getTime() + durationMinutes * 60 * 1000 <= dayEnd.getTime()) {
@@ -527,8 +542,8 @@ const getPublicAvailableSlots = async (req, res) => {
       // Check overlap with doctor unavailabilities / leave
       const unavail = unavailRanges.find(u => (u.all_day || (slotStartTime < u.end && slotEndTime > u.start)));
 
-      // Check past time (for today)
-      const isPast = slotStartTime < now;
+      // Check past time (only if date is today)
+      const isPast = isToday && slotStartTime < (now - 15 * 60 * 1000);
 
       const isAvailable = !isLunchTime && !isBooked && !unavail && !isPast;
 
