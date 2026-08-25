@@ -326,12 +326,43 @@ async function seedData() {
           }
         }
         deptsCount++;
+      // 5. Insertion des Prestations / Consultations Médicales (Medical Services)
+      const medicalServicesList = [
+        { code: 'CONS-MEDGEN', name: 'Consultation Médecine Générale', specCode: 'MED-GEN', cat: 'CONSULTATION', price: 15000, deposit: 2000, duration: 20, desc: 'Consultation médicale générale et bilan' },
+        { code: 'CONS-CARDIO', name: 'Consultation Spécialisée Cardiologie & ECG', specCode: 'CARDIO', cat: 'CONSULTATION', price: 25000, deposit: 2000, duration: 30, desc: 'Consultation cardiologue avec électrocardiogramme' },
+        { code: 'CONS-PED', name: 'Consultation Pédiatrique & Suivi de Croissance', specCode: 'PED', cat: 'CONSULTATION', price: 18000, deposit: 2000, duration: 25, desc: 'Bilan pédiatrique complet et carnet vaccinal' },
+        { code: 'CONS-GYN', name: 'Consultation Gynécologique & Suivi Grossesse', specCode: 'GYN-OBS', cat: 'CONSULTATION', price: 20000, deposit: 2000, duration: 30, desc: 'Suivi obstétrical et examen gynécologique' },
+        { code: 'CONS-DERMA', name: 'Consultation Dermatologique & Bilan Cutané', specCode: 'DERMA', cat: 'CONSULTATION', price: 20000, deposit: 2000, duration: 20, desc: 'Dermatoscopie et examen des lésions cutanées' },
+        { code: 'CONS-OPHTA', name: 'Consultation Ophtalmologie & Examen de Vue', specCode: 'OPHTA', cat: 'CONSULTATION', price: 20000, deposit: 2000, duration: 20, desc: 'Mesure de la réfraction et examen lampe à fente' },
+        { code: 'CONS-CHIR', name: 'Consultation Chirurgie Viscérale & Pré-opératoire', specCode: 'CHIR-GEN', cat: 'CONSULTATION', price: 25000, deposit: 2000, duration: 30, desc: 'Évaluation chirurgicale et diagnostic' }
+      ];
+
+      for (const ms of medicalServicesList) {
+        const specId = specialtyMap[ms.specCode] || null;
+        const docId = practitionerMap[ms.specCode] || null;
+        const checkMS = await client.query('SELECT id FROM medical_services WHERE tenant_id = $1 AND code = $2', [tenant.id, ms.code]);
+        if (checkMS.rowCount > 0) {
+          await client.query(`
+            UPDATE medical_services
+            SET name = $1, category = $2, duration_minutes = $3, price = $4, deposit_amount = $5,
+                practitioner_id = $6, specialty_id = $7, description = $8, is_active = true
+            WHERE id = $9
+          `, [ms.name, ms.cat, ms.duration, ms.price, ms.deposit, docId, specId, ms.desc, checkMS.rows[0].id]);
+        } else {
+          await client.query(`
+            INSERT INTO medical_services (
+              tenant_id, code, name, category, duration_minutes, price, standard_fee, deposit_amount,
+              practitioner_id, specialty_id, description, is_active
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+          `, [tenant.id, ms.code, ms.name, ms.cat, ms.duration, ms.price, ms.price, ms.deposit, docId, specId, ms.desc]);
+        }
       }
-      console.log(`  [+] ${deptsCount} Services hospitaliers créés et reliés aux spécialités & praticiens`);
+      console.log(`  [+] ${medicalServicesList.length} Prestations & Consultations médicales enregistrées`);
     }
 
     await client.query('COMMIT');
-    console.log('\n[Succès] Toutes les spécialités médicales et services hospitaliers de test ont été remplis !');
+    console.log('\n[Succès] Toutes les spécialités médicales, services hospitaliers, praticiens et prestations ont été remplis !');
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('\n[Erreur] Échec lors du remplissage des données:', err.message);

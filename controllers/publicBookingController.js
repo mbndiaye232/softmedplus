@@ -5,6 +5,9 @@ const getPublicClinic = async (req, res) => {
   const { slug } = req.params;
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const tenantRes = await client.query(
       `SELECT id, name, slug, phone_number, logo_url, address, email, gps_coordinates, settings 
        FROM tenants 
@@ -13,6 +16,7 @@ const getPublicClinic = async (req, res) => {
     );
 
     if (tenantRes.rowCount === 0) {
+      await client.query('COMMIT');
       return res.status(404).json({ error: 'Clinique introuvable ou désactivée' });
     }
 
@@ -51,6 +55,8 @@ const getPublicClinic = async (req, res) => {
       [tenant.id]
     );
 
+    await client.query('COMMIT');
+
     return res.status(200).json({
       clinic: {
         id: tenant.id,
@@ -77,9 +83,14 @@ const getPublicClinic = async (req, res) => {
 const getPublicClinics = async (req, res) => {
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const result = await client.query(
       `SELECT id, name, slug, phone_number, logo_url, address, email FROM tenants WHERE is_active = true ORDER BY name ASC`
     );
+
+    await client.query('COMMIT');
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('Public clinics list error:', err.message);
@@ -98,8 +109,14 @@ const publicVerifyPatient = async (req, res) => {
 
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const tRes = await client.query(`SELECT id FROM tenants WHERE LOWER(slug) = LOWER($1) LIMIT 1`, [tenant_slug.trim()]);
-    if (tRes.rowCount === 0) return res.status(404).json({ error: 'Clinique introuvable' });
+    if (tRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return res.status(404).json({ error: 'Clinique introuvable' });
+    }
     const tenantId = tRes.rows[0].id;
 
     const pRes = await client.query(
@@ -192,8 +209,14 @@ const publicBookAppointment = async (req, res) => {
 
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const tRes = await client.query(`SELECT id, name FROM tenants WHERE LOWER(slug) = LOWER($1) LIMIT 1`, [tenant_slug.trim()]);
-    if (tRes.rowCount === 0) return res.status(404).json({ error: 'Clinique introuvable' });
+    if (tRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return res.status(404).json({ error: 'Clinique introuvable' });
+    }
     const tenant = tRes.rows[0];
     const tenantId = tenant.id;
 
@@ -407,8 +430,14 @@ const getPublicAvailableSlots = async (req, res) => {
 
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const tRes = await client.query(`SELECT id, name FROM tenants WHERE LOWER(slug) = LOWER($1) LIMIT 1`, [slug.trim()]);
-    if (tRes.rowCount === 0) return res.status(404).json({ error: 'Clinique introuvable' });
+    if (tRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return res.status(404).json({ error: 'Clinique introuvable' });
+    }
     const tenantId = tRes.rows[0].id;
 
     // 1. Doctor
