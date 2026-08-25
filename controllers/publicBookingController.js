@@ -393,11 +393,12 @@ const publicBookAppointment = async (req, res) => {
 
     // Fetch practitioner details for pass
     const pracRes = await client.query(
-      `SELECT title, first_name, last_name, specialty_name FROM practitioners WHERE id = $1`,
+      `SELECT title, first_name, last_name, specialty_name, consultation_fee FROM practitioners WHERE id = $1`,
       [finalPractitionerId]
     );
     const practitioner = pracRes.rows[0] || {};
     const practitionerName = `${practitioner.title || 'Dr'} ${practitioner.first_name || ''} ${practitioner.last_name || ''}`.trim();
+    const finalPrice = (parseFloat(price) > 0) ? price : (practitioner.consultation_fee || 15000);
 
     return res.status(201).json({
       success: true,
@@ -412,7 +413,7 @@ const publicBookAppointment = async (req, res) => {
         last_name: finalPatientLast
       },
       service_name: serviceName,
-      service_price: price,
+      service_price: finalPrice,
       deposit_required: depositRequired,
       deposit_amount: depositRequired,
       currency: 'FCFA',
@@ -420,7 +421,7 @@ const publicBookAppointment = async (req, res) => {
         amount: 2000,
         currency: 'FCFA',
         methods: ['Wave Sénégal', 'Orange Money Sénégal'],
-        message: `Veuillez verser l'acompte de confirmation de 2 000 FCFA via Wave ou Orange Money pour valider définitivement votre réservation. Ce montant sera déduit de votre consultation (${price} FCFA).`,
+        message: `Veuillez verser l'acompte de confirmation de 2 000 FCFA via Wave ou Orange Money pour valider définitivement votre réservation. Ce montant sera déduit de votre consultation (${finalPrice} FCFA).`,
         patient_code: finalPatientCode
       } : null,
       message: depositRequired > 0

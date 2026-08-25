@@ -11784,34 +11784,23 @@ async function handleVoiceTranscript(userInput) {
     }
 
     voiceStep = 3;
-    const reply = `Très bien ${voicePatientData.first_name} ${voicePatientData.last_name}. Avec quel praticien souhaitez-vous prendre rendez-vous ? (ex: Dr ${docs[0] ? docs[0].last_name : 'Médecin'})`;
+    const reply = `Très bien ${voicePatientData.first_name} ${voicePatientData.last_name}. Quel spécialiste ou médecin souhaitez-vous consulter ? (Par exemple : Cardiologue, Pédiatre, Généraliste...)`;
     voiceTranscriptLog.push({ sender: 'ai', text: reply });
     renderVoiceMessages();
     speakAI(reply);
   } else if (voiceStep === 3) {
-    // Match Doctor
-    let matchedDoc = docs.find(d => text.includes(d.last_name.toLowerCase()) || text.includes(d.first_name.toLowerCase()));
-    if (!matchedDoc && docs.length > 0) matchedDoc = docs[0];
-    voicePatientData.doc_id = matchedDoc ? matchedDoc.id : (docs[0] ? docs[0].id : null);
-    
-    // Automatically match the consultation service corresponding to the doctor's specialty
-    if (matchedDoc) {
-      const services = publicPortalData.services || [];
-      const matchedService = services.find(s => 
-        (s.practitioner_id && s.practitioner_id === matchedDoc.id) ||
-        (matchedDoc.specialty_name && s.name && s.name.toLowerCase().includes(matchedDoc.specialty_name.toLowerCase())) ||
-        (matchedDoc.is_general_practitioner && s.name && s.name.toLowerCase().includes('générale'))
-      ) || services.find(s => s.category === 'CONSULTATION') || services[0];
+    // Match Doctor & Consultation Service by specialty (Cardiologie, Pédiatrie), title (Professeur, Docteur) or name
+    const { doc: matchedDoc, service: matchedService } = matchDoctorAndServiceFromInput(userInput, docs, services);
 
-      if (matchedService) {
-        voicePatientData.service_id = matchedService.id;
-      }
-    }
+    voicePatientData.doc_id = matchedDoc ? matchedDoc.id : (docs[0] ? docs[0].id : null);
+    voicePatientData.service_id = matchedService ? matchedService.id : (services[0] ? services[0].id : null);
+    voicePatientData.consultation_reason = matchedService ? matchedService.name : (matchedDoc ? `Consultation ${matchedDoc.specialty_name || 'Spécialisée'}` : 'Consultation');
 
     const docName = matchedDoc ? `${matchedDoc.title || 'Dr'} ${matchedDoc.first_name} ${matchedDoc.last_name}` : 'votre médecin';
+    const sName = voicePatientData.consultation_reason;
 
     voiceStep = 4;
-    const reply = `Rendez-vous sélectionné avec ${docName}. Quel jour et quelle heure préférez-vous ? (Par exemple : Aujourd'hui à 10 heures ou Demain à 15 heures).`;
+    const reply = `Rendez-vous sélectionné avec ${docName} (${sName}). Quel jour et quelle heure préférez-vous ? (Par exemple : Aujourd'hui à 10 heures ou Demain à 15 heures).`;
     voiceTranscriptLog.push({ sender: 'ai', text: reply });
     renderVoiceMessages();
     speakAI(reply);
@@ -11846,14 +11835,15 @@ async function handleVoiceTranscript(userInput) {
       const payload = {
         tenant_slug: clinic.slug,
         practitioner_id: voicePatientData.doc_id,
-        medical_service_id: voicePatientData.service_id || (publicPortalData.services[0] ? publicPortalData.services[0].id : null),
+        medical_service_id: voicePatientData.service_id,
+        consultation_reason: voicePatientData.consultation_reason || 'Consultation spécialisée',
         start_time: `${dateStr}T${hour}:00`,
         booking_channel: 'VOICE_AGENT',
         is_new_patient: !voicePatientData.is_existing,
         patient_code: voicePatientData.code,
         first_name: voicePatientData.first_name,
         last_name: voicePatientData.last_name,
-        phone_number: voicePatientData.phone || '770000000',
+        phone_number: voicePatientData.phone || '776473506',
         gender: voicePatientData.gender,
         date_of_birth: '1995-01-01'
       };
@@ -11863,14 +11853,14 @@ async function handleVoiceTranscript(userInput) {
         body: JSON.stringify(payload)
       });
 
-      const finalMsg = `Félicitations ${res.patient.first_name} ! Votre rendez-vous est validé sous le Code Patient ${res.patient.patient_code}. Votre pass numérique s'affiche à l'écran.`;
+      const finalMsg = `Félicitations ${res.patient.first_name} ! Votre rendez-vous avec ${res.practitioner_name || 'votre médecin'} est validé sous le Code Patient ${res.patient.patient_code}. Votre pass numérique s'affiche à l'écran.`;
       voiceTranscriptLog.push({ sender: 'ai', text: finalMsg });
       renderVoiceMessages();
       speakAI(finalMsg);
 
       setTimeout(() => {
         renderPublicPortalView(res);
-      }, 3500);
+      }, 2000);
 
     } catch (err) {
       const errMsg = `Désolé, une erreur est survenue : ${err.message}`;
