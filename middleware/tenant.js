@@ -28,6 +28,11 @@ const tenantIsolator = async (req, res, next) => {
     await client.query('BEGIN');
     await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [tenantId]);
 
+    // If Super Admin, bypass RLS so administrative actions work globally
+    if (req.user && (req.user.role === 'SUPER_ADMIN_SAAS' || req.user.role === 'SUPER_ADMIN' || req.user.email === 'mbndiaye@gmail.com')) {
+      await client.query("SET LOCAL app.bypass_rls = 'true'");
+    }
+
     // Track transaction status
     let isFinished = false;
 

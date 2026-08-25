@@ -41,6 +41,16 @@ async function migrate() {
         check: `SELECT 1 FROM information_schema.columns WHERE table_name='practitioners' AND column_name='title'`,
         sql: `ALTER TABLE practitioners ADD COLUMN title VARCHAR(50) NULL DEFAULT 'Dr'`,
         desc: 'practitioners.title'
+      },
+      {
+        check: `SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='preset_name'`,
+        sql: `ALTER TABLE users ADD COLUMN preset_name VARCHAR(100) NULL DEFAULT 'DOCTOR'`,
+        desc: 'users.preset_name'
+      },
+      {
+        check: `SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='permissions'`,
+        sql: `ALTER TABLE users ADD COLUMN permissions JSONB NULL DEFAULT '{}'::jsonb`,
+        desc: 'users.permissions'
       }
     ];
 

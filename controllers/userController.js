@@ -6,6 +6,7 @@ const getUsers = async (req, res) => {
   const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com';
   const tenantId = req.user.tenant_id;
   const targetTenantId = req.query.tenant_id;
+  const db = req.dbClient || pool;
 
   try {
     let query;
@@ -47,7 +48,7 @@ const getUsers = async (req, res) => {
       params = [tenantId];
     }
 
-    const result = await pool.query(query, params);
+    const result = await db.query(query, params);
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('getUsers error:', err.message);
@@ -59,6 +60,7 @@ const getUsers = async (req, res) => {
 const createUser = async (req, res) => {
   const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com';
   const { email, password, first_name, last_name, role, preset_name, permissions } = req.body;
+  const db = req.dbClient || pool;
 
   if (!email || !password || !first_name || !last_name) {
     return res.status(400).json({ error: 'Email, mot de passe, prénom et nom sont requis' });
@@ -69,10 +71,6 @@ const createUser = async (req, res) => {
     return res.status(403).json({ error: 'Accès refusé : seuls les administrateurs peuvent créer des utilisateurs' });
   }
 
-  // Determine target tenant ID:
-  // - For Super Admin creating a Super Admin: defaults to current tenant or system tenant
-  // - For Super Admin creating tenant admin/user: uses body.tenant_id if specified, else current tenant
-  // - For Tenant Admin: strictly restricted to their own tenant
   let targetTenantId = req.user.tenant_id;
   let userRole = role || 'TENANT_USER';
 
@@ -92,7 +90,7 @@ const createUser = async (req, res) => {
 
   try {
     // Check if email already exists in this tenant (or globally for superadmin)
-    const existing = await pool.query(
+    const existing = await db.query(
       `SELECT id FROM users WHERE tenant_id = $1 AND email = $2`,
       [targetTenantId, email.toLowerCase().trim()]
     );
@@ -114,7 +112,7 @@ const createUser = async (req, res) => {
 
     const userPerms = permissions || {};
 
-    const insertRes = await pool.query(`
+    const insertRes = await db.query(`
       INSERT INTO users (tenant_id, email, password_hash, first_name, last_name, role, preset_name, permissions, is_active)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
       RETURNING id, tenant_id, email, first_name, last_name, role, preset_name, permissions, is_active, created_at
@@ -131,8 +129,9 @@ const createUser = async (req, res) => {
 const updateUser = async (req, res) => {
   const { id } = req.params;
   const tenantId = req.user.tenant_id;
-  const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS';
+  const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com';
   const { email, password, first_name, last_name, role, preset_name, permissions, is_active } = req.body;
+  const db = req.dbClient || pool;
 
   // Only Admin can update users
   if (!['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
@@ -146,7 +145,7 @@ const updateUser = async (req, res) => {
       : `SELECT id, password_hash FROM users WHERE id = $1 AND tenant_id = $2`;
     const checkParams = isSaasSuperAdmin ? [id] : [id, tenantId];
 
-    const targetUser = await pool.query(checkQuery, checkParams);
+    const targetUser = await db.query(checkQuery, checkParams);
     if (targetUser.rowCount === 0) {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
@@ -183,7 +182,7 @@ const updateUser = async (req, res) => {
       id
     ];
 
-    const result = await pool.query(updateQuery, updateParams);
+    const result = await db.query(updateQuery, updateParams);
     return res.status(200).json(result.rows[0]);
   } catch (err) {
     console.error('updateUser error:', err.message);
@@ -195,7 +194,8 @@ const updateUser = async (req, res) => {
 const deleteUser = async (req, res) => {
   const { id } = req.params;
   const tenantId = req.user.tenant_id;
-  const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS';
+  const isSaasSuperAdmin = req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com';
+  const db = req.dbClient || pool;
 
   if (!['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Accès refusé' });
@@ -212,7 +212,7 @@ const deleteUser = async (req, res) => {
       : `DELETE FROM users WHERE id = $1 AND tenant_id = $2 RETURNING id`;
     const deleteParams = isSaasSuperAdmin ? [id] : [id, tenantId];
 
-    const result = await pool.query(deleteQuery, deleteParams);
+    const result = await db.query(deleteQuery, deleteParams);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Utilisateur introuvable' });
     }
