@@ -32,6 +32,11 @@ async function seedData() {
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE medical_specialties ADD COLUMN IF NOT EXISTS default_duration_minutes INTEGER DEFAULT 15;
+      ALTER TABLE medical_specialties ADD COLUMN IF NOT EXISTS color_code VARCHAR(20) DEFAULT '#4a90e2';
+      ALTER TABLE medical_specialties ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE medical_specialties ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+
       ALTER TABLE medical_specialties ENABLE ROW LEVEL SECURITY;
       ALTER TABLE medical_specialties FORCE ROW LEVEL SECURITY;
       DO $$ BEGIN
@@ -41,6 +46,16 @@ async function seedData() {
           );
         END IF;
       END $$;
+    `);
+
+    // Practitioners column migrations
+    await client.query(`
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS grade VARCHAR(100) DEFAULT 'Docteur en Médecine';
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS is_general_practitioner BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30);
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS consultation_fee NUMERIC(10, 2) DEFAULT 15000;
+      ALTER TABLE practitioners ADD COLUMN IF NOT EXISTS color_code VARCHAR(20) DEFAULT '#3b82f6';
     `);
 
     // 2. Table hospital_buildings
