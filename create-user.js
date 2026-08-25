@@ -24,6 +24,7 @@ async function createAdmin() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
 
     // 1. Get or Create Tenant
     let tenantId;
