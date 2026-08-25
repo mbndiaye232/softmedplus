@@ -14,15 +14,19 @@ const login = async (req, res) => {
     return res.status(400).json({ error: 'Tenant slug, email, and password are required' });
   }
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     const slugLower = tenant_slug.toLowerCase().trim();
     let tenant;
     let user;
 
     // A. Check if global SaaS Super-Admin login (e.g. slug = 'saas', 'admin', 'global')
     if (['saas', 'admin', 'global', 'master', 'superadmin'].includes(slugLower)) {
-      const superAdminRes = await pool.query(
-        `SELECT u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.preset_name, u.permissions, u.is_active,
+      const superAdminRes = await client.query(
+        `SELECT u.id, u.tenant_id, u.email, u.password_hash, u.first_name, u.last_name, u.role, u.is_active,
                 t.name as tenant_name, t.slug as tenant_slug, t.is_active as tenant_active
          FROM users u
          LEFT JOIN tenants t ON u.tenant_id = t.id
@@ -38,33 +42,41 @@ const login = async (req, res) => {
 
     if (!user) {
       // Regular clinic tenant lookup
-      const tenantRes = await pool.query(
+      const tenantRes = await client.query(
         `SELECT id, name, is_active FROM tenants WHERE slug = $1`,
         [slugLower]
       );
 
       if (tenantRes.rowCount === 0) {
+        await client.query('COMMIT');
+        client.release();
         return res.status(404).json({ error: 'Clinique ou identifiant introuvable' });
       }
 
       tenant = tenantRes.rows[0];
       if (!tenant.is_active) {
+        await client.query('COMMIT');
+        client.release();
         return res.status(403).json({ error: 'Le compte de cette clinique a été désactivé' });
       }
 
       // Fetch user within the tenant
-      const userRes = await pool.query(
-        `SELECT id, tenant_id, email, password_hash, first_name, last_name, role, preset_name, permissions, is_active 
+      const userRes = await client.query(
+        `SELECT id, tenant_id, email, password_hash, first_name, last_name, role, is_active 
          FROM users WHERE (tenant_id = $1 OR role = 'SUPER_ADMIN_SAAS' OR email = 'mbndiaye@gmail.com') AND email = $2`,
         [tenant.id, email.toLowerCase().trim()]
       );
 
       if (userRes.rowCount === 0) {
+        await client.query('COMMIT');
+        client.release();
         return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
       }
 
       user = userRes.rows[0];
     }
+
+    await client.query('COMMIT');
     if (!user.is_active) {
       return res.status(403).json({ error: 'User account is deactivated' });
     }
@@ -82,8 +94,6 @@ const login = async (req, res) => {
         tenant_id: user.tenant_id,
         email: user.email,
         role: user.role,
-        preset_name: user.preset_name || 'CUSTOM',
-        permissions: user.permissions || {},
         first_name: user.first_name,
         last_name: user.last_name
       },
@@ -97,8 +107,6 @@ const login = async (req, res) => {
         id: user.id,
         email: user.email,
         role: user.role,
-        preset_name: user.preset_name || 'CUSTOM',
-        permissions: user.permissions || {},
         first_name: user.first_name,
         last_name: user.last_name
       },
@@ -111,6 +119,8 @@ const login = async (req, res) => {
   } catch (err) {
     console.error('Login error:', err.message);
     return res.status(500).json({ error: 'Internal server error during login' });
+  } finally {
+    client.release();
   }
 };
 
