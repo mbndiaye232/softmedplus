@@ -11455,6 +11455,101 @@ function renderFormChannel(clinic, docs, services) {
   `;
 }
 
+// Intelligent specialty & doctor matching helper
+function matchDoctorAndServiceFromInput(inputText, docs, services) {
+  const text = (inputText || '').toLowerCase();
+  
+  const specialtyRules = [
+    { key: 'pédiatrie', docKeywords: ['pédiatre', 'pediatre', 'pédiatrie', 'pediatrie', 'enfant', 'bébé', 'bebe', 'aminata', 'diop'], serviceKeywords: ['pédiatrique', 'pediatrique', 'pédiatrie', 'pediatrie'] },
+    { key: 'cardiologie', docKeywords: ['cardiologue', 'cardiologie', 'cardio', 'coeur', 'cœur', 'amidou', 'ndiaye', 'tension'], serviceKeywords: ['cardiologie', 'ecg', 'cardio'] },
+    { key: 'gynécologie', docKeywords: ['gynécologue', 'gynecologue', 'gynéco', 'gyneco', 'gynécologie', 'grossesse', 'maternité', 'fatou', 'sow'], serviceKeywords: ['gynécologique', 'gynecologique', 'grossesse', 'gynéco'] },
+    { key: 'ophtalmologie', docKeywords: ['ophtalmologue', 'ophtalmo', 'ophtalmologie', 'yeux', 'vue', 'vision', 'aïssatou', 'aissatou', 'ba'], serviceKeywords: ['ophtalmologie', 'ophtalmo', 'vue'] },
+    { key: 'dermatologie', docKeywords: ['dermatologue', 'dermato', 'dermatologie', 'peau', 'bouton'], serviceKeywords: ['dermatologique', 'dermatologie', 'dermato'] },
+    { key: 'chirurgie', docKeywords: ['chirurgien', 'chirurgie', 'opération', 'operation', 'ousmane', 'fall'], serviceKeywords: ['chirurgie', 'chirurgicale'] },
+    { key: 'générale', docKeywords: ['généraliste', 'generaliste', 'médecin', 'medecin', 'docteur', 'ibrahima', 'sarr', 'saliou'], serviceKeywords: ['générale', 'generale', 'médicale'] }
+  ];
+
+  let matchedDoc = null;
+  let matchedService = null;
+
+  // 1. Direct name match
+  matchedDoc = docs.find(d => 
+    text.includes((d.last_name || '').toLowerCase()) || 
+    text.includes((d.first_name || '').toLowerCase())
+  );
+
+  // 2. Specialty keyword match
+  if (!matchedDoc) {
+    for (const rule of specialtyRules) {
+      if (rule.docKeywords.some(kw => text.includes(kw))) {
+        matchedDoc = docs.find(d => 
+          (d.specialty_name && d.specialty_name.toLowerCase().includes(rule.key)) ||
+          (rule.key === 'générale' && d.is_general_practitioner) ||
+          rule.docKeywords.some(kw => (d.first_name + ' ' + d.last_name).toLowerCase().includes(kw))
+        );
+        if (matchedDoc) break;
+      }
+    }
+  }
+
+  if (!matchedDoc && docs.length > 0) matchedDoc = docs[0];
+
+  // 3. Match service for this doctor / specialty
+  if (matchedDoc) {
+    matchedService = services.find(s => 
+      (s.practitioner_id && s.practitioner_id === matchedDoc.id) ||
+      (matchedDoc.specialty_name && s.name && s.name.toLowerCase().includes(matchedDoc.specialty_name.toLowerCase().slice(0, 5))) ||
+      (matchedDoc.is_general_practitioner && s.name && s.name.toLowerCase().includes('générale'))
+    );
+  }
+
+  if (!matchedService) {
+    for (const rule of specialtyRules) {
+      if (rule.docKeywords.some(kw => text.includes(kw))) {
+        matchedService = services.find(s => rule.serviceKeywords.some(skw => (s.name || '').toLowerCase().includes(skw)));
+        if (matchedService) break;
+      }
+    }
+  }
+
+  if (!matchedService) {
+    matchedService = services.find(s => s.category === 'CONSULTATION' || (s.name && s.name.toLowerCase().includes('consultation'))) || services[0];
+  }
+
+  return { doc: matchedDoc, service: matchedService };
+}
+
+function parseNameAndPhoneFromInput(userInput) {
+  let phone = '';
+  const phoneMatch = userInput.match(/(?:\+?221\s*)?(?:7[05678]|33)\s*\d{3}\s*\d{2}\s*\d{2}/) || userInput.match(/\d{9}/);
+  if (phoneMatch) {
+    phone = phoneMatch[0].replace(/[\s+]/g, '');
+    if (phone.startsWith('221') && phone.length === 12) phone = phone.slice(3);
+  }
+
+  let cleanName = userInput
+    .replace(/(?:mon\s+num[ée]ro\s+de\s+t[ée]l[ée]phone|t[ée]l[ée]phone|num[ée]ro|t[ée]l|mon\s+num[ée]ro\s+c'?est|mon\s+num[ée]ro\s+est|c'?est\s+le|voici\s+mon\s+num[ée]ro)/gi, '')
+    .replace(/(?:\+?221\s*)?(?:7[05678]|33)\s*\d{3}\s*\d{2}\s*\d{2}/g, '')
+    .replace(/\d+/g, '')
+    .replace(/[^\wÀ-ÿ\s-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const parts = cleanName.split(/\s+/).filter(p => p.length > 1);
+  let firstName = 'Patient';
+  let lastName = 'Vocal';
+
+  if (parts.length >= 2) {
+    firstName = parts[0];
+    lastName = parts.slice(1).join(' ');
+  } else if (parts.length === 1) {
+    firstName = parts[0];
+    lastName = 'Nouveau';
+  }
+
+  return { firstName, lastName, phone: phone || '776473506' };
+}
+
 // ----------------------------------------------------------------------------
 // Channel 2: Voice AI Assistant (Speech Recognition + SpeechSynthesis)
 // ----------------------------------------------------------------------------
@@ -11580,6 +11675,7 @@ async function handleVoiceTranscript(userInput) {
   const text = userInput.toLowerCase();
   const clinic = publicPortalData.clinic;
   const docs = publicPortalData.practitioners || [];
+  const services = publicPortalData.services || [];
 
   if (voiceStep === 0) {
     // Check if user says code or new
@@ -11621,10 +11717,11 @@ async function handleVoiceTranscript(userInput) {
     renderVoiceMessages();
     speakAI(reply);
   } else if (voiceStep === 2) {
-    // Name & identity verification
-    const parts = userInput.trim().split(/\s+/);
-    voicePatientData.first_name = parts[0] || 'Patient';
-    voicePatientData.last_name = parts.slice(1).join(' ') || 'Vocal';
+    // Name & Phone extraction
+    const { firstName, lastName, phone } = parseNameAndPhoneFromInput(userInput);
+    voicePatientData.first_name = firstName;
+    voicePatientData.last_name = lastName;
+    if (phone) voicePatientData.phone = phone;
 
     if (voicePatientData.is_existing) {
       // Cross-check with backend API
@@ -11962,10 +12059,11 @@ async function processWhatsAppFlow(userInput) {
       ]
     });
   } else if (waStep === 2) {
-    // Name provided
-    const parts = userInput.trim().split(/\s+/);
-    waPatientData.first_name = parts[0] || 'Patient';
-    waPatientData.last_name = parts.slice(1).join(' ') || 'WhatsApp';
+    // Name & phone provided
+    const { firstName, lastName, phone } = parseNameAndPhoneFromInput(userInput);
+    waPatientData.first_name = firstName;
+    waPatientData.last_name = lastName;
+    if (phone) waPatientData.phone = phone;
 
     if (waPatientData.is_existing) {
       try {
@@ -11990,22 +12088,28 @@ async function processWhatsAppFlow(userInput) {
     waMessages.push({
       sender: 'bot',
       time: timeNow,
-      text: `✅ Merci **${waPatientData.first_name} ${waPatientData.last_name}**.\n\nQuel praticien souhaitez-vous consulter ?`,
+      text: `✅ Merci **${waPatientData.first_name} ${waPatientData.last_name}**.\n\nQuel praticien ou spécialité souhaitez-vous consulter ?`,
       quickReplies: docs.map(d => ({
-        label: `${d.title || 'Dr'} ${d.last_name}`,
+        label: `${d.title || 'Dr'} ${d.last_name} (${d.specialty_name || 'Spécialiste'})`,
         action: () => {
-          waPatientData.doc_id = d.id;
+          const { doc, service } = matchDoctorAndServiceFromInput(d.last_name, docs, services);
+          waPatientData.doc_id = doc ? doc.id : d.id;
+          waPatientData.service_id = service ? service.id : null;
           handleWhatsAppUserAnswer(`${d.title || 'Dr'} ${d.first_name} ${d.last_name}`);
         }
       }))
     });
   } else if (waStep === 3) {
-    // Practitioner chosen -> Pick service & date
+    // Practitioner / Specialty chosen -> Pick service & date
+    const { doc, service } = matchDoctorAndServiceFromInput(userInput, docs, services);
+    if (doc) waPatientData.doc_id = doc.id;
+    if (service) waPatientData.service_id = service.id;
+
     waStep = 4;
     waMessages.push({
       sender: 'bot',
       time: timeNow,
-      text: `Quel créneau vous convient le mieux ?`,
+      text: `Consultation : **${service ? service.name : 'Consultation'}** avec **${doc ? ((doc.title || 'Dr') + ' ' + doc.first_name + ' ' + doc.last_name) : 'le médecin'}**.\n\nQuel créneau vous convient le mieux ?`,
       quickReplies: [
         { label: '📅 Aujourd\'hui à 10:00', action: () => { waPatientData.date = getTodayDateStr(); waPatientData.time = '10:00'; handleWhatsAppUserAnswer('Aujourd\'hui à 10:00'); } },
         { label: '📅 Aujourd\'hui à 15:00', action: () => { waPatientData.date = getTodayDateStr(); waPatientData.time = '15:00'; handleWhatsAppUserAnswer('Aujourd\'hui à 15:00'); } },
@@ -12031,14 +12135,14 @@ async function processWhatsAppFlow(userInput) {
       const payload = {
         tenant_slug: clinic.slug,
         practitioner_id: waPatientData.doc_id || docs[0].id,
-        medical_service_id: services[0] ? services[0].id : null,
+        medical_service_id: waPatientData.service_id,
         start_time: `${waPatientData.date}T${waPatientData.time}:00`,
         booking_channel: 'WHATSAPP',
         is_new_patient: !waPatientData.is_existing,
         patient_code: waPatientData.code,
         first_name: waPatientData.first_name,
         last_name: waPatientData.last_name,
-        phone_number: waPatientData.phone || '770000000',
+        phone_number: waPatientData.phone || '776473506',
         gender: 'M',
         date_of_birth: '1995-01-01'
       };
