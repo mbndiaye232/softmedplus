@@ -212,10 +212,13 @@ const getAppointments = async (req, res) => {
 
   let queryStr = `
     SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
+           a.consultation_reason,
            lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
            p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
            prac.first_name AS doc_first, prac.last_name AS doc_last,
-           ms.name AS service_name, ms.price, ms.deposit_amount
+           COALESCE(NULLIF(a.consultation_reason, ''), ms.name) AS service_name,
+           COALESCE(NULLIF(ms.price, 0), prac.consultation_fee, 15000) AS price,
+           ms.deposit_amount
     FROM appointments a
     JOIN patients p ON a.patient_id = p.id
     JOIN practitioners prac ON a.practitioner_id = prac.id
