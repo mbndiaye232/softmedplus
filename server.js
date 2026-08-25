@@ -238,7 +238,11 @@ app.post('/api/tenants', tenantCtrl.createTenant);
 app.put('/api/tenants/:id', tenantCtrl.updateTenant);
 app.delete('/api/tenants/:id', tenantCtrl.deleteTenant);
 
-// 10. AI Clinical Voice Copilot & Consultation Dictation
+// 10. AI Clinical Voice Copilot & Multi-Provider LLM Engine
+app.get('/api/ai/config', aiCopilotCtrl.getAIConfig);
+app.post('/api/ai/config', aiCopilotCtrl.saveAIConfig);
+app.post('/api/ai/test', aiCopilotCtrl.testAIConnection);
+app.post('/api/ai/toggle', aiCopilotCtrl.toggleAI);
 app.post('/api/ai/copilot/query', aiCopilotCtrl.handleCopilotQuery);
 app.post('/api/ai/copilot/dictate', aiCopilotCtrl.handleDictationConsultation);
 

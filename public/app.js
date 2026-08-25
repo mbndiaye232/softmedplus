@@ -7233,29 +7233,147 @@ async function simulateDepletion(id, name) {
 }
 
 // ============================================================================
-// 6. Settings UI (Online Payment Gateways Configuration)
+// 6. Settings UI (Online Payment Gateways, AI LLMs, SMTP & Profile Configuration)
 // ============================================================================
 async function renderSettings(container) {
-  const [methods, tenant, statuses, users, smtpAccounts] = await Promise.all([
+  const [methods, tenant, statuses, users, smtpAccounts, aiRes] = await Promise.all([
     api.request('/payment-methods').catch(() => []),
     api.request('/tenant/profile').catch(() => ({})),
     api.request('/patient-statuses').catch(() => []),
     api.request('/users').catch(() => []),
-    api.request('/settings/smtp-accounts').catch(() => [])
+    api.request('/settings/smtp-accounts').catch(() => []),
+    api.request('/ai/config').catch(() => ({ configured: false, config: { is_active: false, provider_name: 'openrouter', model_name: 'deepseek/deepseek-chat' } }))
   ]);
   
   currentSettingsUsers = users || [];
+  const aiCfg = (aiRes && aiRes.config) ? aiRes.config : { is_active: false, provider_name: 'openrouter', model_name: 'deepseek/deepseek-chat' };
   const gps = tenant.gps_coordinates || { latitude: '', longitude: '' };
   const isSuperOrTenantAdmin = ['SUPER_ADMIN_SAAS', 'SUPER_ADMIN', 'TENANT_ADMIN', 'ADMIN'].includes(state.user.role);
 
   container.innerHTML = `
+    <!-- 0. Multi-Provider LLM & Artificial Intelligence Configuration Card -->
+    <div class="card" style="margin-bottom: 24px; border:1px solid rgba(37,99,235,0.25); background:linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:42px; height:42px; border-radius:10px; background:linear-gradient(135deg, #2563eb, #7c3aed); color:#fff; display:flex; align-items:center; justify-content:center; font-size:1.3rem; box-shadow:0 4px 12px rgba(37,99,235,0.25);">
+            <i class="fas fa-brain"></i>
+          </div>
+          <div>
+            <div class="card-title" style="margin:0; font-size:1.15rem; font-weight:800;">
+              Intelligence Artificielle & Modèles LLM (OpenRouter, Gemini, DeepSeek, Claude, Mammouth...)
+            </div>
+            <div style="font-size:0.83rem; color:var(--text-muted); margin-top:2px;">
+              Connectez le grand modèle de votre choix pour alimenter le Copilote Médical (DPI), les suggestions diagnostiques et l'Agent Vocal/WhatsApp.
+            </div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span id="ai-status-badge" class="badge" style="background:${aiCfg.is_active ? '#ecfdf5' : '#f1f5f9'}; color:${aiCfg.is_active ? '#047857' : '#64748b'}; border:1px solid ${aiCfg.is_active ? '#a7f3d0' : '#cbd5e1'}; font-size:0.82rem; font-weight:700; padding:6px 12px; border-radius:20px;">
+            <i class="fas ${aiCfg.is_active ? 'fa-check-circle' : 'fa-circle'}" style="color:${aiCfg.is_active ? '#10b981' : '#94a3b8'};"></i>
+            ${aiCfg.is_active ? `IA Active : ${(aiCfg.provider_name || 'OPENROUTER').toUpperCase()} (${aiCfg.model_name || 'deepseek'})` : 'IA Désactivée (Règles locales actives)'}
+          </span>
+          <button type="button" class="btn ${aiCfg.is_active ? 'btn-secondary' : 'btn-success'} btn-sm" onclick="toggleAIStatus(${!aiCfg.is_active})" style="font-weight:700; padding:6px 14px;">
+            <i class="fas ${aiCfg.is_active ? 'fa-toggle-on text-success' : 'fa-toggle-off'}"></i>
+            ${aiCfg.is_active ? 'Désactiver l\'IA' : 'Activer l\'IA'}
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Preset Badges -->
+      <div style="background:rgba(37,99,235,0.04); border:1px solid rgba(37,99,235,0.15); border-radius:10px; padding:12px 16px; margin-bottom:18px;">
+        <div style="font-size:0.8rem; font-weight:700; color:#1e40af; margin-bottom:8px;">
+          ⚡ Modèles & Fournisseurs recommandés (Remplissage en 1 clic) :
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('openrouter', 'deepseek/deepseek-chat')" style="font-size:0.78rem; padding:4px 10px;">
+            🚀 OpenRouter • DeepSeek V3 (Idéal & Économique)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('openrouter', 'anthropic/claude-3.5-sonnet')" style="font-size:0.78rem; padding:4px 10px;">
+            🧠 OpenRouter • Claude 3.5 Sonnet (Raisonnement Médical)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('openrouter', 'google/gemini-2.0-flash-001')" style="font-size:0.78rem; padding:4px 10px;">
+            ⚡ OpenRouter • Gemini 2.0 Flash (Ultra-rapide)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('gemini', 'gemini-2.0-flash-001')" style="font-size:0.78rem; padding:4px 10px;">
+            🌟 Google Gemini Direct (Google AI Studio)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('deepseek', 'deepseek-chat')" style="font-size:0.78rem; padding:4px 10px;">
+            🐬 DeepSeek Direct API
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('claude', 'claude-3-5-sonnet-20241022')" style="font-size:0.78rem; padding:4px 10px;">
+            🎭 Anthropic Claude Direct
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('mammouth', 'default')" style="font-size:0.78rem; padding:4px 10px;">
+            🐘 Mammouth API Proxy
+          </button>
+        </div>
+      </div>
+
+      <!-- AI Configuration Form -->
+      <form onsubmit="saveAIConfigForm(event)">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight:700;">Fournisseur IA (Provider)</label>
+            <select class="form-control" id="ai-provider" onchange="onAIProviderChange(this.value)" required>
+              <option value="openrouter" ${aiCfg.provider_name === 'openrouter' ? 'selected' : ''}>🌐 OpenRouter (DeepSeek, Claude, Gemini, Llama via clé unique)</option>
+              <option value="gemini" ${aiCfg.provider_name === 'gemini' ? 'selected' : ''}>🌟 Google Gemini (Direct API / AI Studio)</option>
+              <option value="deepseek" ${aiCfg.provider_name === 'deepseek' ? 'selected' : ''}>🐬 DeepSeek (Direct API)</option>
+              <option value="claude" ${aiCfg.provider_name === 'claude' ? 'selected' : ''}>🎭 Anthropic Claude (Direct API)</option>
+              <option value="mammouth" ${aiCfg.provider_name === 'mammouth' ? 'selected' : ''}>🐘 Mammouth AI Proxy</option>
+              <option value="custom" ${aiCfg.provider_name === 'custom' ? 'selected' : ''}>⚙️ Serveur Personnalisé (Ollama / Proxy Local)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-weight:700;">Modèle LLM Identifiant</label>
+            <input type="text" class="form-control" id="ai-model" value="${aiCfg.model_name || 'deepseek/deepseek-chat'}" placeholder="ex: deepseek/deepseek-chat ou google/gemini-2.0-flash-001" required />
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+              Exemples : <code>deepseek/deepseek-chat</code>, <code>anthropic/claude-3.5-sonnet</code>, <code>gemini-2.0-flash-001</code>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight:700;">Clé API Secrète (API Key)</label>
+            <div style="display:flex; gap:6px;">
+              <input type="password" class="form-control" id="ai-api-key" value="${aiCfg.masked_key || ''}" placeholder="sk-or-v1-... ou AIzaSy..." style="flex:1;" />
+              <button type="button" class="btn btn-secondary" onclick="togglePasswordVisibility('ai-api-key')" style="padding:0 12px;" title="Afficher/Masquer"><i class="fas fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-weight:700;">URL de Base Endpoint (facultatif / Mammouth / Ollama)</label>
+            <input type="text" class="form-control" id="ai-base-url" value="${aiCfg.base_url || ''}" placeholder="ex: https://api.mammouth.ai/v1 ou http://localhost:11434/v1" />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label" style="font-weight:700;">Consigne Système Globale (System Prompt)</label>
+          <textarea class="form-control" id="ai-system-prompt" rows="2" style="font-size:0.85rem;" placeholder="Instructions pour l'assistant médical...">${aiCfg.system_prompt || 'Tu es un assistant médical IA expert et bienveillant pour la plateforme de santé SoftMed. Tu rédiges en français clair, précis et professionnel.'}</textarea>
+        </div>
+
+        <!-- Connection Test Result Area -->
+        <div id="ai-test-result-box" style="display:none; margin-bottom:16px; padding:12px 16px; border-radius:8px; font-size:0.85rem;"></div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <button type="button" class="btn btn-secondary" id="btn-test-ai-conn" onclick="testAIConnectionForm()" style="font-weight:700;">
+            <i class="fas fa-bolt text-warning"></i> ⚡ Tester la connexion au LLM
+          </button>
+          <div style="display:flex; gap:10px;">
+            <button type="submit" class="btn btn-primary" id="btn-save-ai-conn" style="font-weight:700;">
+              <i class="fas fa-save"></i> Enregistrer les Paramètres LLM
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+
     <!-- 1. User Management & Permissions Matrix Card -->
     <div class="card" style="margin-bottom: 24px;">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
         <div>
           <div class="card-title" style="margin:0;"><i class="fas fa-users-cog" style="color:var(--primary);"></i> Utilisateurs & Matrice des Droits d'Accès (${users.length})</div>
           <div style="font-size:0.85rem; color:var(--text-muted); margin-top:2px;">
-            Gérez les comptes d'accès à la clinique et configurez avec précision leurs autorisations (Voir, Créer, Modifier, Supprimer).
+            Gérez les comptes d'accès à la structure sanitaire et configurez avec précision leurs autorisations (Voir, Créer, Modifier, Supprimer).
           </div>
         </div>
         ${isSuperOrTenantAdmin ? `
@@ -7707,9 +7825,185 @@ async function saveClinicProfile(e) {
     
     state.tenant = updated;
     
-    showToast('Profil clinique mis à jour avec succès !');
+    showToast('Profil de la structure sanitaire mis à jour avec succès !');
     navigate('settings');
   } catch (err) {}
+}
+
+// -------------------------------------------------------------
+// 6a. Multi-Provider LLM Intelligence Configuration Handlers
+// -------------------------------------------------------------
+
+function applyAIPreset(provider, model) {
+  const provEl = document.getElementById('ai-provider');
+  const modelEl = document.getElementById('ai-model');
+  const baseEl = document.getElementById('ai-base-url');
+  if (provEl) provEl.value = provider;
+  if (modelEl) modelEl.value = model;
+  if (baseEl) {
+    if (provider === 'mammouth') baseEl.value = 'https://api.mammouth.ai/v1';
+    else if (provider === 'openrouter') baseEl.value = 'https://openrouter.ai/api/v1';
+    else baseEl.value = '';
+  }
+  showToast(`Modèle préconfiguré : ${provider.toUpperCase()} (${model})`, 'info');
+}
+
+function onAIProviderChange(provider) {
+  const modelEl = document.getElementById('ai-model');
+  const baseEl = document.getElementById('ai-base-url');
+  if (!modelEl) return;
+
+  if (provider === 'openrouter') {
+    modelEl.value = 'deepseek/deepseek-chat';
+    if (baseEl) baseEl.value = '';
+  } else if (provider === 'gemini') {
+    modelEl.value = 'gemini-2.0-flash-001';
+    if (baseEl) baseEl.value = '';
+  } else if (provider === 'deepseek') {
+    modelEl.value = 'deepseek-chat';
+    if (baseEl) baseEl.value = '';
+  } else if (provider === 'claude') {
+    modelEl.value = 'claude-3-5-sonnet-20241022';
+    if (baseEl) baseEl.value = '';
+  } else if (provider === 'mammouth') {
+    modelEl.value = 'default';
+    if (baseEl) baseEl.value = 'https://api.mammouth.ai/v1';
+  } else if (provider === 'custom') {
+    modelEl.value = 'llama3.3';
+    if (baseEl) baseEl.value = 'http://localhost:11434/v1';
+  }
+}
+
+function togglePasswordVisibility(fieldId) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+async function testAIConnectionForm() {
+  const btn = document.getElementById('btn-test-ai-conn');
+  const resultBox = document.getElementById('ai-test-result-box');
+  const provider = document.getElementById('ai-provider').value;
+  const model = document.getElementById('ai-model').value.trim();
+  const apiKey = document.getElementById('ai-api-key').value.trim();
+  const baseUrl = document.getElementById('ai-base-url').value.trim();
+
+  if (!apiKey) {
+    showToast('Veuillez saisir votre clé API pour tester la liaison.', 'warning');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Test en cours...`;
+  }
+  if (resultBox) {
+    resultBox.style.display = 'block';
+    resultBox.style.background = '#eff6ff';
+    resultBox.style.border = '1px solid #bfdbfe';
+    resultBox.style.color = '#1e40af';
+    resultBox.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Envoi d'une requête test à <strong>${provider.toUpperCase()} (${model})</strong>...`;
+  }
+
+  try {
+    const res = await api.request('/ai/test', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider_name: provider,
+        api_key: apiKey,
+        model_name: model,
+        base_url: baseUrl
+      })
+    });
+
+    if (resultBox) {
+      resultBox.style.background = '#ecfdf5';
+      resultBox.style.border = '1px solid #10b981';
+      resultBox.style.color = '#065f46';
+      resultBox.innerHTML = `
+        <div style="font-weight:700; margin-bottom:4px;">
+          <i class="fas fa-check-circle" style="color:#10b981;"></i> Connexion réussie ! (Latence : ${res.latency_ms} ms)
+        </div>
+        <div style="font-size:0.8rem; opacity:0.9;">Réponse du modèle (${res.model}) : <em>« ${res.reply} »</em></div>
+      `;
+    }
+    showToast(`Connexion validée en ${res.latency_ms} ms !`, 'success');
+  } catch (err) {
+    if (resultBox) {
+      resultBox.style.background = '#fef2f2';
+      resultBox.style.border = '1px solid #ef4444';
+      resultBox.style.color = '#991b1b';
+      resultBox.innerHTML = `
+        <div style="font-weight:700; margin-bottom:4px;">
+          <i class="fas fa-times-circle" style="color:#ef4444;"></i> Échec de la connexion
+        </div>
+        <div style="font-size:0.8rem;">${err.message || 'Clé invalide ou fournisseur inaccessible'}</div>
+      `;
+    }
+    showToast(`Échec du test : ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fas fa-bolt text-warning"></i> ⚡ Tester la connexion au LLM`;
+    }
+  }
+}
+
+async function saveAIConfigForm(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn-save-ai-conn');
+  const provider = document.getElementById('ai-provider').value;
+  const model = document.getElementById('ai-model').value.trim();
+  const apiKey = document.getElementById('ai-api-key').value.trim();
+  const baseUrl = document.getElementById('ai-base-url').value.trim();
+  const systemPrompt = document.getElementById('ai-system-prompt').value.trim();
+
+  if (!apiKey) {
+    showToast('La clé API est requise.', 'warning');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Enregistrement...`;
+  }
+
+  try {
+    const res = await api.request('/ai/config', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider_name: provider,
+        api_key: apiKey,
+        model_name: model,
+        base_url: baseUrl,
+        system_prompt: systemPrompt,
+        is_active: true
+      })
+    });
+
+    showToast('Configuration IA enregistrée et activée avec succès !', 'success');
+    navigate('settings');
+  } catch (err) {
+    showToast(`Erreur : ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fas fa-save"></i> Enregistrer les Paramètres LLM`;
+    }
+  }
+}
+
+async function toggleAIStatus(newStatus) {
+  try {
+    const res = await api.request('/ai/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ is_active: newStatus })
+    });
+    showToast(res.message, 'success');
+    navigate('settings');
+  } catch (err) {
+    showToast(`Erreur : ${err.message}`, 'error');
+  }
 }
 
 // -------------------------------------------------------------

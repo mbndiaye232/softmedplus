@@ -152,7 +152,62 @@ const handleCopilotQuery = async (req, res) => {
       }
     }
 
-    // C. Clinical Reasoning & Response Synthesis
+    // Check if active LLM is configured
+    const activeLLM = await getActiveLLMConfig(tenantId);
+    if (activeLLM && activeLLM.is_active && activeLLM.api_key) {
+      try {
+        let systemPrompt = activeLLM.system_prompt || 'Tu es un copilote médical IA expert pour la plateforme SoftMed. Tu assistes les médecins et soignants avec précision, rigueur clinique et bienveillance en français.';
+        
+        let contextMsg = '';
+        if (patientDossier) {
+          const p = patientDossier.patient;
+          contextMsg = `\n\n[CONTEXTE DU DOSSIER PATIENT EN COURS]\n` +
+            `- Patient : ${p.first_name} ${p.last_name} (${p.gender || 'N/A'}), Âge : ${calculateAge(p.date_of_birth) || 'Inconnu'} ans\n` +
+            `- Allergies connues : ${safeStr(p.allergies) || 'Aucune connue'}\n` +
+            `- Antécédents / Pathologies : ${safeStr(p.medical_history) || safeStr(p.notes) || 'Néant'}\n` +
+            `- Traitements en cours : ${(patientDossier.treatments || []).map(t => `${t.medication_name} (${t.dosage || ''})`).join(', ') || 'Aucun'}\n` +
+            `- Dernières consultations : ${(patientDossier.consultations || []).map(c => `[${new Date(c.consultation_date).toLocaleDateString()}] Motif: ${c.reason}, Diag: ${c.diagnosis}`).join(' | ') || 'Aucune'}\n`;
+        }
+
+        const llmResult = await callLLM({
+          provider: activeLLM.provider_name,
+          apiKey: activeLLM.api_key,
+          model: activeLLM.model_name,
+          baseUrl: activeLLM.base_url,
+          temperature: activeLLM.temperature,
+          maxTokens: activeLLM.max_tokens,
+          systemPrompt,
+          messages: [
+            { role: 'user', content: `${prompt}${contextMsg}` }
+          ]
+        });
+
+        if (llmResult && llmResult.content) {
+          return res.status(200).json({
+            success: true,
+            prompt,
+            patient_matched: patientDossier ? {
+              id: patientDossier.patient.id,
+              name: `${patientDossier.patient.first_name} ${patientDossier.patient.last_name}`,
+              patient_code: patientDossier.patient.patient_code,
+              age: calculateAge(patientDossier.patient.date_of_birth),
+              gender: patientDossier.patient.gender
+            } : null,
+            answer: llmResult.content,
+            speech_text: llmResult.content.replace(/[#*`_\[\]]/g, '').slice(0, 300),
+            category: 'LLM_INTELLIGENCE',
+            llm_provider: activeLLM.provider_name,
+            llm_model: activeLLM.model_name,
+            alerts: [],
+            suggestions: []
+          });
+        }
+      } catch (llmErr) {
+        console.warn('Active LLM call failed, falling back to local CDSS engine:', llmErr.message);
+      }
+    }
+
+    // C. Fallback: Local Clinical Reasoning & Rule-Based Response Synthesis
     const aiResponse = synthesizeClinicalAnswer(prompt, patientDossier);
 
     return res.status(200).json({
@@ -190,13 +245,67 @@ const handleDictationConsultation = async (req, res) => {
       if (pRes.rowCount > 0) patient = pRes.rows[0];
     }
 
+    // Check if active LLM can parse and structure consultation into JSON
+    const activeLLM = await getActiveLLMConfig(tenantId);
+    if (activeLLM && activeLLM.is_active && activeLLM.api_key) {
+      try {
+        const parsePrompt = `Tu es un assistant médical qui structure une dictée vocale de consultation en JSON strict valide.
+Voici la dictée brute du médecin :
+"""${dictation_text}"""
+
+Retourne UNIQUEMENT un objet JSON avec cette structure exacte, sans markdown autour :
+{
+  "reason": "Motif de consultation",
+  "diagnosis": "Diagnostic ou hypothèse diagnostique",
+  "examination": "Compte-rendu de l'examen clinique",
+  "vitals": {
+    "blood_pressure": "ex: 12/8",
+    "temperature": 37.5,
+    "weight": 70,
+    "pulse": 80
+  },
+  "prescriptions": [
+    "Médicament 1 : posologie et durée",
+    "Médicament 2 : posologie et durée"
+  ]
+}`;
+
+        const llmResult = await callLLM({
+          provider: activeLLM.provider_name,
+          apiKey: activeLLM.api_key,
+          model: activeLLM.model_name,
+          baseUrl: activeLLM.base_url,
+          temperature: 0.2,
+          maxTokens: 1000,
+          messages: [{ role: 'user', content: parsePrompt }]
+        });
+
+        if (llmResult && llmResult.content) {
+          const cleanJson = llmResult.content.replace(/```json/gi, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(cleanJson);
+          return res.status(200).json({
+            success: true,
+            raw_text: dictation_text,
+            structured: parsed,
+            llm_powered: true,
+            provider: activeLLM.provider_name,
+            model: activeLLM.model_name
+          });
+        }
+      } catch (e) {
+        console.warn('LLM dictation parsing error, fallback to heuristics:', e.message);
+      }
+    }
+
     const structuredConsultation = parseMedicalDictation(dictation_text, patient);
 
     return res.status(200).json({
       success: true,
-      raw_dictation: dictation_text,
-      structured_data: structuredConsultation
+      raw_text: dictation_text,
+      structured: structuredConsultation,
+      llm_powered: false
     });
+
   } catch (err) {
     console.error('handleDictationConsultation error:', err);
     return res.status(500).json({ error: 'Erreur lors de la structuration de la dictée : ' + err.message });
@@ -487,7 +596,224 @@ function parseMedicalDictation(rawText, patient) {
   };
 }
 
+const { callLLM } = require('../utils/llmClient');
+
+// Auto-migrate AI configuration table
+async function ensureAIConfigsTable() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_llm_configs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
+        provider_name VARCHAR(50) NOT NULL DEFAULT 'openrouter',
+        api_key TEXT NOT NULL,
+        model_name VARCHAR(100) NOT NULL DEFAULT 'deepseek/deepseek-chat',
+        base_url TEXT,
+        is_active BOOLEAN DEFAULT false,
+        temperature NUMERIC(3,2) DEFAULT 0.7,
+        max_tokens INTEGER DEFAULT 1500,
+        system_prompt TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (err) {
+    console.error('Error ensuring ai_llm_configs table:', err.message);
+  }
+}
+ensureAIConfigsTable();
+
+// Helper to fetch active LLM config
+async function getActiveLLMConfig(tenantId) {
+  try {
+    const res = await pool.query(
+      `SELECT * FROM ai_llm_configs WHERE (tenant_id = $1 OR tenant_id IS NULL) AND is_active = true ORDER BY (tenant_id = $1) DESC, updated_at DESC LIMIT 1`,
+      [tenantId]
+    );
+    if (res.rowCount > 0) return res.rows[0];
+  } catch (e) {}
+  return null;
+}
+
+// ----------------------------------------------------------------------------
+// AI Configuration Endpoints
+// ----------------------------------------------------------------------------
+
+const getAIConfig = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const result = await pool.query(
+      `SELECT id, provider_name, model_name, base_url, is_active, temperature, max_tokens, system_prompt, 
+              CASE WHEN api_key IS NOT NULL AND length(api_key) > 6 
+                   THEN substring(api_key from 1 for 4) || '••••••••' || substring(api_key from length(api_key)-2) 
+                   ELSE '' END as masked_key,
+              updated_at
+       FROM ai_llm_configs 
+       WHERE tenant_id = $1 OR tenant_id IS NULL
+       ORDER BY (tenant_id = $1) DESC, updated_at DESC LIMIT 1`,
+      [tenantId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.json({
+        configured: false,
+        config: {
+          provider_name: 'openrouter',
+          model_name: 'deepseek/deepseek-chat',
+          base_url: '',
+          is_active: false,
+          temperature: 0.7,
+          max_tokens: 1500,
+          system_prompt: 'Tu es un assistant médical IA expert et bienveillant pour la plateforme de santé SoftMed. Tu rédiges en français clair, précis et professionnel.'
+        }
+      });
+    }
+
+    return res.json({
+      configured: true,
+      config: result.rows[0]
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+const saveAIConfig = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const { provider_name, api_key, model_name, base_url, is_active, temperature, max_tokens, system_prompt } = req.body;
+
+    if (!provider_name) {
+      return res.status(400).json({ error: 'Le fournisseur IA est obligatoire.' });
+    }
+
+    // Check existing config
+    const existRes = await pool.query(`SELECT id, api_key FROM ai_llm_configs WHERE tenant_id = $1 LIMIT 1`, [tenantId]);
+
+    let finalKey = api_key;
+    if (existRes.rowCount > 0 && (!api_key || api_key.includes('••••'))) {
+      finalKey = existRes.rows[0].api_key; // Keep existing key if not modified
+    }
+
+    if (!finalKey || !finalKey.trim()) {
+      return res.status(400).json({ error: 'La clé API est requise.' });
+    }
+
+    let saved;
+    if (existRes.rowCount > 0) {
+      saved = await pool.query(
+        `UPDATE ai_llm_configs 
+         SET provider_name = $1, api_key = $2, model_name = $3, base_url = $4, is_active = $5, 
+             temperature = $6, max_tokens = $7, system_prompt = $8, updated_at = NOW()
+         WHERE id = $9
+         RETURNING id, provider_name, model_name, is_active, updated_at`,
+        [provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(maxTokens || 1500, 10), system_prompt || '', existRes.rows[0].id]
+      );
+    } else {
+      saved = await pool.query(
+        `INSERT INTO ai_llm_configs (tenant_id, provider_name, api_key, model_name, base_url, is_active, temperature, max_tokens, system_prompt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, provider_name, model_name, is_active, updated_at`,
+        [tenantId, provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(maxTokens || 1500, 10), system_prompt || '']
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: 'Configuration IA enregistrée avec succès !',
+      config: saved.rows[0]
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+const testAIConnection = async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const tenantId = req.user.tenant_id;
+    let { provider_name, api_key, model_name, base_url } = req.body;
+
+    if (!api_key || api_key.includes('••••')) {
+      const existRes = await pool.query(`SELECT api_key FROM ai_llm_configs WHERE tenant_id = $1 LIMIT 1`, [tenantId]);
+      if (existRes.rowCount > 0) {
+        api_key = existRes.rows[0].api_key;
+      }
+    }
+
+    if (!api_key) {
+      return res.status(400).json({ success: false, error: 'Veuillez saisir une clé API valide pour tester.' });
+    }
+
+    const testPrompt = [
+      { role: 'system', content: 'Tu es le moteur IA de SoftMed. Réponds en une seule phrase courte.' },
+      { role: 'user', content: 'Présente-toi brièvement et confirme que la liaison fonctionne.' }
+    ];
+
+    const result = await callLLM({
+      provider: provider_name || 'openrouter',
+      apiKey: api_key,
+      model: model_name || 'deepseek/deepseek-chat',
+      baseUrl: base_url,
+      messages: testPrompt,
+      temperature: 0.5,
+      maxTokens: 100
+    });
+
+    const latency = Date.now() - startTime;
+
+    return res.json({
+      success: true,
+      latency_ms: latency,
+      provider: result.provider,
+      model: result.model,
+      reply: result.content.trim(),
+      message: `Connexion réussie avec ${result.provider} (${result.model}) en ${latency} ms !`
+    });
+  } catch (err) {
+    const latency = Date.now() - startTime;
+    return res.status(400).json({
+      success: false,
+      latency_ms: latency,
+      error: err.message
+    });
+  }
+};
+
+const toggleAI = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const { is_active } = req.body;
+
+    const result = await pool.query(
+      `UPDATE ai_llm_configs 
+       SET is_active = $1, updated_at = NOW()
+       WHERE tenant_id = $2
+       RETURNING id, is_active, provider_name, model_name`,
+      [is_active === true, tenantId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Aucune configuration IA trouvée. Enregistrez une clé API d\'abord.' });
+    }
+
+    return res.json({
+      success: true,
+      is_active: result.rows[0].is_active,
+      message: result.rows[0].is_active ? 'Intelligence Artificielle activée !' : 'Intelligence Artificielle désactivée (Mode Règles Locales actif).'
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 module.exports = {
   handleCopilotQuery,
-  handleDictationConsultation
+  handleDictationConsultation,
+  getAIConfig,
+  saveAIConfig,
+  testAIConnection,
+  toggleAI,
+  getActiveLLMConfig
 };
+
