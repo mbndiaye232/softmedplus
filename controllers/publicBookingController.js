@@ -367,15 +367,23 @@ const publicBookAppointment = async (req, res) => {
     const endISO = endDate.toISOString();
     const initialStatus = depositRequired > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
+    // Add consultation_reason column if not exists
+    await client.query(`
+      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS consultation_reason TEXT;
+    `);
+
+    const finalReason = (req.body.consultation_reason || '').trim() || serviceName;
+
     const apptRes = await client.query(
-      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel)
-       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8)
+      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, consultation_reason, time_slot, status, booking_channel)
+       VALUES ($1, $2, $3, $4, $5, tstzrange($6, $7, '[)'), $8, $9)
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
       [
         tenantId,
         finalPractitionerId,
         finalPatientId,
         finalServiceId,
+        finalReason,
         startISO,
         endISO,
         initialStatus,
@@ -383,10 +391,20 @@ const publicBookAppointment = async (req, res) => {
       ]
     );
 
+    // Fetch practitioner details for pass
+    const pracRes = await client.query(
+      `SELECT title, first_name, last_name, specialty_name FROM practitioners WHERE id = $1`,
+      [finalPractitionerId]
+    );
+    const practitioner = pracRes.rows[0] || {};
+    const practitionerName = `${practitioner.title || 'Dr'} ${practitioner.first_name || ''} ${practitioner.last_name || ''}`.trim();
+
     return res.status(201).json({
       success: true,
       appointment: apptRes.rows[0],
       clinic_name: tenant.name,
+      practitioner_name: practitionerName ? `${practitionerName} (${practitioner.specialty_name || 'Médecin'})` : 'Médecin',
+      consultation_reason: finalReason,
       patient: {
         id: finalPatientId,
         patient_code: finalPatientCode,

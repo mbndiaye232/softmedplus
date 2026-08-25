@@ -11218,12 +11218,20 @@ function renderPublicPortalView(bookedResult = null) {
               <strong style="color:#2563eb;">${new Date(bookedResult.appointment.start_time).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</strong>
             </div>
             <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.9rem;">
-              <span style="color:#64748b;">Prestation / Acte :</span>
-              <strong style="color:#0f172a;">${bookedResult.service_name} (${parseFloat(bookedResult.service_price).toLocaleString()} FCFA)</strong>
+              <span style="color:#64748b;">Praticien :</span>
+              <strong style="color:#0f172a;">${bookedResult.practitioner_name || ((activeDoc.title || 'Dr') + ' ' + activeDoc.first_name + ' ' + activeDoc.last_name + ' (' + (activeDoc.specialty_name || 'Spécialiste') + ')')}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.9rem;">
+              <span style="color:#64748b;">Motif de consultation :</span>
+              <strong style="color:#2563eb;">${bookedResult.consultation_reason || bookedResult.service_name || 'Consultation médicale'}</strong>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.9rem;">
+              <span style="color:#64748b;">Tarif consultation :</span>
+              <strong style="color:#0f172a;">${parseFloat(bookedResult.service_price || 15000).toLocaleString()} FCFA</strong>
             </div>
             <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
               <span style="color:#64748b;">Lieu de consultation :</span>
-              <span style="color:#0f172a; text-align:right;">${clinic.address || 'Plateau, Dakar'}</span>
+              <span style="color:#0f172a; text-align:right;">${clinic.address || '12 rue Amadou Assane NDOYE, Dakar'}</span>
             </div>
           </div>
 
@@ -11233,7 +11241,7 @@ function renderPublicPortalView(bookedResult = null) {
                 <i class="fas fa-mobile-alt"></i> Acompte de confirmation : 2 000 FCFA (Wave / OM)
               </div>
               <div style="color:#78350f; line-height:1.4; font-size:0.82rem;">
-                Pour valider votre créneau, effectuez le transfert au numéro : <strong>${clinic.phone_number || '+221 33 800 00 00'}</strong>.<br/>
+                Pour valider votre créneau, effectuez le transfert au numéro : <strong>${clinic.phone_number || '+221 77 647 35 06'}</strong>.<br/>
                 Référence à indiquer : <strong>${bookedResult.patient.patient_code}</strong>.
               </div>
             </div>
@@ -11312,20 +11320,34 @@ function renderPublicPortalView(bookedResult = null) {
   if (publicPortalMode === 'form') updateSlotsUI();
 }
 
+let publicConsultationReason = '';
+
+function setPublicConsultationReason(text) {
+  publicConsultationReason = text;
+  const input = document.getElementById('pub-consultation-reason');
+  if (input) {
+    input.value = text;
+    input.focus();
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Channel 1: Web Standard Form
 // ----------------------------------------------------------------------------
 function renderFormChannel(clinic, docs, services) {
+  const activeDoc = docs.find(d => d.id === publicSelectedDocId) || docs[0];
+  const feeText = activeDoc && activeDoc.consultation_fee ? `${parseFloat(activeDoc.consultation_fee).toLocaleString()} FCFA` : '15 000 FCFA';
+
   return `
     <div style="text-align:center; margin-bottom:20px;">
       <h3 style="margin:0; color:var(--text-primary); font-size:1.3rem;">
         <i class="fas fa-calendar-alt" style="color:var(--primary);"></i> Formulaire de Réservation
       </h3>
-      <p style="color:var(--text-muted); font-size:0.85rem; margin-top:4px;">Choisissez votre médecin, la date et confirmez en quelques secondes.</p>
+      <p style="color:var(--text-muted); font-size:0.85rem; margin-top:4px;">Choisissez votre médecin, indiquez votre motif et réservez en quelques clics.</p>
     </div>
 
     <form id="public-booking-form" onsubmit="handlePublicBookingSubmit(event)">
-      <!-- Step 1: Doctor & Service -->
+      <!-- Step 1: Doctor -->
       <div style="margin-bottom:20px;">
         <label class="form-label" style="font-weight:600; font-size:0.9rem;"><i class="fas fa-user-md" style="color:var(--primary);"></i> 1. Praticien / Médecin :</label>
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
@@ -11340,21 +11362,33 @@ function renderFormChannel(clinic, docs, services) {
         </div>
       </div>
 
-      <!-- Service / Acte -->
+      <!-- Step 2: Free Consultation Reason Input -->
       <div class="form-group" style="margin-bottom:20px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <label class="form-label" style="font-weight:600; font-size:0.9rem; margin:0;"><i class="fas fa-stethoscope" style="color:var(--primary);"></i> 2. Prestation ou Consultation :</label>
+          <label class="form-label" style="font-weight:600; font-size:0.9rem; margin:0;">
+            <i class="fas fa-edit" style="color:var(--primary);"></i> 2. Motif de votre consultation :
+          </label>
           <span id="pub-duration-badge" class="badge" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; font-size:0.75rem; padding:4px 8px;">
             <i class="fas fa-stopwatch"></i> Durée estimée : <strong>${publicSelectedDuration} min</strong>
           </span>
         </div>
-        <select class="form-control" id="pub-service-id" required onchange="selectPublicService(this.value)" style="font-size:0.9rem; padding:10px;">
-          ${services.map(s => `
-            <option value="${s.id}" ${publicSelectedServiceId === s.id ? 'selected' : ''}>
-              ${s.name} — ${parseFloat(s.price).toLocaleString()} FCFA (${s.duration_minutes || 15} min)
-            </option>
-          `).join('')}
-        </select>
+        <input type="text" class="form-control" id="pub-consultation-reason" value="${publicConsultationReason || ''}" placeholder="Indiquez vos symptômes ou motif (ex: Fièvre enfant, Bilan tension, Maux de ventre, Contrôle de routine...)" style="font-size:0.92rem; padding:10px 14px; border-radius:10px;" required oninput="publicConsultationReason = this.value;" />
+        
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+          <span style="font-size:0.75rem; color:var(--text-muted); align-self:center;">Exemples rapides :</span>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setPublicConsultationReason('Première consultation & Bilan')" style="font-size:0.75rem; padding:3px 8px; border-radius:6px; background:#f8fafc; border-color:#e2e8f0; color:#334155;">
+            Routine & Bilan
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setPublicConsultationReason('Douleurs ou symptômes inhabituels')" style="font-size:0.75rem; padding:3px 8px; border-radius:6px; background:#f8fafc; border-color:#e2e8f0; color:#334155;">
+            Douleurs / Symptômes
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setPublicConsultationReason('Suivi de traitement & Ordonnance')" style="font-size:0.75rem; padding:3px 8px; border-radius:6px; background:#f8fafc; border-color:#e2e8f0; color:#334155;">
+            Suivi & Ordonnance
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="setPublicConsultationReason('Avis médical spécialisé')" style="font-size:0.75rem; padding:3px 8px; border-radius:6px; background:#f8fafc; border-color:#e2e8f0; color:#334155;">
+            Avis spécialisé
+          </button>
+        </div>
       </div>
 
       <!-- Step 2: Date & Hour Slots -->
@@ -12479,13 +12513,15 @@ async function verifyPublicPatientCode(slug) {
 async function handlePublicBookingSubmit(e) {
   e.preventDefault();
   const slug = publicPortalData.clinic.slug;
-  const service_id = document.getElementById('pub-service-id').value;
+  const reasonInput = document.getElementById('pub-consultation-reason');
+  const customReason = reasonInput ? reasonInput.value.trim() : (publicConsultationReason || 'Consultation médicale');
   const start_time = `${publicSelectedDate}T${publicSelectedTime}:00`;
 
   let payload = {
     tenant_slug: slug,
     practitioner_id: publicSelectedDocId,
-    medical_service_id: service_id,
+    medical_service_id: publicSelectedServiceId,
+    consultation_reason: customReason,
     start_time,
     booking_channel: 'WEB_PWA'
   };
