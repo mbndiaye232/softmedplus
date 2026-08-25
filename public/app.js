@@ -11794,17 +11794,27 @@ async function handleVoiceTranscript(userInput) {
 
     voicePatientData.doc_id = matchedDoc ? matchedDoc.id : (docs[0] ? docs[0].id : null);
     voicePatientData.service_id = matchedService ? matchedService.id : (services[0] ? services[0].id : null);
-    voicePatientData.consultation_reason = matchedService ? matchedService.name : (matchedDoc ? `Consultation ${matchedDoc.specialty_name || 'Spécialisée'}` : 'Consultation');
 
     const docName = matchedDoc ? `${matchedDoc.title || 'Dr'} ${matchedDoc.first_name} ${matchedDoc.last_name}` : 'votre médecin';
-    const sName = voicePatientData.consultation_reason;
+    const specName = matchedDoc ? (matchedDoc.specialty_name || 'Spécialiste') : 'Médecine';
 
     voiceStep = 4;
-    const reply = `Rendez-vous sélectionné avec ${docName} (${sName}). Quel jour et quelle heure préférez-vous ? (Par exemple : Aujourd'hui à 10 heures ou Demain à 15 heures).`;
+    const reply = `Rendez-vous sélectionné avec ${docName} (${specName}). Quel est le motif de votre consultation ? (Par exemple : Douleurs à la poitrine, bilan de santé, suivi de tension, contrôle de routine...)`;
     voiceTranscriptLog.push({ sender: 'ai', text: reply });
     renderVoiceMessages();
     speakAI(reply);
   } else if (voiceStep === 4) {
+    // Consultation Reason provided
+    let reason = userInput.trim();
+    if (!reason || reason.length < 3) reason = 'Consultation & Bilan';
+    voicePatientData.consultation_reason = reason;
+
+    voiceStep = 5;
+    const reply = `Bien noté : « ${reason} ». Quel jour et quelle heure préférez-vous ? (Par exemple : Aujourd'hui à 10 heures ou Demain à 15 heures).`;
+    voiceTranscriptLog.push({ sender: 'ai', text: reply });
+    renderVoiceMessages();
+    speakAI(reply);
+  } else if (voiceStep === 5) {
     // Time and booking execution
     let hour = '10:00';
     const hourMatch = text.match(/(\d{1,2})\s*h/i) || text.match(/(\d{1,2})\s*heure/i);
@@ -11823,7 +11833,7 @@ async function handleVoiceTranscript(userInput) {
 
     voicePatientData.date = dateStr;
     voicePatientData.time = hour;
-    voiceStep = 5;
+    voiceStep = 6;
 
     const reply = `Parfait ! J'enregistre votre rendez-vous pour le ${dateStr} à ${hour}...`;
     voiceTranscriptLog.push({ sender: 'ai', text: reply });
@@ -11908,10 +11918,25 @@ function getVoiceShortcutsHTML(docs) {
   } else if (voiceStep === 3) {
     return docs.map(d => `
       <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('${d.title || 'Dr'} ${d.last_name}')" style="font-size:0.78rem;">
-        💬 « ${d.title || 'Dr'} ${d.last_name} »
+        💬 « ${d.title || 'Dr'} ${d.last_name} (${d.specialty_name || 'Spécialiste'}) »
       </button>
     `).join('');
   } else if (voiceStep === 4) {
+    return `
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Bilan cardiologique & Suivi')" style="font-size:0.78rem;">
+        💬 « Bilan & Suivi »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Contrôle de routine')" style="font-size:0.78rem;">
+        💬 « Contrôle de routine »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Douleurs et symptômes')" style="font-size:0.78rem;">
+        💬 « Douleurs & Symptômes »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Avis spécialisé')" style="font-size:0.78rem;">
+        💬 « Avis spécialisé »
+      </button>
+    `;
+  } else if (voiceStep === 5) {
     return `
       <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Aujourd\'hui à 11 heures')" style="font-size:0.78rem;">
         💬 « Aujourd'hui à 11h »
@@ -11921,6 +11946,9 @@ function getVoiceShortcutsHTML(docs) {
       </button>
       <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Demain à 09 heures')" style="font-size:0.78rem;">
         💬 « Demain à 09h »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Demain à 15 heures')" style="font-size:0.78rem;">
+        💬 « Demain à 15h »
       </button>
     `;
   }
