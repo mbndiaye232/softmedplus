@@ -1818,6 +1818,63 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
           </div>
         </div>
 
+        <!-- Legend & Stats Bar -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px; background:var(--bg-surface); padding:10px 16px; border-radius:8px; border:1px solid var(--border-color);">
+          <div style="display:flex; gap:16px; align-items:center; font-size:0.85rem; font-weight:700;">
+            <span style="display:flex; align-items:center; gap:6px; color:#047857;">
+              <span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#10b981;"></span>
+              Tranches Libres : <strong>${(() => {
+                let freeCount = 0;
+                for (let h = 8; h <= 19; h++) {
+                  for (let m of [0, 15, 30, 45]) {
+                    if (h === 19 && m > 0) break;
+                    const sMin = h * 60 + m;
+                    const isOcc = filteredAppts.some(appt => {
+                      const d = new Date(appt.start_time);
+                      const startM = d.getHours() * 60 + d.getMinutes();
+                      let endM = startM + (appt.duration_minutes || 15);
+                      if (appt.end_time) {
+                        const endD = new Date(appt.end_time);
+                        if (getApptDateStr(appt.end_time) === activeAgendaDate) endM = endD.getHours() * 60 + endD.getMinutes();
+                      }
+                      return sMin >= startM && sMin < endM;
+                    });
+                    if (!isOcc) freeCount++;
+                  }
+                }
+                return freeCount;
+              })()}</strong>
+            </span>
+            <span style="display:flex; align-items:center; gap:6px; color:#b91c1c;">
+              <span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#ef4444;"></span>
+              Tranches Occupées : <strong>${(() => {
+                let occCount = 0;
+                for (let h = 8; h <= 19; h++) {
+                  for (let m of [0, 15, 30, 45]) {
+                    if (h === 19 && m > 0) break;
+                    const sMin = h * 60 + m;
+                    const isOcc = filteredAppts.some(appt => {
+                      const d = new Date(appt.start_time);
+                      const startM = d.getHours() * 60 + d.getMinutes();
+                      let endM = startM + (appt.duration_minutes || 15);
+                      if (appt.end_time) {
+                        const endD = new Date(appt.end_time);
+                        if (getApptDateStr(appt.end_time) === activeAgendaDate) endM = endD.getHours() * 60 + endD.getMinutes();
+                      }
+                      return sMin >= startM && sMin < endM;
+                    });
+                    if (isOcc) occCount++;
+                  }
+                }
+                return occCount;
+              })()}</strong>
+            </span>
+          </div>
+          <div style="font-size:0.78rem; color:var(--text-muted); font-weight:600;">
+            <i class="fas fa-clock text-primary"></i> Tranches de 15 minutes (08:00 à 19:00)
+          </div>
+        </div>
+
         <!-- Banner with selected date details -->
         <div style="background:rgba(74, 144, 226, 0.07); border:1px solid rgba(74, 144, 226, 0.2); border-radius:8px; padding:8px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; font-size:0.88rem;">
           <div style="color:var(--text-primary);">
@@ -1830,51 +1887,95 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
           </div>
         </div>
         
-        <div class="calendar-slots">
-          ${[8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(hour => {
-            const hourStr = `${hour.toString().padStart(2, '0')}:00`;
-            const hourAppts = filteredAppts.filter(a => {
-              const date = new Date(a.start_time);
-              return date.getHours() === hour;
-            });
+        <div class="calendar-slots" style="border:1px solid var(--border-color); border-radius:10px; overflow:hidden;">
+          ${(() => {
+            const slotsHtml = [];
+            for (let hour = 8; hour <= 19; hour++) {
+              for (let min of [0, 15, 30, 45]) {
+                if (hour === 19 && min > 0) break;
+                const timeStr = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+                const slotMinutes = hour * 60 + min;
 
-            return `
-              <div class="slot-hour">${hourStr}</div>
-              <div class="slot-content">
-                ${hourAppts.length > 0 ? hourAppts.map(appt => {
-                  const startTimeStr = new Date(appt.start_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-                  const endTimeStr = appt.end_time ? new Date(appt.end_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-                  return `
-                    <div class="appt-pill" style="border-color:${docColor}; margin-bottom:4px;">
-                      <div class="appt-pill-header" style="display:flex; justify-content:space-between; align-items:center;">
-                        <span>
-                          <i class="fas fa-clock" style="color:var(--primary); font-size:0.75rem; margin-right:4px;"></i>
-                          <strong>${startTimeStr}${endTimeStr ? ` - ${endTimeStr}` : ''}</strong> • 
-                          <strong>${appt.patient_first} ${appt.patient_last}</strong> 
-                          <span style="font-size:0.75rem; color:var(--text-muted);">(${appt.patient_code})</span>
-                        </span>
-                        <span style="font-size:0.75rem;" class="status-badge ${appt.status.toLowerCase()}">${appt.status}</span>
-                      </div>
-                      <div style="font-size:0.8rem; color:var(--text-primary); margin-top:4px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-                        <div>
-                          <i class="fas fa-stethoscope" style="color:var(--primary); font-size:0.75rem;"></i> ${appt.service_name}
-                          <span style="margin-left:6px; color:var(--text-muted); font-size:0.75rem;">(${parseFloat(appt.price).toLocaleString()} FCFA)</span>
+                // Find appointments covering this 15-min slot
+                const slotAppts = filteredAppts.filter(appt => {
+                  const d = new Date(appt.start_time);
+                  const startM = d.getHours() * 60 + d.getMinutes();
+                  let endM = startM + (appt.duration_minutes || 15);
+                  if (appt.end_time) {
+                    const endD = new Date(appt.end_time);
+                    if (getApptDateStr(appt.end_time) === activeAgendaDate) {
+                      endM = endD.getHours() * 60 + endD.getMinutes();
+                    }
+                  }
+                  return slotMinutes >= startM && slotMinutes < endM;
+                });
+
+                const isOccupied = slotAppts.length > 0;
+
+                if (isOccupied) {
+                  // ROUGE: OCCUPÉ
+                  slotsHtml.push(`
+                    <div class="slot-hour" style="background:#fef2f2; color:#b91c1c; font-weight:800; border-left:4px solid #ef4444; border-bottom:1px solid #fee2e2; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">
+                      ${timeStr}
+                    </div>
+                    <div class="slot-content" style="background:#fff5f5; border-bottom:1px solid #fee2e2; padding:6px 10px;">
+                      ${slotAppts.map(appt => {
+                        const startTimeStr = new Date(appt.start_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                        const endTimeStr = appt.end_time ? new Date(appt.end_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                        return `
+                          <div style="background:#ffffff; border:1px solid #fca5a5; border-left:4px solid #ef4444; border-radius:6px; padding:6px 10px; box-shadow:0 1px 3px rgba(239,68,68,0.08);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                              <div style="display:flex; align-items:center; gap:8px;">
+                                <span class="badge" style="background:#ef4444; color:#fff; font-size:0.7rem; font-weight:700; padding:2px 7px; border-radius:4px;">
+                                  <i class="fas fa-lock"></i> OCCUPÉ
+                                </span>
+                                <strong style="color:#991b1b; font-size:0.88rem;">${appt.patient_first} ${appt.patient_last}</strong>
+                                <span style="font-size:0.75rem; color:var(--text-muted);">(${appt.patient_code})</span>
+                                <span style="font-size:0.75rem; color:#b91c1c; font-weight:600;">[${startTimeStr}${endTimeStr ? ` - ${endTimeStr}` : ''}]</span>
+                              </div>
+                              <span class="status-badge ${appt.status.toLowerCase()}" style="font-size:0.7rem; padding:1px 6px;">${appt.status}</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:3px; font-size:0.78rem; color:var(--text-muted); flex-wrap:wrap; gap:4px;">
+                              <div>
+                                <i class="fas fa-stethoscope text-primary"></i> ${appt.service_name} • <strong style="color:var(--text-primary);">${parseFloat(appt.price || 0).toLocaleString()} FCFA</strong>
+                              </div>
+                              <span class="badge" style="background:${appt.booking_channel === 'VOICE_AGENT' ? '#8b5cf6' : (appt.booking_channel === 'WHATSAPP' ? '#10b981' : (appt.booking_channel === 'WEB_PWA' ? '#4a90e2' : '#64748b'))}; color:#fff; font-size:0.68rem; padding:1px 6px; border-radius:6px;">
+                                <i class="${appt.booking_channel === 'VOICE_AGENT' ? 'fas fa-microphone' : (appt.booking_channel === 'WHATSAPP' ? 'fab fa-whatsapp' : (appt.booking_channel === 'WEB_PWA' ? 'fas fa-globe' : 'fas fa-desktop'))}"></i>
+                                ${appt.booking_channel === 'VOICE_AGENT' ? 'Vocal IA' : (appt.booking_channel === 'WHATSAPP' ? 'WhatsApp' : (appt.booking_channel === 'WEB_PWA' ? 'En ligne' : 'Guichet'))}
+                              </span>
+                            </div>
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  `);
+                } else {
+                  // VERT: LIBRE
+                  slotsHtml.push(`
+                    <div class="slot-hour" style="background:#f0fdf4; color:#15803d; font-weight:700; border-left:4px solid #10b981; border-bottom:1px solid #dcfce7; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">
+                      ${timeStr}
+                    </div>
+                    <div class="slot-content" style="background:#f0fdf4; border-bottom:1px solid #dcfce7; padding:4px 10px; cursor:pointer;" onclick="quickSelectSlot('${timeStr}')" title="Cliquer pour planifier à ${timeStr}">
+                      <div style="display:flex; justify-content:space-between; align-items:center; padding:2px 4px; border-radius:4px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <span class="badge" style="background:#10b981; color:#ffffff; font-size:0.7rem; font-weight:700; padding:2px 7px; border-radius:4px;">
+                            <i class="fas fa-check-circle"></i> LIBRE
+                          </span>
+                          <span style="color:#047857; font-size:0.82rem; font-weight:600;">
+                            ${fr ? 'Créneau libre (Cliquer pour planifier)' : 'موعد شاغر (اضغط للحجز)'}
+                          </span>
                         </div>
-                        <span class="badge" style="background:${appt.booking_channel === 'VOICE_AGENT' ? '#8b5cf6' : (appt.booking_channel === 'WHATSAPP' ? '#10b981' : (appt.booking_channel === 'WEB_PWA' ? '#4a90e2' : 'var(--bg-surface)'))}; color:${appt.booking_channel && appt.booking_channel !== 'DESK' ? '#fff' : 'var(--text-muted)'}; border:1px solid var(--border-color); font-size:0.68rem; padding:1px 6px; border-radius:8px;">
-                          <i class="${appt.booking_channel === 'VOICE_AGENT' ? 'fas fa-microphone' : (appt.booking_channel === 'WHATSAPP' ? 'fab fa-whatsapp' : (appt.booking_channel === 'WEB_PWA' ? 'fas fa-globe' : 'fas fa-desktop'))}" style="margin-right:2px;"></i>
-                          ${appt.booking_channel === 'VOICE_AGENT' ? 'Vocal IA' : (appt.booking_channel === 'WHATSAPP' ? 'WhatsApp' : (appt.booking_channel === 'WEB_PWA' ? 'En ligne' : 'Guichet'))}
-                        </span>
+                        <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.72rem; padding:2px 8px; background:#ffffff; color:#047857; border-color:#86efac;">
+                          <i class="fas fa-plus"></i> ${fr ? 'Planifier' : 'حجز'}
+                        </button>
                       </div>
                     </div>
-                  `;
-                }).join('') : `
-                  <div style="color:var(--text-muted); font-size:0.8rem; opacity:0.6; cursor:pointer; padding:4px; border-radius:4px;" onclick="quickSelectSlot('${hour.toString().padStart(2, '0')}:00')" title="Cliquer pour planifier à cette heure">
-                    <i class="fas fa-plus-circle" style="opacity:0.6; margin-right:4px;"></i> ${fr ? 'Créneau libre (cliquer pour planifier)' : 'موعد شاغر'}
-                  </div>
-                `}
-              </div>
-            `;
-          }).join('')}
+                  `);
+                }
+              }
+            }
+            return slotsHtml.join('');
+          })()}
         </div>
       </div>
     </div>
