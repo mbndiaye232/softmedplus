@@ -9418,19 +9418,27 @@ function renderAuthLayout() {
           </div>
 
           <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px;">
-            <h5 style="margin-bottom:10px; color:var(--text-primary);">Compte Administrateur Principal</h5>
+            <h5 style="margin-bottom:12px; color:var(--text-primary); font-weight:700;"><i class="fas fa-user-shield text-primary"></i> Compte Administrateur Principal</h5>
             <div style="display:flex; gap:10px; margin-bottom:10px;">
-              <input type="text" class="form-control" id="signup-first" placeholder="Prénom" required />
-              <input type="text" class="form-control" id="signup-last" placeholder="Nom" required />
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.8rem; font-weight:600;">Prénom</label>
+                <input type="text" class="form-control" id="signup-first" placeholder="Prénom" required />
+              </div>
+              <div style="flex:1;">
+                <label class="form-label" style="font-size:0.8rem; font-weight:600;">Nom</label>
+                <input type="text" class="form-control" id="signup-last" placeholder="Nom" required />
+              </div>
             </div>
             <div class="form-group">
-              <input type="email" class="form-control" id="signup-email" placeholder="email@structure.com" required />
+              <label class="form-label" style="font-size:0.8rem; font-weight:600;"><i class="fas fa-envelope"></i> Adresse Email Professionnelle (Login)</label>
+              <input type="email" class="form-control" id="signup-email" placeholder="admin@structure.com" required />
             </div>
             <div class="form-group">
-              <input type="password" class="form-control" id="signup-password" placeholder="Mot de passe" required />
+              <label class="form-label" style="font-size:0.8rem; font-weight:600;"><i class="fas fa-lock"></i> Mot de passe de Connexion</label>
+              <input type="password" class="form-control" id="signup-password" placeholder="••••••••" required />
             </div>
           </div>
-          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:10px;">Créer ma structure sanitaire & démarrer</button>
+          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:10px; font-weight:700;">Créer ma structure sanitaire & démarrer</button>
         </form>
       </div>
     </div>
