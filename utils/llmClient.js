@@ -50,6 +50,8 @@ async function callOpenAICompatible({ provider, apiKey, model, baseUrl, messages
     endpoint = 'https://openrouter.ai/api/v1/chat/completions';
     headers['HTTP-Referer'] = 'https://softmed.com.co';
     headers['X-Title'] = 'SoftMed EHR Platform';
+  } else if (provider === 'aimlapi' || provider === 'aiml') {
+    endpoint = baseUrl ? (baseUrl.endsWith('/chat/completions') ? baseUrl : `${baseUrl.replace(/\/+$/, '')}/chat/completions`) : 'https://api.aimlapi.com/v1/chat/completions';
   } else if (provider === 'deepseek') {
     endpoint = 'https://api.deepseek.com/v1/chat/completions';
   } else if (provider === 'mammouth') {

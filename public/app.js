@@ -7288,6 +7288,9 @@ async function renderSettings(container) {
           <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('openrouter', 'deepseek/deepseek-chat')" style="font-size:0.78rem; padding:4px 10px;">
             🚀 OpenRouter • DeepSeek V3 (Idéal & Économique)
           </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('aimlapi', 'deepseek/deepseek-chat')" style="font-size:0.78rem; padding:4px 10px;">
+            ✨ AIML API (api.aimlapi.com • +200 modèles)
+          </button>
           <button type="button" class="btn btn-secondary btn-sm" onclick="applyAIPreset('openrouter', 'anthropic/claude-3.5-sonnet')" style="font-size:0.78rem; padding:4px 10px;">
             🧠 OpenRouter • Claude 3.5 Sonnet (Raisonnement Médical)
           </button>
@@ -7316,6 +7319,7 @@ async function renderSettings(container) {
             <label class="form-label" style="font-weight:700;">Fournisseur IA (Provider)</label>
             <select class="form-control" id="ai-provider" onchange="onAIProviderChange(this.value)" required>
               <option value="openrouter" ${aiCfg.provider_name === 'openrouter' ? 'selected' : ''}>🌐 OpenRouter (DeepSeek, Claude, Gemini, Llama via clé unique)</option>
+              <option value="aimlapi" ${aiCfg.provider_name === 'aimlapi' ? 'selected' : ''}>✨ AIML API (api.aimlapi.com • Multi-modèles)</option>
               <option value="gemini" ${aiCfg.provider_name === 'gemini' ? 'selected' : ''}>🌟 Google Gemini (Direct API / AI Studio)</option>
               <option value="deepseek" ${aiCfg.provider_name === 'deepseek' ? 'selected' : ''}>🐬 DeepSeek (Direct API)</option>
               <option value="claude" ${aiCfg.provider_name === 'claude' ? 'selected' : ''}>🎭 Anthropic Claude (Direct API)</option>
@@ -7841,7 +7845,8 @@ function applyAIPreset(provider, model) {
   if (provEl) provEl.value = provider;
   if (modelEl) modelEl.value = model;
   if (baseEl) {
-    if (provider === 'mammouth') baseEl.value = 'https://api.mammouth.ai/v1';
+    if (provider === 'aimlapi') baseEl.value = 'https://api.aimlapi.com/v1';
+    else if (provider === 'mammouth') baseEl.value = 'https://api.mammouth.ai/v1';
     else if (provider === 'openrouter') baseEl.value = 'https://openrouter.ai/api/v1';
     else baseEl.value = '';
   }
@@ -7856,6 +7861,9 @@ function onAIProviderChange(provider) {
   if (provider === 'openrouter') {
     modelEl.value = 'deepseek/deepseek-chat';
     if (baseEl) baseEl.value = '';
+  } else if (provider === 'aimlapi') {
+    modelEl.value = 'deepseek/deepseek-chat';
+    if (baseEl) baseEl.value = 'https://api.aimlapi.com/v1';
   } else if (provider === 'gemini') {
     modelEl.value = 'gemini-2.0-flash-001';
     if (baseEl) baseEl.value = '';
