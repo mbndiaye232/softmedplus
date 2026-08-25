@@ -210,43 +210,46 @@ const getAppointments = async (req, res) => {
   const { practitioner_id, start_date, end_date } = req.query;
   const tenantId = req.user.tenant_id;
 
-  let queryStr = `
-    SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
-           a.consultation_reason,
-           lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
-           p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
-           prac.first_name AS doc_first, prac.last_name AS doc_last,
-           COALESCE(NULLIF(a.consultation_reason, ''), ms.name) AS service_name,
-           COALESCE(NULLIF(ms.price, 0), prac.consultation_fee, 15000) AS price,
-           ms.deposit_amount
-    FROM appointments a
-    JOIN patients p ON a.patient_id = p.id
-    JOIN practitioners prac ON a.practitioner_id = prac.id
-    JOIN medical_services ms ON a.medical_service_id = ms.id
-    WHERE a.tenant_id = $1 AND a.status != 'CANCELED'
-  `;
-  const params = [tenantId];
-
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (practitioner_id && uuidRegex.test(practitioner_id)) {
-    params.push(practitioner_id);
-    queryStr += ` AND a.practitioner_id = $${params.length}`;
-  }
-
-  if (start_date && end_date) {
-    params.push(start_date);
-    params.push(end_date);
-    queryStr += ` AND a.time_slot && tstzrange($${params.length - 1}, $${params.length})`;
-  }
-
-  queryStr += ` ORDER BY start_time ASC`;
-
   try {
+    // Ensure column exists
+    await req.dbClient.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS consultation_reason TEXT;`);
+
+    let queryStr = `
+      SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
+             a.consultation_reason,
+             lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
+             p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
+             prac.first_name AS doc_first, prac.last_name AS doc_last,
+             COALESCE(NULLIF(a.consultation_reason, ''), ms.name, 'Consultation Médicale') AS service_name,
+             COALESCE(NULLIF(ms.price, 0), prac.consultation_fee, 15000) AS price,
+             COALESCE(ms.deposit_amount, 0) AS deposit_amount
+      FROM appointments a
+      LEFT JOIN patients p ON a.patient_id = p.id
+      LEFT JOIN practitioners prac ON a.practitioner_id = prac.id
+      LEFT JOIN medical_services ms ON a.medical_service_id = ms.id
+      WHERE a.tenant_id = $1 AND a.status != 'CANCELED'
+    `;
+    const params = [tenantId];
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (practitioner_id && uuidRegex.test(practitioner_id)) {
+      params.push(practitioner_id);
+      queryStr += ` AND a.practitioner_id = $${params.length}`;
+    }
+
+    if (start_date && end_date) {
+      params.push(start_date);
+      params.push(end_date);
+      queryStr += ` AND a.time_slot && tstzrange($${params.length - 1}, $${params.length})`;
+    }
+
+    queryStr += ` ORDER BY start_time ASC`;
+
     const result = await req.dbClient.query(queryStr, params);
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('Get appointments error:', err.message);
-    return res.status(500).json({ error: 'Failed to retrieve appointments' });
+    return res.status(500).json({ error: 'Failed to retrieve appointments: ' + err.message });
   }
 };
 
