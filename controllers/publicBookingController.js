@@ -228,7 +228,11 @@ const publicBookAppointment = async (req, res) => {
 
     let finalServiceId = medical_service_id;
     if (!finalServiceId) {
-      const servRes = await client.query(`SELECT id FROM medical_services WHERE tenant_id = $1 AND is_active = true LIMIT 1`, [tenantId]);
+      const servRes = await client.query(`
+        SELECT id FROM medical_services 
+        WHERE tenant_id = $1 AND is_active = true 
+        ORDER BY (practitioner_id = $2) DESC, (category = 'CONSULTATION') DESC, price DESC LIMIT 1
+      `, [tenantId, finalPractitionerId]);
       if (servRes.rowCount > 0) finalServiceId = servRes.rows[0].id;
     }
 

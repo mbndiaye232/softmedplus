@@ -11053,6 +11053,27 @@ async function selectPublicDoc(docId) {
   publicSelectedDocId = docId;
   voicePatientData.doc_id = docId;
   waPatientData.doc_id = docId;
+
+  // Auto-match consultation service to this practitioner's specialty
+  const docs = publicPortalData.practitioners || [];
+  const services = publicPortalData.services || [];
+  const doc = docs.find(d => d.id === docId);
+
+  if (doc && services.length > 0) {
+    const matchedService = services.find(s => 
+      (s.practitioner_id && s.practitioner_id === doc.id) ||
+      (doc.specialty_name && s.name && s.name.toLowerCase().includes(doc.specialty_name.toLowerCase())) ||
+      (doc.is_general_practitioner && s.name && s.name.toLowerCase().includes('générale'))
+    ) || services.find(s => s.category === 'CONSULTATION') || services[0];
+
+    if (matchedService) {
+      publicSelectedServiceId = matchedService.id;
+      publicSelectedDuration = matchedService.duration_minutes || 20;
+      voicePatientData.service_id = matchedService.id;
+      waPatientData.service_id = matchedService.id;
+    }
+  }
+
   renderPublicPortalView();
   await fetchAndRenderPublicSlots();
 }
@@ -11101,14 +11122,23 @@ async function renderPublicBookingPortal(slug) {
     const data = await api.request(`/public/clinics/${slug || 'paix'}`);
     publicPortalData = data;
     if (data.practitioners && data.practitioners.length > 0 && !publicSelectedDocId) {
-      publicSelectedDocId = data.practitioners[0].id;
-      voicePatientData.doc_id = data.practitioners[0].id;
-      waPatientData.doc_id = data.practitioners[0].id;
-    }
-    if (data.services && data.services.length > 0 && !publicSelectedServiceId) {
-      publicSelectedServiceId = data.services[0].id;
-      voicePatientData.service_id = data.services[0].id;
-      waPatientData.service_id = data.services[0].id;
+      const firstDoc = data.practitioners[0];
+      publicSelectedDocId = firstDoc.id;
+      voicePatientData.doc_id = firstDoc.id;
+      waPatientData.doc_id = firstDoc.id;
+
+      if (data.services && data.services.length > 0) {
+        const matchedService = data.services.find(s => 
+          (s.practitioner_id && s.practitioner_id === firstDoc.id) ||
+          (firstDoc.specialty_name && s.name && s.name.toLowerCase().includes(firstDoc.specialty_name.toLowerCase())) ||
+          (firstDoc.is_general_practitioner && s.name && s.name.toLowerCase().includes('générale'))
+        ) || data.services.find(s => s.category === 'CONSULTATION') || data.services[0];
+        
+        publicSelectedServiceId = matchedService.id;
+        publicSelectedDuration = matchedService.duration_minutes || 20;
+        voicePatientData.service_id = matchedService.id;
+        waPatientData.service_id = matchedService.id;
+      }
     }
     
     initWhatsAppConversation();
@@ -11632,6 +11662,21 @@ async function handleVoiceTranscript(userInput) {
     let matchedDoc = docs.find(d => text.includes(d.last_name.toLowerCase()) || text.includes(d.first_name.toLowerCase()));
     if (!matchedDoc && docs.length > 0) matchedDoc = docs[0];
     voicePatientData.doc_id = matchedDoc ? matchedDoc.id : (docs[0] ? docs[0].id : null);
+    
+    // Automatically match the consultation service corresponding to the doctor's specialty
+    if (matchedDoc) {
+      const services = publicPortalData.services || [];
+      const matchedService = services.find(s => 
+        (s.practitioner_id && s.practitioner_id === matchedDoc.id) ||
+        (matchedDoc.specialty_name && s.name && s.name.toLowerCase().includes(matchedDoc.specialty_name.toLowerCase())) ||
+        (matchedDoc.is_general_practitioner && s.name && s.name.toLowerCase().includes('générale'))
+      ) || services.find(s => s.category === 'CONSULTATION') || services[0];
+
+      if (matchedService) {
+        voicePatientData.service_id = matchedService.id;
+      }
+    }
+
     const docName = matchedDoc ? `${matchedDoc.title || 'Dr'} ${matchedDoc.first_name} ${matchedDoc.last_name}` : 'votre médecin';
 
     voiceStep = 4;
