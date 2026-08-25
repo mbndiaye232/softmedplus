@@ -138,19 +138,19 @@ const i18n = {
     hospital: "Hospitalisation",
     
     // Tenants CRUD & Landing Page
-    tenants: "Gestion des Cliniques",
-    addTenant: "Enregistrer une Clinique",
-    editTenant: "Modifier la Clinique",
-    tenantName: "Nom de la Clinique",
+    tenants: "Gestion des Structures Sanitaires",
+    addTenant: "Enregistrer une Structure Sanitaire",
+    editTenant: "Modifier la Structure Sanitaire",
+    tenantName: "Nom de la Structure Sanitaire",
     tenantSlug: "Identifiant Unique (Slug)",
     tenantPhone: "Téléphone",
     tenantNinea: "NINEA / RC fiscal",
     tenantEmail: "Email de contact",
-    tenantAddress: "Adresse de la Clinique",
+    tenantAddress: "Adresse de la Structure Sanitaire",
     tenantLogo: "URL du Logo",
     tenantActive: "Statut Actif",
     actions: "Actions",
-    confirmDeleteTenant: "Êtes-vous sûr de vouloir supprimer cette clinique ? Cette action est irréversible et supprimera toutes ses données.",
+    confirmDeleteTenant: "Êtes-vous sûr de vouloir supprimer cette structure sanitaire ? Cette action est irréversible et supprimera toutes ses données.",
     adminUserCreation: "Création du Compte Administrateur Principal",
     adminFirstName: "Prénom Administrateur",
     adminLastName: "Nom Administrateur",
@@ -159,12 +159,12 @@ const i18n = {
     saveBtn: "Enregistrer",
     cancelBtn: "Annuler",
     deleteBtn: "Supprimer",
-    tenantsList: "Liste des Cliniques / Tenants",
-    noTenants: "Aucune clinique enregistrée.",
-    homeTitle: "Gérez votre clinique en toute simplicité",
+    tenantsList: "Liste des Structures Sanitaires / Établissements",
+    noTenants: "Aucune structure sanitaire enregistrée.",
+    homeTitle: "Gérez votre structure sanitaire en toute simplicité",
     homeSubtitle: "La plateforme médicale SaaS multi-tenant moderne et sécurisée.",
     homeCTAConnect: "Se Connecter",
-    homeCTASignup: "Créer un Nouveau Cabinet",
+    homeCTASignup: "Créer une Structure Sanitaire",
     homeFeatures: "Fonctionnalités Clés",
     homeFeature1: "Dossier Patient Informatisé (DPI)",
     homeFeature1Desc: "Saisie rapide des constantes vitales, antécédents et diagnostics CIM-10.",
@@ -316,20 +316,20 @@ const i18n = {
     hospital: "الاستشفاء والاقامة",
     
     // Tenants CRUD & Landing Page
-    tenants: "إدارة العيادات",
-    addTenant: "تسجيل عيادة جديدة",
-    editTenant: "تعديل بيانات العيادة",
-    tenantName: "اسم العيادة",
+    tenants: "إدارة المنشآت الصحية",
+    addTenant: "تسجيل منشأة صحية جديدة",
+    editTenant: "تعديل بيانات المنشأة الصحية",
+    tenantName: "اسم المنشأة الصحية",
     tenantSlug: "المعرف الفريد (Slug)",
     tenantPhone: "الهاتف",
     tenantNinea: "رقم التعريف الضريبي (NINEA)",
     tenantEmail: "البريد الإلكتروني للتواصل",
-    tenantAddress: "عنوان العيادة",
+    tenantAddress: "عنوان المنشأة الصحية",
     tenantLogo: "رابط الشعار",
     tenantActive: "الحالة (نشط)",
     actions: "الإجراءات",
-    confirmDeleteTenant: "هل أنت متأكد من حذف هذه العيادة؟ هذا الإجراء غير قابل للتراجع وسيؤدي لحذف كافة البيانات.",
-    adminUserCreation: "إنشاء حساب المدير الرئيسي للعيادة",
+    confirmDeleteTenant: "هل أنت متأكد من حذف هذه المنشأة الصحية؟ هذا الإجراء غير قابل للتراجع وسيؤدي لحذف كافة البيانات.",
+    adminUserCreation: "إنشاء حساب المدير الرئيسي للمنشأة الصحية",
     adminFirstName: "الاسم الأول للمدير",
     adminLastName: "الاسم الأخير للمدير",
     adminEmail: "البريد الإلكتروني للمدير",
@@ -337,12 +337,12 @@ const i18n = {
     saveBtn: "حفظ",
     cancelBtn: "إلغاء",
     deleteBtn: "حذف",
-    tenantsList: "قائمة العيادات / المستأجرين",
-    noTenants: "لا توجد عيادات مسجلة.",
-    homeTitle: "إدارة عيادتك الطبية بكل سهولة",
+    tenantsList: "قائمة المنشآت الصحية / المستأجرين",
+    noTenants: "لا توجد منشآت صحية مسجلة.",
+    homeTitle: "إدارة منشأتك الصحية بكل سهولة",
     homeSubtitle: "منصة طبية سحابية حديثة، آمنة ومتعددة المستأجرين.",
     homeCTAConnect: "تسجيل الدخول",
-    homeCTASignup: "تسجيل عيادة جديدة",
+    homeCTASignup: "تسجيل منشأة صحية جديدة",
     homeFeatures: "الميزات الرئيسية للمنصة",
     homeFeature1: "الملف الطبي الرقمي للمريض (DPI)",
     homeFeature1Desc: "تسجيل سريع للعلامات الحيوية، التشخيصات والرموز الطبية الدولية CIM-10.",
@@ -7365,13 +7365,13 @@ async function renderSettings(container) {
         `).join('')}
       </div>
     </div>
-    <!-- Clinic Identity Settings -->
+    <!-- Structure Identity Settings -->
     <div class="card" style="margin-bottom: 24px;">
-      <div class="card-title"><i class="fas fa-clinic-medical"></i> Identité de la Clinique / Cabinet</div>
+      <div class="card-title"><i class="fas fa-hospital"></i> Identité de la Structure Sanitaire</div>
       <form onsubmit="saveClinicProfile(event)">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
           <div class="form-group">
-            <label class="form-label">Nom du Cabinet / Clinique</label>
+            <label class="form-label">Nom de la Structure Sanitaire</label>
             <input type="text" class="form-control" id="prof-name" value="${tenant.name || ''}" required />
           </div>
           <div class="form-group">
@@ -7395,7 +7395,7 @@ async function renderSettings(container) {
         </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
           <div class="form-group">
-            <label class="form-label">Logo de la Clinique</label>
+            <label class="form-label">Logo de la Structure Sanitaire</label>
             <div style="display:flex; gap:5px;">
               <input type="text" class="form-control" id="prof-logo" value="${tenant.logo_url || ''}" placeholder="/logo-default.png" style="flex:1;" />
               <input type="file" id="prof-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'prof-logo')" />
@@ -7403,7 +7403,7 @@ async function renderSettings(container) {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Cachet / Tampon Officiel de la Clinique</label>
+            <label class="form-label">Cachet / Tampon Officiel de la Structure Sanitaire</label>
             <div style="display:flex; gap:5px;">
               <input type="text" class="form-control" id="prof-stamp" value="${tenant.stamp_url || ''}" placeholder="/stamp-default.png" style="flex:1;" />
               <input type="file" id="prof-stamp-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'prof-stamp')" />
@@ -7421,7 +7421,7 @@ async function renderSettings(container) {
             <input type="number" step="0.000001" class="form-control" id="prof-lng" value="${gps.longitude || ''}" placeholder="-17.4479" />
           </div>
         </div>
-        <button class="btn btn-primary" type="submit"><i class="fas fa-save"></i> Enregistrer le Profil Clinique</button>
+        <button class="btn btn-primary" type="submit"><i class="fas fa-save"></i> Enregistrer le Profil de la Structure Sanitaire</button>
       </form>
     </div>
 
@@ -9017,7 +9017,7 @@ function renderAuthLayout() {
             </a>
           </div>
 
-          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:5px; font-weight:700;">Accéder à ma clinique</button>
+          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:5px; font-weight:700;">Accéder à ma structure sanitaire</button>
           
           <div style="margin-top:16px; text-align:center; border-top:1px solid var(--border-color); padding-top:14px;">
             <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">Vous êtes un patient ?</div>
@@ -9050,8 +9050,8 @@ function renderAuthLayout() {
         <!-- Signup Form (Hidden by default) -->
         <form id="signup-form" onsubmit="handleTenantSignup(event)" style="display:none;">
           <div class="form-group">
-            <label class="form-label">Nom de la Clinique / Cabinet</label>
-            <input type="text" class="form-control" id="signup-tenant-name" placeholder="Clinique de l'Espoir" required />
+            <label class="form-label">Nom de la Structure Sanitaire</label>
+            <input type="text" class="form-control" id="signup-tenant-name" placeholder="Centre Médical de l'Espoir" required />
           </div>
           <div class="form-group">
             <label class="form-label">Identifiant Unique URL (Slug)</label>
@@ -9074,7 +9074,7 @@ function renderAuthLayout() {
               <input type="text" class="form-control" id="signup-address" placeholder="12 Rue de Dakar, Fann" />
             </div>
             <div style="flex:1;">
-              <label class="form-label">Logo de la Clinique</label>
+              <label class="form-label">Logo de la Structure Sanitaire</label>
               <div style="display:flex; gap:5px;">
                 <input type="text" class="form-control" id="signup-logo" placeholder="/logo-espoir.png" style="flex:1;" />
                 <input type="file" id="signup-logo-file" style="display:none;" accept="image/*" onchange="uploadImage(this, 'signup-logo')" />
@@ -9122,13 +9122,13 @@ function renderAuthLayout() {
               <input type="text" class="form-control" id="signup-last" placeholder="Nom" required />
             </div>
             <div class="form-group">
-              <input type="email" class="form-control" id="signup-email" placeholder="email@clinique.com" required />
+              <input type="email" class="form-control" id="signup-email" placeholder="email@structure.com" required />
             </div>
             <div class="form-group">
               <input type="password" class="form-control" id="signup-password" placeholder="Mot de passe" required />
             </div>
           </div>
-          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:10px;">Créer ma clinique & démarrer</button>
+          <button class="btn btn-primary" style="width:100%; height:45px; margin-top:10px;">Créer ma structure sanitaire & démarrer</button>
         </form>
       </div>
     </div>
@@ -10860,7 +10860,7 @@ function copyPublicBookingLink(slug) {
 
 function shareOnWhatsApp(slug, clinicName) {
   const url = `${window.location.origin}/rdv/${slug || 'paix'}`;
-  const text = encodeURIComponent(`Bonjour, prenez rendez-vous en ligne en quelques clics à ${clinicName || 'notre clinique'} via ce lien sécurisé : ${url}`);
+  const text = encodeURIComponent(`Bonjour, prenez rendez-vous en ligne en quelques clics à ${clinicName || 'notre structure sanitaire'} via ce lien sécurisé : ${url}`);
   window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
 }
 
@@ -10902,11 +10902,11 @@ function openSelectClinicModal(clinics) {
     <div class="modal-container" style="width:520px; max-width:95%; animation: modalFadeIn 0.3s ease; padding:25px;">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
         <h4 style="margin:0; color:var(--text-primary); font-size:1.15rem; font-weight:700;">
-          <i class="fas fa-clinic-medical" style="color:var(--primary);"></i> Choisissez votre Clinique
+          <i class="fas fa-hospital" style="color:var(--primary);"></i> Choisissez votre Structure Sanitaire
         </h4>
         <button onclick="document.getElementById('select-clinic-modal').style.display='none'" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
       </div>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Sélectionnez l'établissement où vous souhaitez consulter :</p>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Sélectionnez la structure sanitaire où vous souhaitez consulter :</p>
       <div style="display:flex; flex-direction:column; gap:10px; max-height:360px; overflow-y:auto;">
         ${clinics.map(c => `
           <div onclick="document.getElementById('select-clinic-modal').style.display='none'; openPublicBookingPortal('${c.slug}')" style="border:1px solid var(--border-color); background:var(--bg-surface); padding:14px 18px; border-radius:12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
@@ -11150,8 +11150,8 @@ async function renderPublicBookingPortal(slug) {
       <div style="min-height:100vh; display:flex; justify-content:center; align-items:center; background:var(--bg-primary); padding:20px;">
         <div class="card" style="max-width:500px; text-align:center; padding:30px;">
           <i class="fas fa-hospital-alt fa-3x" style="color:var(--primary); margin-bottom:15px;"></i>
-          <h3 style="color:var(--text-primary);">Clinique introuvable</h3>
-          <p style="color:var(--text-muted); font-size:0.9rem;">Le lien utilisé ne correspond à aucune clinique active.</p>
+          <h3 style="color:var(--text-primary);">Structure sanitaire introuvable</h3>
+          <p style="color:var(--text-muted); font-size:0.9rem;">Le lien utilisé ne correspond à aucune structure sanitaire active.</p>
           <button class="btn btn-primary" onclick="window.location.href='/'" style="margin-top:15px;">
             <i class="fas fa-home"></i> Retour à l'accueil
           </button>
