@@ -11670,7 +11670,7 @@ function speakAI(text) {
       voiceIsSpeaking = false;
       updateVoiceUI();
       // Auto listen after speaking if not completed
-      if (voiceStep < 5 && voiceRecognition && !voiceIsListening) {
+      if (voiceStep < 6 && voiceRecognition && !voiceIsListening) {
         try { voiceRecognition.start(); } catch(e) {}
       }
     };
