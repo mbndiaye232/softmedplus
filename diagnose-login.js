@@ -14,30 +14,41 @@ const pool = process.env.DATABASE_URL
 async function diagnose() {
   const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     await client.query("SET LOCAL app.bypass_rls = 'true'");
 
     // 1. Check tenant
     const t = await client.query("SELECT id, name, slug, is_active FROM tenants WHERE slug = 'paix'");
     console.log('[Tenant]', t.rows.length ? t.rows[0] : 'NOT FOUND');
 
-    if (t.rows.length === 0) { return; }
-    const tenantId = t.rows[0].id;
-
-    // 2. Check user
+    // 2. Search user across ALL tenants
     const u = await client.query("SELECT id, tenant_id, email, password_hash, role, is_active FROM users WHERE email = 'mbndiaye@gmail.com'");
-    console.log('[User]', u.rows.length ? { ...u.rows[0], password_hash: u.rows[0].password_hash.substring(0, 20) + '...' } : 'NOT FOUND');
-
-    if (u.rows.length === 0) { return; }
+    console.log('[User count]', u.rows.length);
     
-    // 3. Check tenant_id match
-    const user = u.rows[0];
-    console.log('[Tenant ID match]', user.tenant_id === tenantId ? 'YES' : `NO (user tenant: ${user.tenant_id}, slug tenant: ${tenantId})`);
+    if (u.rows.length > 0) {
+      for (const user of u.rows) {
+        console.log('[User]', { id: user.id, tenant_id: user.tenant_id, role: user.role, is_active: user.is_active });
+        
+        // Check tenant_id match
+        if (t.rows.length > 0) {
+          console.log('[Tenant ID match]', user.tenant_id === t.rows[0].id ? 'YES' : `NO (user: ${user.tenant_id}, paix: ${t.rows[0].id})`);
+        }
 
-    // 4. Verify password
-    const isMatch = await bcrypt.compare('Soft2026', user.password_hash);
-    console.log('[Password "Soft2026" valid]', isMatch);
+        // Verify password
+        const isMatch = await bcrypt.compare('Soft2026', user.password_hash);
+        console.log('[Password "Soft2026" valid]', isMatch);
+      }
+    } else {
+      console.log('[User] NOT FOUND even with RLS bypassed');
+      
+      // Count all users
+      const allUsers = await client.query("SELECT email, tenant_id, role FROM users LIMIT 10");
+      console.log('[All users in DB]', allUsers.rows);
+    }
 
+    await client.query('COMMIT');
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[Error]', err.message);
   } finally {
     client.release();
