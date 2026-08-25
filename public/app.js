@@ -12091,7 +12091,7 @@ function speakAI(text) {
       voiceIsSpeaking = false;
       updateVoiceUI();
       // Auto listen after speaking if not completed
-      if (voiceStep < 6 && voiceRecognition && !voiceIsListening) {
+      if (voiceStep < 7 && voiceRecognition && !voiceIsListening) {
         try { voiceRecognition.start(); } catch(e) {}
       }
     };
@@ -12236,13 +12236,14 @@ async function handleVoiceTranscript(userInput) {
     renderVoiceMessages();
     speakAI(reply);
   } else if (voiceStep === 5) {
-    // Time and booking execution
+    // Time and date selection -> Move to Verification & Confirmation Step 6
     let hour = '10:00';
-    const hourMatch = text.match(/(\d{1,2})\s*h/i) || text.match(/(\d{1,2})\s*heure/i);
+    const hourMatch = text.match(/(\d{1,2})\s*h(?:eure)?(?:\s*(\d{1,2}))?/i) || text.match(/(\d{1,2})\s*:\s*(\d{2})/i);
     if (hourMatch) {
       let hVal = parseInt(hourMatch[1]);
+      let mVal = hourMatch[2] ? parseInt(hourMatch[2]) : 0;
       if (hVal < 8) hVal += 12;
-      hour = `${String(hVal).padStart(2, '0')}:00`;
+      hour = `${String(hVal).padStart(2, '0')}:${String(mVal).padStart(2, '0')}`;
     }
 
     let dateStr = getTodayDateStr();
@@ -12250,55 +12251,172 @@ async function handleVoiceTranscript(userInput) {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       dateStr = tomorrow.toISOString().split('T')[0];
+    } else if (text.includes('après-demain') || text.includes('apres demain')) {
+      const dayAfter = new Date();
+      dayAfter.setDate(dayAfter.getDate() + 2);
+      dateStr = dayAfter.toISOString().split('T')[0];
     }
 
     voicePatientData.date = dateStr;
     voicePatientData.time = hour;
     voiceStep = 6;
 
-    const reply = `Parfait ! J'enregistre votre rendez-vous pour le ${dateStr} à ${hour}...`;
+    const doc = docs.find(d => d.id === voicePatientData.doc_id) || docs[0];
+    const docName = doc ? `${doc.title || 'Dr'} ${doc.first_name} ${doc.last_name}` : 'votre médecin';
+    const specName = doc ? (doc.specialty_name || 'Médecine') : 'Consultation';
+    const reason = voicePatientData.consultation_reason || 'Consultation & Bilan';
+
+    const reply = `Voici le récapitulatif de votre rendez-vous :
+• Patient : ${voicePatientData.first_name} ${voicePatientData.last_name}
+• Praticien : ${docName} (${specName})
+• Motif : « ${reason} »
+• Date et Heure : Le ${dateStr} à ${hour}.
+
+Ces informations sont-elles bien correctes ? Répondez « Oui » pour confirmer, ou dites ce que vous souhaitez modifier (ex: « Changer l'heure », « Changer le médecin », « Changer le motif »).`;
+
     voiceTranscriptLog.push({ sender: 'ai', text: reply });
     renderVoiceMessages();
     speakAI(reply);
 
-    // Call public booking API
-    try {
-      const payload = {
-        tenant_slug: clinic.slug,
-        practitioner_id: voicePatientData.doc_id,
-        medical_service_id: voicePatientData.service_id,
-        consultation_reason: voicePatientData.consultation_reason || 'Consultation spécialisée',
-        start_time: `${dateStr}T${hour}:00`,
-        booking_channel: 'VOICE_AGENT',
-        is_new_patient: !voicePatientData.is_existing,
-        patient_code: voicePatientData.code,
-        first_name: voicePatientData.first_name,
-        last_name: voicePatientData.last_name,
-        phone_number: voicePatientData.phone || '776473506',
-        gender: voicePatientData.gender,
-        date_of_birth: '1995-01-01'
-      };
+  } else if (voiceStep === 6) {
+    // Step 6: Interactive Confirmation & Continuous Correction Loop
+    const isConfirmation = text.includes('oui') || text.includes('correct') || text.includes('valider') || text.includes('confirmer') || text.includes('exact') || text.includes('parfait') || text.includes('d\'accord') || text.includes('c\'est bon') || text.includes('yes') || text.includes('ok');
 
-      const res = await api.request('/public/book', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-
-      const finalMsg = `Félicitations ${res.patient.first_name} ! Votre rendez-vous avec ${res.practitioner_name || 'votre médecin'} est validé sous le Code Patient ${res.patient.patient_code}. Votre pass numérique s'affiche à l'écran.`;
-      voiceTranscriptLog.push({ sender: 'ai', text: finalMsg });
+    if (isConfirmation) {
+      voiceStep = 7;
+      const confirmReply = `Parfait ! J'enregistre définitivement votre rendez-vous...`;
+      voiceTranscriptLog.push({ sender: 'ai', text: confirmReply });
       renderVoiceMessages();
-      speakAI(finalMsg);
+      speakAI(confirmReply);
 
-      setTimeout(() => {
-        renderPublicPortalView(res);
-      }, 2000);
+      // Call public booking API
+      try {
+        const payload = {
+          tenant_slug: clinic.slug,
+          practitioner_id: voicePatientData.doc_id,
+          medical_service_id: voicePatientData.service_id,
+          consultation_reason: voicePatientData.consultation_reason || 'Consultation spécialisée',
+          start_time: `${voicePatientData.date}T${voicePatientData.time}:00`,
+          booking_channel: 'VOICE_AGENT',
+          is_new_patient: !voicePatientData.is_existing,
+          patient_code: voicePatientData.code,
+          first_name: voicePatientData.first_name,
+          last_name: voicePatientData.last_name,
+          phone_number: voicePatientData.phone || '776473506',
+          gender: voicePatientData.gender,
+          date_of_birth: '1995-01-01'
+        };
 
-    } catch (err) {
-      const errMsg = `Désolé, une erreur est survenue : ${err.message}`;
-      voiceTranscriptLog.push({ sender: 'ai', text: errMsg });
-      renderVoiceMessages();
-      speakAI(errMsg);
+        const res = await api.request('/public/book', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        const finalMsg = `Félicitations ${res.patient.first_name} ! Votre rendez-vous avec ${res.practitioner_name || 'votre médecin'} est validé sous le Code Patient ${res.patient.patient_code}. Votre pass numérique s'affiche à l'écran.`;
+        voiceTranscriptLog.push({ sender: 'ai', text: finalMsg });
+        renderVoiceMessages();
+        speakAI(finalMsg);
+
+        setTimeout(() => {
+          renderPublicPortalView(res);
+        }, 2500);
+
+      } catch (err) {
+        const errMsg = `Désolé, une erreur est survenue : ${err.message}`;
+        voiceTranscriptLog.push({ sender: 'ai', text: errMsg });
+        renderVoiceMessages();
+        speakAI(errMsg);
+      }
+      return;
     }
+
+    // Check for specific field corrections:
+    // A. Doctor / Specialty
+    if (text.includes('médecin') || text.includes('docteur') || text.includes('praticien') || text.includes('changer de medecin') || text.includes('changer le medecin') || text.includes('cardiologue') || text.includes('pédiatre') || text.includes('généraliste') || text.includes('ophtalmo')) {
+      const { doc: matchedDoc, service: matchedService } = matchDoctorAndServiceFromInput(userInput, docs, services);
+      if (matchedDoc) {
+        voicePatientData.doc_id = matchedDoc.id;
+        if (matchedService) voicePatientData.service_id = matchedService.id;
+        const newDocName = `${matchedDoc.title || 'Dr'} ${matchedDoc.first_name} ${matchedDoc.last_name}`;
+        const newSpecName = matchedDoc.specialty_name || 'Spécialiste';
+        const reply = `Praticien modifié pour : ${newDocName} (${newSpecName}).\n\nNouveau récapitulatif : RDV avec ${newDocName} le ${voicePatientData.date} à ${voicePatientData.time} pour « ${voicePatientData.consultation_reason} ».\n\nEst-ce bien correct ? (Dites « Oui » pour valider).`;
+        voiceTranscriptLog.push({ sender: 'ai', text: reply });
+        renderVoiceMessages();
+        speakAI(reply);
+      } else {
+        voiceStep = 3;
+        const reply = `D'accord, quel médecin ou spécialité souhaitez-vous choisir ? (ex: Cardiologue, Pédiatre, Généraliste...)`;
+        voiceTranscriptLog.push({ sender: 'ai', text: reply });
+        renderVoiceMessages();
+        speakAI(reply);
+      }
+      return;
+    }
+
+    // B. Date & Time
+    if (text.includes('heure') || text.includes('date') || text.includes('jour') || text.includes('changer l\'heure') || text.includes('changer la date') || text.includes('demain') || text.includes('aujourd\'hui') || text.match(/\d{1,2}\s*h/i)) {
+      const hourMatch = text.match(/(\d{1,2})\s*h(?:eure)?(?:\s*(\d{1,2}))?/i) || text.match(/(\d{1,2})\s*:\s*(\d{2})/i);
+      if (hourMatch) {
+        let hVal = parseInt(hourMatch[1]);
+        let mVal = hourMatch[2] ? parseInt(hourMatch[2]) : 0;
+        if (hVal < 8) hVal += 12;
+        voicePatientData.time = `${String(hVal).padStart(2, '0')}:${String(mVal).padStart(2, '0')}`;
+      }
+      if (text.includes('demain')) {
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        voicePatientData.date = tomorrow.toISOString().split('T')[0];
+      } else if (text.includes('aujourd\'hui')) {
+        voicePatientData.date = getTodayDateStr();
+      }
+
+      const doc = docs.find(d => d.id === voicePatientData.doc_id) || docs[0];
+      const docName = doc ? `${doc.title || 'Dr'} ${doc.first_name} ${doc.last_name}` : 'votre médecin';
+      const reply = `Date et heure modifiées pour le ${voicePatientData.date} à ${voicePatientData.time}.\n\nNouveau récapitulatif : RDV avec ${docName} le ${voicePatientData.date} à ${voicePatientData.time} (Motif : « ${voicePatientData.consultation_reason} »).\n\nEst-ce bien correct ? (Dites « Oui » pour valider).`;
+      voiceTranscriptLog.push({ sender: 'ai', text: reply });
+      renderVoiceMessages();
+      speakAI(reply);
+      return;
+    }
+
+    // C. Reason
+    if (text.includes('motif') || text.includes('changer le motif') || text.includes('raison')) {
+      const cleanReason = userInput.replace(/^(changer le motif|le motif est|motif\s*:?)/i, '').trim();
+      if (cleanReason && cleanReason.length > 2) {
+        voicePatientData.consultation_reason = cleanReason;
+        const doc = docs.find(d => d.id === voicePatientData.doc_id) || docs[0];
+        const docName = doc ? `${doc.title || 'Dr'} ${doc.first_name} ${doc.last_name}` : 'votre médecin';
+        const reply = `Motif modifié : « ${cleanReason} ».\n\nNouveau récapitulatif : RDV avec ${docName} le ${voicePatientData.date} à ${voicePatientData.time} pour « ${cleanReason} ».\n\nEst-ce bien correct ? (Dites « Oui » pour valider).`;
+        voiceTranscriptLog.push({ sender: 'ai', text: reply });
+        renderVoiceMessages();
+        speakAI(reply);
+      } else {
+        voiceStep = 4;
+        const reply = `D'accord, quel est le nouveau motif de votre consultation ?`;
+        voiceTranscriptLog.push({ sender: 'ai', text: reply });
+        renderVoiceMessages();
+        speakAI(reply);
+      }
+      return;
+    }
+
+    // D. Name
+    if (text.includes('nom') || text.includes('prénom') || text.includes('changer le nom')) {
+      voiceStep = 2;
+      const reply = `D'accord, veuillez me donner vos prénom et nom exacts :`;
+      voiceTranscriptLog.push({ sender: 'ai', text: reply });
+      renderVoiceMessages();
+      speakAI(reply);
+      return;
+    }
+
+    // E. General fallback for Step 6
+    const doc = docs.find(d => d.id === voicePatientData.doc_id) || docs[0];
+    const docName = doc ? `${doc.title || 'Dr'} ${doc.first_name} ${doc.last_name}` : 'votre médecin';
+    const reply = `Que souhaitez-vous corriger ? Vous pouvez me dire par exemple : « Changer l'heure pour 16h », « Changer de médecin » ou « Changer le motif ». Ou dites « Oui » pour confirmer ce rendez-vous.`;
+    voiceTranscriptLog.push({ sender: 'ai', text: reply });
+    renderVoiceMessages();
+    speakAI(reply);
   }
 }
 
@@ -12370,6 +12488,21 @@ function getVoiceShortcutsHTML(docs) {
       </button>
       <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Demain à 15 heures')" style="font-size:0.78rem;">
         💬 « Demain à 15h »
+      </button>
+    `;
+  } else if (voiceStep === 6) {
+    return `
+      <button type="button" class="btn btn-success btn-sm" onclick="handleVoiceTranscript('Oui, c\'est tout à fait correct')" style="font-size:0.78rem; font-weight:700; background:#10b981; border-color:#10b981; color:#fff;">
+        ✅ « Oui, c'est correct (Confirmer) »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Changer l\'heure pour 16 heures')" style="font-size:0.78rem;">
+        🕒 « Modifier l'heure »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Changer de médecin')" style="font-size:0.78rem;">
+        👨‍⚕️ « Modifier le médecin »
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="handleVoiceTranscript('Changer le motif')" style="font-size:0.78rem;">
+        📝 « Modifier le motif »
       </button>
     `;
   }
