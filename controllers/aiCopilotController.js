@@ -707,14 +707,14 @@ const saveAIConfig = async (req, res) => {
              temperature = $6, max_tokens = $7, system_prompt = $8, updated_at = NOW()
          WHERE id = $9
          RETURNING id, provider_name, model_name, is_active, updated_at`,
-        [provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(maxTokens || 1500, 10), system_prompt || '', existRes.rows[0].id]
+        [provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(max_tokens || 1500, 10), system_prompt || '', existRes.rows[0].id]
       );
     } else {
       saved = await pool.query(
         `INSERT INTO ai_llm_configs (tenant_id, provider_name, api_key, model_name, base_url, is_active, temperature, max_tokens, system_prompt)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id, provider_name, model_name, is_active, updated_at`,
-        [tenantId, provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(maxTokens || 1500, 10), system_prompt || '']
+        [tenantId, provider_name, finalKey.trim(), model_name || 'deepseek/deepseek-chat', base_url || '', is_active !== false, parseFloat(temperature) || 0.7, parseInt(max_tokens || 1500, 10), system_prompt || '']
       );
     }
 
