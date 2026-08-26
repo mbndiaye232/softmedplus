@@ -338,9 +338,8 @@ const updatePatient = async (req, res) => {
            status = COALESCE($11, status),
            address = $12,
            allergies = $13,
-           attending_practitioner_id = $14,
-           email = $15
-       WHERE id = $16 AND tenant_id = $17
+           attending_practitioner_id = $14
+       WHERE id = $15 AND tenant_id = $16
        RETURNING *`,
       [
         phone_number ? phone_number.trim() : null,
@@ -357,7 +356,6 @@ const updatePatient = async (req, res) => {
         address !== undefined ? address : null,
         parsedAllergies,
         cleanDocId,
-        email ? email.trim() : null,
         id,
         tenantId
       ]
