@@ -701,7 +701,7 @@ const sendInvoiceEmailController = async (req, res) => {
         last_name: invoice.patient_last,
         patient_code: invoice.patient_code,
         phone_number: invoice.patient_phone,
-        email: invoice.patient_email
+        email: invoice.patient_email || null
       },
       insurance: invoice.insurance_name ? {
         name: invoice.insurance_name,
@@ -712,7 +712,7 @@ const sendInvoiceEmailController = async (req, res) => {
       lines: linesRes.rows,
       payments: paymentsRes.rows,
       recipientEmail: recipient_email.trim(),
-      recipientType,
+      recipientType: recipient_type,
       customSubject: subject,
       customMessage: message,
       attachedDocuments,
@@ -728,7 +728,7 @@ const sendInvoiceEmailController = async (req, res) => {
       [
         tenantId,
         id,
-        recipientType,
+        recipient_type,
         recipient_email.trim(),
         subject || `Facture N° ${invoice.invoice_number}`,
         message || null,
