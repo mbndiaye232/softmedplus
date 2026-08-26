@@ -79,17 +79,26 @@ app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 app.post('/api/payments/webhook/:provider', paymentCtrl.handleWebhook);
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
-app.post('/api/upload', upload.single('file'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-  try {
-    const url = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
-    return res.status(200).json({ url });
-  } catch (err) {
-    console.error('File upload route error:', err.message);
-    return res.status(500).json({ error: 'File upload failed' });
-  }
+app.post('/api/upload', (req, res) => {
+  upload.single('file')(req, res, async (multerErr) => {
+    if (multerErr) {
+      // Multer errors (file too large, wrong type, etc.) — always return JSON
+      const msg = multerErr.code === 'LIMIT_FILE_SIZE'
+        ? 'Fichier trop volumineux. La taille maximale autorisée est 25 Mo.'
+        : (multerErr.message || 'Erreur lors du téléversement du fichier.');
+      return res.status(400).json({ error: msg });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Aucun fichier reçu. Veuillez sélectionner un fichier.' });
+    }
+    try {
+      const url = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
+      return res.status(200).json({ url });
+    } catch (err) {
+      console.error('File upload route error:', err.message);
+      return res.status(500).json({ error: 'Échec du téléversement : ' + err.message });
+    }
+  });
 });
 
 // ============================================================================

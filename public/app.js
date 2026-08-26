@@ -613,9 +613,21 @@ async function uploadMedicalDocument(inputEl, targetInputId, previewContainerId)
       body: formData
     });
 
-    const data = await response.json();
+    // Safely parse JSON — avoid "Unexpected end of JSON" on empty/non-JSON responses
+    let data = {};
+    try {
+      const rawText = await response.text();
+      if (rawText && rawText.trim().length > 0) {
+        data = JSON.parse(rawText);
+      }
+    } catch (_) {
+      // ignore parse errors — handled below via response.ok
+    }
     if (!response.ok) {
-      throw new Error(data.error || 'Échec du téléversement');
+      throw new Error(data.error || `Échec du téléversement (HTTP ${response.status})`);
+    }
+    if (!data.url) {
+      throw new Error('Le serveur n\'a pas retourné une URL valide pour le document.');
     }
 
     document.getElementById(targetInputId).value = data.url;
