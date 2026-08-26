@@ -483,8 +483,11 @@ const getHospitalizations = async (req, res) => {
   try {
     let query = `
       SELECT h.*, 
-             p.first_name as patient_first_name, p.last_name as patient_last_name, p.patient_code, p.phone as patient_phone,
-             b.name as bed_name, r.number_or_name as room_name, r.id as room_id,
+             p.first_name as patient_first_name, p.last_name as patient_last_name, p.patient_code, 
+             p.phone_number as patient_phone,
+             COALESCE(b.name, b.bed_number) as bed_name, 
+             COALESCE(r.number_or_name, r.room_number) as room_name, 
+             r.id as room_id,
              bl.name as building_name, bl.id as building_id,
              b.daily_rate, b.luxury_level,
              GREATEST(1, CEIL(EXTRACT(EPOCH FROM (COALESCE(h.discharged_at, NOW()) - h.admitted_at)) / 86400))::INT as duration_days,
@@ -528,9 +531,9 @@ const getHospitalizations = async (req, res) => {
       query += ` AND (
         LOWER(p.first_name) LIKE $${params.length} OR 
         LOWER(p.last_name) LIKE $${params.length} OR 
-        LOWER(p.patient_code) LIKE $${params.length} OR 
-        LOWER(b.name) LIKE $${params.length} OR 
-        LOWER(r.number_or_name) LIKE $${params.length} OR 
+        LOWER(COALESCE(p.patient_code, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(b.name, b.bed_number, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(r.number_or_name, r.room_number, '')) LIKE $${params.length} OR 
         LOWER(bl.name) LIKE $${params.length}
       )`;
     }
@@ -560,22 +563,25 @@ const admitPatient = async (req, res) => {
       [patient_id, tenantId]
     );
     if (activeStay.rowCount > 0) {
-      return res.status(400).json({ error: 'Le patient est déjà actuellement admis dans un séjour hospitalier' });
+      return res.status(400).json({ error: 'Ce patient est déjà actuellement hospitalisé.' });
     }
 
     // Check if bed is available
-    const bedCheck = await req.dbClient.query(
+    const bed = await req.dbClient.query(
       `SELECT status FROM hospital_beds WHERE id = $1 AND tenant_id = $2`,
       [bed_id, tenantId]
     );
-    if (bedCheck.rowCount === 0) {
+    if (bed.rowCount === 0) {
       return res.status(404).json({ error: 'Lit introuvable' });
     }
-    if (bedCheck.rows[0].status !== 'AVAILABLE') {
-      return res.status(400).json({ error: 'Ce lit n\'est pas disponible' });
+    if (bed.rows[0].status === 'OCCUPIED') {
+      return res.status(400).json({ error: 'Ce lit est déjà occupé.' });
+    }
+    if (bed.rows[0].status === 'MAINTENANCE') {
+      return res.status(400).json({ error: 'Ce lit est en maintenance.' });
     }
 
-    const hospId = crypto.randomUUID();
+    const hospId = require('crypto').randomUUID();
     const admissionDate = admitted_at ? new Date(admitted_at) : new Date();
     
     // A. Insert hospitalization stay record
@@ -615,8 +621,11 @@ const dischargePatient = async (req, res) => {
   try {
     // Fetch active stay with full room, building and patient insurance info
     const stayRes = await req.dbClient.query(
-      `SELECT h.*, b.daily_rate, b.name as bed_name, b.luxury_level,
-              r.number_or_name as room_name, bl.name as building_name,
+      `SELECT h.*, b.daily_rate, 
+              COALESCE(b.name, b.bed_number) as bed_name, 
+              b.luxury_level,
+              COALESCE(r.number_or_name, r.room_number) as room_name, 
+              bl.name as building_name,
               p.first_name as patient_first_name, p.last_name as patient_last_name, p.patient_code,
               pip.insurance_company_id, pip.coverage_rate_percent,
               ic.name as insurance_name
