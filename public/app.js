@@ -2593,12 +2593,22 @@ async function openCreateSpecialtyModal() {
   if (actEl) actEl.checked = true;
 }
 
-function openEditSpecialtyModal(id) {
+async function openEditSpecialtyModal(id) {
   const modal = document.getElementById('specialty-modal');
   if (!modal) return;
 
-  const spec = (Array.isArray(currentAgendaSpecialties) ? currentAgendaSpecialties : []).find(s => s.id === id);
-  if (!spec) return;
+  let spec = (Array.isArray(currentAgendaSpecialties) ? currentAgendaSpecialties : []).find(s => s.id === id);
+  if (!spec) {
+    try {
+      const specs = await api.request('/specialties');
+      currentAgendaSpecialties = specs || [];
+      spec = currentAgendaSpecialties.find(s => s.id === id);
+    } catch (e) {}
+  }
+  if (!spec) {
+    showToast('Spécialité introuvable', 'error');
+    return;
+  }
 
   const idEl = document.getElementById('specialty-form-id');
   if (idEl) idEl.value = spec.id;
@@ -2617,6 +2627,8 @@ function openEditSpecialtyModal(id) {
 
   const titleEl = document.getElementById('specialty-modal-title');
   if (titleEl) titleEl.innerText = `Modifier : ${spec.name}`;
+
+  modal.style.display = 'flex';
 }
 
 function closeSpecialtyModal() {
