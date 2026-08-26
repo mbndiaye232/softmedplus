@@ -1,14 +1,5 @@
-const { Pool } = require('pg');
-
-const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL })
-  : new Pool({
-      host: process.env.DB_HOST || '127.0.0.1',
-      port: process.env.DB_PORT || 5432,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-    });
+require('dotenv').config();
+const pool = require('./config/db');
 
 async function migrate() {
   const client = await pool.connect();
@@ -111,6 +102,33 @@ async function migrate() {
       console.log('[OK] FK patients.status_id -> patient_statuses.id');
     } catch (e) {
       console.log('[Skip FK]', e.message);
+    }
+
+    // Hospital structure uniqueness indexes and column alignment
+    try {
+      await client.query(`
+        ALTER TABLE hospital_rooms ALTER COLUMN room_number DROP NOT NULL;
+        ALTER TABLE hospital_rooms ADD COLUMN IF NOT EXISTS number_or_name VARCHAR(100);
+        UPDATE hospital_rooms SET number_or_name = room_number WHERE number_or_name IS NULL AND room_number IS NOT NULL;
+        UPDATE hospital_rooms SET room_number = number_or_name WHERE room_number IS NULL AND number_or_name IS NOT NULL;
+
+        ALTER TABLE hospital_beds ADD COLUMN IF NOT EXISTS name VARCHAR(100);
+        ALTER TABLE hospital_beds ADD COLUMN IF NOT EXISTS bed_number VARCHAR(100);
+        UPDATE hospital_beds SET name = bed_number WHERE name IS NULL AND bed_number IS NOT NULL;
+        UPDATE hospital_beds SET bed_number = name WHERE bed_number IS NULL AND name IS NOT NULL;
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_building_name_per_tenant 
+        ON hospital_buildings(tenant_id, LOWER(TRIM(name)));
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_room_name_per_building 
+        ON hospital_rooms(tenant_id, building_id, LOWER(TRIM(COALESCE(number_or_name, room_number))));
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_bed_name_per_room 
+        ON hospital_beds(tenant_id, room_id, LOWER(TRIM(COALESCE(name, bed_number))));
+      `);
+      console.log('[OK] Hospital structure column alignment and uniqueness indexes verified');
+    } catch (e) {
+      console.log('[Skip Hospital Structure Align]', e.message);
     }
 
     await client.query('COMMIT');

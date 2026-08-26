@@ -200,10 +200,19 @@ app.post('/api/inventory/deplete', stockCtrl.depleteStock);
 // 5b. Hospitalization (Bed & Occupancy Management)
 app.get('/api/hospital/buildings', hospitalCtrl.getBuildings);
 app.post('/api/hospital/buildings', hospitalCtrl.createBuilding);
+app.put('/api/hospital/buildings/:id', hospitalCtrl.updateBuilding);
+app.delete('/api/hospital/buildings/:id', hospitalCtrl.deleteBuilding);
+
 app.get('/api/hospital/rooms', hospitalCtrl.getRooms);
 app.post('/api/hospital/rooms', hospitalCtrl.createRoom);
+app.put('/api/hospital/rooms/:id', hospitalCtrl.updateRoom);
+app.delete('/api/hospital/rooms/:id', hospitalCtrl.deleteRoom);
+
 app.get('/api/hospital/beds', hospitalCtrl.getBeds);
 app.post('/api/hospital/beds', hospitalCtrl.createBed);
+app.put('/api/hospital/beds/:id', hospitalCtrl.updateBed);
+app.delete('/api/hospital/beds/:id', hospitalCtrl.deleteBed);
+
 app.get('/api/hospital/hospitalizations', hospitalCtrl.getHospitalizations);
 app.post('/api/hospital/hospitalizations', hospitalCtrl.admitPatient);
 app.post('/api/hospital/hospitalizations/:id/discharge', hospitalCtrl.dischargePatient);

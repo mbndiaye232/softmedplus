@@ -13180,50 +13180,90 @@ function initApp() {
     renderAuthLayout();
   }
 }
-
 // ============================================================================
-// Hospitalization Tab (Bed & Occupancy Management)
+// Hospitalization Tab (Bed, Occupancy History & Structure Management)
 // ============================================================================
 let activeHospitalSubTab = 'beds';
 let hospitalSelectedBedId = null;
+let hospitalHistoryFilters = {
+  start_date: '',
+  end_date: '',
+  building_id: '',
+  status: '',
+  search: ''
+};
 
 async function renderHospital(container) {
-  const [buildings, rooms, beds, stays] = await Promise.all([
+  const fr = state.currentLang === 'fr';
+
+  let historyQuery = '';
+  if (activeHospitalSubTab === 'history') {
+    const params = new URLSearchParams();
+    if (hospitalHistoryFilters.start_date) params.append('start_date', hospitalHistoryFilters.start_date);
+    if (hospitalHistoryFilters.end_date) params.append('end_date', hospitalHistoryFilters.end_date);
+    if (hospitalHistoryFilters.building_id) params.append('building_id', hospitalHistoryFilters.building_id);
+    if (hospitalHistoryFilters.status) params.append('status', hospitalHistoryFilters.status);
+    if (hospitalHistoryFilters.search) params.append('search', hospitalHistoryFilters.search);
+    const qs = params.toString();
+    if (qs) historyQuery = '?' + qs;
+  }
+
+  const [buildings, rooms, beds, activeStays, historyStays] = await Promise.all([
     api.request('/hospital/buildings'),
     api.request('/hospital/rooms'),
     api.request('/hospital/beds'),
-    api.request('/hospital/hospitalizations?status=ADMITTED')
+    api.request('/hospital/hospitalizations?status=ADMITTED'),
+    activeHospitalSubTab === 'history' 
+      ? api.request(`/hospital/hospitalizations${historyQuery}`).catch(() => []) 
+      : Promise.resolve([])
   ]);
 
-  const fr = state.currentLang === 'fr';
+  let subTabContent = '';
+  if (activeHospitalSubTab === 'beds') {
+    subTabContent = renderBedsDashboard(buildings, rooms, beds, activeStays, fr);
+  } else if (activeHospitalSubTab === 'history') {
+    subTabContent = renderHospitalHistory(buildings, rooms, beds, historyStays, fr);
+  } else {
+    subTabContent = renderHospitalSetup(buildings, rooms, beds, fr);
+  }
+
+  const buildingOptions = buildings.map(b => `<option value="${b.id}">${escapeHTML(b.name)}</option>`).join('');
+  const roomOptions = rooms.map(r => `<option value="${r.id}">${escapeHTML(r.number_or_name)} (${escapeHTML(r.building_name)})</option>`).join('');
 
   container.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-      <h3 style="color:var(--text-primary); font-weight:600; margin:0;">${fr ? 'Gestion de l\'Hospitalisation' : 'إدارة الاستشفاء والإقامة'}</h3>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px;">
+      <div>
+        <h3 style="color:var(--text-primary); font-weight:700; margin:0; display:flex; align-items:center; gap:10px;">
+          <i class="fas fa-procedures" style="color:var(--primary);"></i> ${fr ? 'Gestion de l\'Hospitalisation & Séjours' : 'إدارة الاستشفاء والإقامة'}
+        </h3>
+        <div style="font-size:0.85rem; color:var(--text-muted); margin-top:3px;">
+          ${fr ? 'Suivi en temps réel des lits, historique des admissions sur période et configuration de la structure.' : 'متابعة حية للأسرة وسجل الإشغال وإعداد الهيكل الطبي.'}
+        </div>
+      </div>
     </div>
 
     <!-- Sub-tab Selector -->
-    <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
-      <button class="btn ${activeHospitalSubTab === 'beds' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('beds')" style="font-size:0.9rem; padding: 6px 15px;">
+    <div style="display:flex; gap:10px; margin-bottom:20px; border-bottom:1px solid var(--border-color); padding-bottom:10px; flex-wrap:wrap;">
+      <button class="btn ${activeHospitalSubTab === 'beds' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('beds')" style="font-size:0.9rem; padding: 7px 16px;">
         <i class="fas fa-bed"></i> ${fr ? 'Lits & Hospitalisations' : 'الأسرة والاقامات'}
       </button>
-      <button class="btn ${activeHospitalSubTab === 'setup' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('setup')" style="font-size:0.9rem; padding: 6px 15px;">
+      <button class="btn ${activeHospitalSubTab === 'history' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('history')" style="font-size:0.9rem; padding: 7px 16px;">
+        <i class="fas fa-history"></i> ${fr ? 'Historique des Occupations' : 'سجل الإشغال والإقامات'}
+      </button>
+      <button class="btn ${activeHospitalSubTab === 'setup' ? 'btn-primary' : 'btn-secondary'}" onclick="switchHospitalSubTab('setup')" style="font-size:0.9rem; padding: 7px 16px;">
         <i class="fas fa-tools"></i> ${fr ? 'Configuration Structure' : 'إعداد الهيكل'}
       </button>
     </div>
 
     <div id="hospital-subtab-content">
-      ${activeHospitalSubTab === 'beds' 
-        ? renderBedsDashboard(buildings, rooms, beds, stays, fr) 
-        : renderHospitalSetup(buildings, rooms, beds, fr)
-      }
+      ${subTabContent}
     </div>
 
-    <!-- Patient Admission Modal -->
+    <!-- 1. Patient Admission Modal -->
     <div class="modal-overlay" id="admit-modal" style="display:none; justify-content:center; align-items:center;">
-      <div class="modal-container" style="width:450px; max-width:95%; animation: modalFadeIn 0.3s ease;">
+      <div class="modal-container" style="width:480px; max-width:95%; animation: modalFadeIn 0.3s ease;">
         <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
-          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;">${fr ? 'Admettre un Patient' : 'إدخال مريض جديد'}</h4>
+          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;"><i class="fas fa-user-plus" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Admettre un Patient en Hospitalisation' : 'إدخال مريض جديد'}</h4>
           <button class="modal-close" onclick="closeAdmitModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
         </div>
         <form onsubmit="saveAdmission(event)">
@@ -13247,6 +13287,115 @@ async function renderHospital(container) {
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:12px;">
             <button class="btn btn-secondary" type="button" onclick="closeAdmitModal()">${fr ? 'Annuler' : 'إلغاء'}</button>
             <button class="btn btn-primary" type="submit">${fr ? 'Confirmer l\'Admission' : 'تأكيد الدخول'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. Edit Building Modal -->
+    <div class="modal-overlay" id="edit-building-modal" style="display:none; justify-content:center; align-items:center;">
+      <div class="modal-container" style="width:420px; max-width:95%;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;"><i class="fas fa-edit" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Modifier le Bâtiment' : 'تعديل المبنى'}</h4>
+          <button class="modal-close" onclick="closeEditBuildingModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <form onsubmit="saveEditBuilding(event)">
+          <input type="hidden" id="edit-build-id" />
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Nom du Bâtiment (unique)' : 'اسم المبنى'} *</label>
+            <input type="text" class="form-control" id="edit-build-name" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Code (facultatif)' : 'رمز المبنى'}</label>
+            <input type="text" class="form-control" id="edit-build-code" />
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:12px;">
+            <button class="btn btn-secondary" type="button" onclick="closeEditBuildingModal()">${fr ? 'Annuler' : 'إلغاء'}</button>
+            <button class="btn btn-primary" type="submit">${fr ? 'Enregistrer' : 'حفظ'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 3. Edit Room Modal -->
+    <div class="modal-overlay" id="edit-room-modal" style="display:none; justify-content:center; align-items:center;">
+      <div class="modal-container" style="width:450px; max-width:95%;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;"><i class="fas fa-edit" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Modifier la Chambre' : 'تعديل الغرفة'}</h4>
+          <button class="modal-close" onclick="closeEditRoomModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <form onsubmit="saveEditRoom(event)">
+          <input type="hidden" id="edit-room-id" />
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Bâtiment' : 'المبنى'} *</label>
+            <select class="form-control" id="edit-room-building-id" required>
+              ${buildingOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Nom / Numéro de Chambre' : 'اسم / رقم الغرفة'} *</label>
+            <input type="text" class="form-control" id="edit-room-number" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Type de Chambre' : 'نوع الغرفة'}</label>
+            <select class="form-control" id="edit-room-type" required>
+              <option value="STANDARD">STANDARD</option>
+              <option value="VIP">VIP</option>
+              <option value="SOINS_INTENSIFS">SOINS INTENSIFS (ICU)</option>
+              <option value="MATERNITE">MATERNITÉ</option>
+            </select>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:12px;">
+            <button class="btn btn-secondary" type="button" onclick="closeEditRoomModal()">${fr ? 'Annuler' : 'إلغاء'}</button>
+            <button class="btn btn-primary" type="submit">${fr ? 'Enregistrer' : 'حفظ'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 4. Edit Bed Modal -->
+    <div class="modal-overlay" id="edit-bed-modal" style="display:none; justify-content:center; align-items:center;">
+      <div class="modal-container" style="width:480px; max-width:95%;">
+        <div class="modal-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px;">
+          <h4 class="modal-title" style="margin:0; color:var(--text-primary); font-weight:600;"><i class="fas fa-edit" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Modifier le Lit' : 'تعديل السرير'}</h4>
+          <button class="modal-close" onclick="closeEditBedModal()" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+        </div>
+        <form onsubmit="saveEditBed(event)">
+          <input type="hidden" id="edit-bed-id" />
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Chambre / Salle' : 'الغرفة / القاعة'} *</label>
+            <select class="form-control" id="edit-bed-room-id" required>
+              ${roomOptions}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Nom / Numéro de Lit' : 'اسم / رقم السرير'} *</label>
+            <input type="text" class="form-control" id="edit-bed-name" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Luxe / Classe' : 'الفئة والدرجة'}</label>
+            <select class="form-control" id="edit-bed-luxury" required>
+              <option value="STANDARD">STANDARD</option>
+              <option value="CONFORT">CONFORT</option>
+              <option value="VIP">VIP</option>
+              <option value="SUITE">SUITE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Tarif journalier d\'hébergement (XOF)' : 'السعر اليومي (XOF)'} *</label>
+            <input type="number" class="form-control" id="edit-bed-rate" min="0" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">${fr ? 'Statut Opérationnel' : 'الحالة التشغيلية'}</label>
+            <select class="form-control" id="edit-bed-status" required>
+              <option value="AVAILABLE">${fr ? 'Disponible' : 'متاح'}</option>
+              <option value="MAINTENANCE">${fr ? 'En entretien / Hors service' : 'تحت الصيانة'}</option>
+              <option value="OCCUPIED" disabled>${fr ? 'Occupé (Géré via admission)' : 'مشغول'}</option>
+            </select>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:12px;">
+            <button class="btn btn-secondary" type="button" onclick="closeEditBedModal()">${fr ? 'Annuler' : 'إلغاء'}</button>
+            <button class="btn btn-primary" type="submit">${fr ? 'Enregistrer' : 'حفظ'}</button>
           </div>
         </form>
       </div>
@@ -13309,13 +13458,15 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
             const days = Math.max(1, Math.ceil((new Date() - admittedDate) / (1000 * 60 * 60 * 24)));
             occupantHtml = `
               <div style="font-size:0.8rem; margin-top:8px; border-top:1px dashed var(--border-color); padding-top:8px; color:var(--text-primary);">
-                <i class="fas fa-user-injured" style="color:var(--primary); margin-right:4px;"></i> <strong>${bed.stay.patient_first_name} ${bed.stay.patient_last_name}</strong>
+                <div style="cursor:pointer;" onclick="openPatientDossierModal('${bed.stay.patient_id}')" title="${fr ? 'Consulter le dossier médical' : 'عرض الملف الطبي'}">
+                  <i class="fas fa-user-injured" style="color:var(--primary); margin-right:4px;"></i> <strong>${escapeHTML(bed.stay.patient_first_name)} ${escapeHTML(bed.stay.patient_last_name)}</strong>
+                </div>
                 <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
                   Admis: ${admittedDate.toLocaleDateString('fr-FR')} (${days} j)
                 </div>
               </div>
             `;
-            btnHtml = `<button class="btn btn-danger" style="width:100%; font-size:0.8rem; margin-top:10px; background-color:var(--danger);" onclick="dischargeAndInvoice('${bed.stay.id}', '${bed.name}')"><i class="fas fa-sign-out-alt"></i> Libérer & Facturer</button>`;
+            btnHtml = `<button class="btn btn-danger" style="width:100%; font-size:0.8rem; margin-top:10px; background-color:var(--danger);" onclick="dischargeAndInvoice('${bed.stay.id}', '${escapeHTML(bed.name)}')"><i class="fas fa-sign-out-alt"></i> Libérer & Facturer</button>`;
           } else {
             occupantHtml = `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:8px;">Occupé (Détails RLS masqués)</div>`;
             btnHtml = `<button class="btn btn-secondary" style="width:100%; font-size:0.8rem; margin-top:10px;" disabled>Occupé</button>`;
@@ -13323,7 +13474,7 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
         } else if (isMaintenance) {
           colorTheme = 'var(--warning)';
           statusBadge = `<span class="badge" style="background-color:var(--warning); color:black; font-size:0.7rem; padding:2px 6px; border-radius:12px;">Entretien</span>`;
-          btnHtml = `<button class="btn btn-secondary" style="width:100%; font-size:0.8rem; margin-top:10px;" disabled>Entretien</button>`;
+          btnHtml = `<button class="btn btn-secondary" style="width:100%; font-size:0.8rem; margin-top:10px;" onclick="openEditBedModal('${bed.id}', '${bed.room_id}', '${escapeHTML(bed.name)}', '${bed.luxury_level}', ${bed.daily_rate}, '${bed.status}')"><i class="fas fa-tools"></i> Remettre en service</button>`;
         } else {
           statusBadge = `<span class="badge" style="background-color:var(--primary); color:white; font-size:0.7rem; padding:2px 6px; border-radius:12px;">${fr ? 'Disponible' : 'متاح'}</span>`;
           btnHtml = `<button class="btn btn-primary" style="width:100%; font-size:0.8rem; margin-top:10px;" onclick="openAdmitModal('${bed.id}')"><i class="fas fa-check"></i> Admettre</button>`;
@@ -13333,7 +13484,7 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
           <div class="card" style="border-top: 4px solid ${colorTheme}; display:flex; flex-direction:column; justify-content:space-between; padding:12px; min-height:165px; background-color:var(--bg-surface);">
             <div>
               <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <h5 style="margin:0; font-size:1rem; font-weight:600; color:var(--text-primary);"><i class="fas fa-bed"></i> ${bed.name}</h5>
+                <h5 style="margin:0; font-size:1rem; font-weight:600; color:var(--text-primary);"><i class="fas fa-bed"></i> ${escapeHTML(bed.name)}</h5>
                 ${statusBadge}
               </div>
               <div style="font-size:0.8rem; color:var(--text-muted); margin-top:5px;">
@@ -13349,7 +13500,7 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
       return `
         <div style="margin-bottom:20px;">
           <h5 style="font-size:0.95rem; color:var(--text-primary); font-weight:600; border-bottom:1px dashed var(--border-color); padding-bottom:6px; margin-bottom:12px;">
-            <i class="fas fa-door-open" style="color:var(--primary);"></i> ${r.number_or_name} <span style="font-size:0.8rem; font-weight:400; color:var(--text-muted);">(${r.room_type})</span>
+            <i class="fas fa-door-open" style="color:var(--primary);"></i> ${escapeHTML(r.number_or_name)} <span style="font-size:0.8rem; font-weight:400; color:var(--text-muted);">(${r.room_type})</span>
           </h5>
           <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap:15px;">
             ${bedsHtml}
@@ -13363,7 +13514,7 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
     return `
       <div class="card" style="margin-bottom:24px; padding:20px;">
         <h4 style="margin-top:0; margin-bottom:15px; font-weight:700; color:var(--text-primary); font-size:1.15rem; display:flex; align-items:center; gap:8px;">
-          <i class="fas fa-building" style="color:var(--primary);"></i> ${b.name} ${b.code ? `<span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">(${b.code})</span>` : ''}
+          <i class="fas fa-building" style="color:var(--primary);"></i> ${escapeHTML(b.name)} ${b.code ? `<span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">(${escapeHTML(b.code)})</span>` : ''}
         </h4>
         ${roomsHtml}
       </div>
@@ -13371,45 +13522,392 @@ function renderBedsDashboard(buildings, rooms, beds, stays, fr) {
   }).join('');
 }
 
-function renderHospitalSetup(buildings, rooms, beds, fr) {
-  const buildingOptions = buildings.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
-  const roomOptions = rooms.map(r => `<option value="${r.id}">${r.number_or_name} (${r.building_name})</option>`).join('');
+function renderHospitalHistory(buildings, rooms, beds, historyStays, fr) {
+  // Compute analytics
+  const totalStays = historyStays.length;
+  const activeCount = historyStays.filter(s => s.status === 'ADMITTED').length;
+  const dischargedCount = historyStays.filter(s => s.status === 'DISCHARGED').length;
+  const totalDays = historyStays.reduce((acc, s) => acc + (parseInt(s.duration_days) || 1), 0);
+  const totalCost = historyStays.reduce((acc, s) => acc + (parseFloat(s.calculated_cost) || 0), 0);
+
+  const buildingFilterOptions = buildings.map(b => 
+    `<option value="${b.id}" ${hospitalHistoryFilters.building_id === b.id ? 'selected' : ''}>${escapeHTML(b.name)}</option>`
+  ).join('');
+
+  const rowsHtml = historyStays.length === 0
+    ? `<tr><td colspan="8" style="text-align:center; padding:40px; color:var(--text-muted);">
+        <i class="fas fa-history fa-2x" style="margin-bottom:10px; opacity:0.4;"></i>
+        <div>${fr ? 'Aucun séjour hospitalier trouvé pour cette période ou ces critères.' : 'لا توجد سجلات إشغال للفترة المحددة.'}</div>
+       </td></tr>`
+    : historyStays.map(s => {
+        const isAdmitted = s.status === 'ADMITTED';
+        const admittedAt = new Date(s.admitted_at);
+        const dischargedAt = s.discharged_at ? new Date(s.discharged_at) : null;
+        const cost = parseFloat(s.calculated_cost) || 0;
+
+        return `
+          <tr style="border-bottom:1px solid var(--border-color);">
+            <td style="padding:12px;">
+              <div style="font-weight:600; color:var(--text-primary); cursor:pointer;" onclick="openPatientDossierModal('${s.patient_id}')">
+                <i class="fas fa-user-injured" style="color:var(--primary); margin-right:4px;"></i>
+                ${escapeHTML(s.patient_first_name)} ${escapeHTML(s.patient_last_name)}
+              </div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+                Code: <strong>${escapeHTML(s.patient_code || '-')}</strong> ${s.patient_phone ? `| Tél: ${escapeHTML(s.patient_phone)}` : ''}
+              </div>
+            </td>
+            <td style="padding:12px;">
+              <div style="font-weight:600; color:var(--text-primary);">
+                <i class="fas fa-bed" style="color:var(--primary); font-size:0.85rem;"></i> ${escapeHTML(s.bed_name)}
+              </div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">
+                ${escapeHTML(s.building_name || '')} &bull; ${escapeHTML(s.room_name || '')} (${s.luxury_level || 'STANDARD'})
+              </div>
+            </td>
+            <td style="padding:12px; font-size:0.85rem; color:var(--text-secondary);">
+              <div>${admittedAt.toLocaleDateString('fr-FR')}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">${admittedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+            </td>
+            <td style="padding:12px; font-size:0.85rem; color:var(--text-secondary);">
+              ${dischargedAt ? `
+                <div>${dischargedAt.toLocaleDateString('fr-FR')}</div>
+                <div style="font-size:0.75rem; color:var(--text-muted);">${dischargedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+              ` : `<span class="badge" style="background-color:rgba(239, 68, 68, 0.1); color:var(--danger); border:1px solid var(--danger); font-size:0.75rem;">${fr ? 'En cours' : 'مستمرة'}</span>`}
+            </td>
+            <td style="padding:12px; text-align:center;">
+              <span class="badge" style="background:var(--bg-main); font-weight:700; font-size:0.85rem; color:var(--text-primary); border:1px solid var(--border-color);">
+                ${s.duration_days} ${fr ? 'j' : 'يوم'}
+              </span>
+            </td>
+            <td style="padding:12px; font-size:0.85rem;">
+              <div style="font-weight:700; color:var(--primary); font-size:0.9rem;">
+                ${cost.toLocaleString()} XOF
+              </div>
+              <div style="font-size:0.75rem; color:var(--text-muted);">
+                ${parseFloat(s.daily_rate).toLocaleString()} XOF/j
+              </div>
+            </td>
+            <td style="padding:12px;">
+              ${isAdmitted 
+                ? `<span class="badge" style="background-color:var(--danger); color:white; font-size:0.75rem; padding:3px 8px; border-radius:12px;">${fr ? 'Hospitalisé' : 'مقيد بالقسم'}</span>`
+                : `<span class="badge" style="background-color:var(--success); color:white; font-size:0.75rem; padding:3px 8px; border-radius:12px;">${fr ? 'Libéré' : 'مغادر'}</span>`
+              }
+            </td>
+            <td style="padding:12px; text-align:right;">
+              <div style="display:inline-flex; gap:6px;">
+                <button class="btn btn-secondary" style="padding:4px 8px; font-size:0.8rem;" title="${fr ? 'Consulter le dossier médical' : 'عرض الملف الطبي'}" onclick="openPatientDossierModal('${s.patient_id}')">
+                  <i class="fas fa-folder-open"></i> ${fr ? 'Dossier' : 'الملف'}
+                </button>
+                ${isAdmitted ? `
+                  <button class="btn btn-danger" style="padding:4px 8px; font-size:0.8rem;" title="${fr ? 'Libérer et générer la facture' : 'إنهاء الإقامة والفوترة'}" onclick="dischargeAndInvoice('${s.id}', '${escapeHTML(s.bed_name)}')">
+                    <i class="fas fa-sign-out-alt"></i> ${fr ? 'Libérer' : 'خروج'}
+                  </button>
+                ` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
 
   return `
-    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:20px;">
+    <!-- Top Period & Filters Control Box -->
+    <div class="card" style="padding:18px; margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+        <h4 style="margin:0; font-size:1.05rem; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-filter" style="color:var(--primary);"></i> ${fr ? 'Filtres de Période & Recherche d\'Occupations' : 'فلاتر الفترة والبحث'}
+        </h4>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 10px;" onclick="setHospitalHistoryPreset('today')">${fr ? 'Aujourd\'hui' : 'اليوم'}</button>
+          <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 10px;" onclick="setHospitalHistoryPreset('week')">${fr ? '7 Derniers Jours' : 'آخر 7 أيام'}</button>
+          <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 10px;" onclick="setHospitalHistoryPreset('month')">${fr ? 'Ce Mois' : 'هذا الشهر'}</button>
+          <button class="btn btn-secondary" style="font-size:0.8rem; padding:4px 10px;" onclick="setHospitalHistoryPreset('all')">${fr ? 'Tout l\'Historique' : 'كامل السجل'}</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">${fr ? 'Du (Date début)' : 'من تاريخ'}</label>
+          <input type="date" class="form-control" id="hosp-filter-start" value="${hospitalHistoryFilters.start_date}" onchange="updateHospitalHistoryFilter('start_date', this.value)" />
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">${fr ? 'Au (Date fin)' : 'إلى تاريخ'}</label>
+          <input type="date" class="form-control" id="hosp-filter-end" value="${hospitalHistoryFilters.end_date}" onchange="updateHospitalHistoryFilter('end_date', this.value)" />
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">${fr ? 'Bâtiment' : 'المبنى'}</label>
+          <select class="form-control" id="hosp-filter-building" onchange="updateHospitalHistoryFilter('building_id', this.value)">
+            <option value="">-- ${fr ? 'Tous les bâtiments' : 'جميع المباني'} --</option>
+            ${buildingFilterOptions}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">${fr ? 'Statut du Séjour' : 'حالة الإقامة'}</label>
+          <select class="form-control" id="hosp-filter-status" onchange="updateHospitalHistoryFilter('status', this.value)">
+            <option value="" ${!hospitalHistoryFilters.status ? 'selected' : ''}>-- ${fr ? 'Tous les statuts' : 'جميع الحالات'} --</option>
+            <option value="ADMITTED" ${hospitalHistoryFilters.status === 'ADMITTED' ? 'selected' : ''}>${fr ? 'En cours (Hospitalisé)' : 'مقيم حالياً'}</option>
+            <option value="DISCHARGED" ${hospitalHistoryFilters.status === 'DISCHARGED' ? 'selected' : ''}>${fr ? 'Libéré (Sorti)' : 'تمت المغادرة'}</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">${fr ? 'Recherche Patient / Lit' : 'بحث المريض أو السرير'}</label>
+          <input type="text" class="form-control" id="hosp-filter-search" placeholder="ex: Nom, code, Lit A..." value="${escapeHTML(hospitalHistoryFilters.search)}" oninput="updateHospitalHistoryFilter('search', this.value)" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics KPI Cards -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="padding:15px; border-left:4px solid var(--primary);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${fr ? 'Total Séjours' : 'إجمالي الإقامات'}</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--text-primary); margin-top:5px;">
+          ${totalStays} <span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">(${activeCount} ${fr ? 'en cours' : 'حالي'})</span>
+        </div>
+      </div>
+      <div class="card" style="padding:15px; border-left:4px solid var(--danger);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${fr ? 'Patients Actuellement Admis' : 'المرضى المقيمون الآن'}</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--danger); margin-top:5px;">
+          ${activeCount}
+        </div>
+      </div>
+      <div class="card" style="padding:15px; border-left:4px solid var(--info);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${fr ? 'Total Journées d\'Occupation' : 'إجمالي أيام الإشغال'}</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--info); margin-top:5px;">
+          ${totalDays} <span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">${fr ? 'jours' : 'أيام'}</span>
+        </div>
+      </div>
+      <div class="card" style="padding:15px; border-left:4px solid var(--success);">
+        <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">${fr ? 'Chiffre d\'Affaires Séjours' : 'إجمالي إيراد الإقامة'}</div>
+        <div style="font-size:1.6rem; font-weight:700; color:var(--success); margin-top:5px;">
+          ${totalCost.toLocaleString()} <span style="font-size:0.85rem; font-weight:400; color:var(--text-muted);">XOF</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detailed History Table -->
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div style="padding:15px 20px; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <h4 style="margin:0; font-size:1.05rem; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-list" style="color:var(--primary);"></i> ${fr ? 'Historique Détaillé des Séjours & Occupations' : 'سجل تفاصيل الإقامات والإشغال'}
+        </h4>
+        <span class="badge" style="background:var(--bg-main); color:var(--text-secondary); border:1px solid var(--border-color);">
+          ${historyStays.length} ${fr ? 'séjour(s) affiché(s)' : 'سجل'}
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.9rem; text-align:left;">
+          <thead>
+            <tr style="background:var(--bg-main); border-bottom:1px solid var(--border-color); color:var(--text-muted); font-size:0.8rem; text-transform:uppercase;">
+              <th style="padding:12px;">${fr ? 'Patient' : 'المريض'}</th>
+              <th style="padding:12px;">${fr ? 'Lit & Chambre' : 'السرير والغرفة'}</th>
+              <th style="padding:12px;">${fr ? 'Admission' : 'الدخول'}</th>
+              <th style="padding:12px;">${fr ? 'Sortie' : 'الخروج'}</th>
+              <th style="padding:12px; text-align:center;">${fr ? 'Durée' : 'المدة'}</th>
+              <th style="padding:12px;">${fr ? 'Frais de Séjour' : 'التكلفة'}</th>
+              <th style="padding:12px;">${fr ? 'Statut' : 'الحالة'}</th>
+              <th style="padding:12px; text-align:right;">${fr ? 'Actions' : 'إجراءات'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function updateHospitalHistoryFilter(key, value) {
+  hospitalHistoryFilters[key] = value;
+  // Debounce if typing search
+  if (key === 'search') {
+    if (window._hospSearchTimer) clearTimeout(window._hospSearchTimer);
+    window._hospSearchTimer = setTimeout(() => {
+      navigate('hospital');
+    }, 350);
+  } else {
+    navigate('hospital');
+  }
+}
+
+function setHospitalHistoryPreset(preset) {
+  const now = new Date();
+  if (preset === 'today') {
+    const todayStr = now.toISOString().slice(0, 10);
+    hospitalHistoryFilters.start_date = todayStr;
+    hospitalHistoryFilters.end_date = todayStr;
+  } else if (preset === 'week') {
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
+    hospitalHistoryFilters.start_date = weekAgo.toISOString().slice(0, 10);
+    hospitalHistoryFilters.end_date = now.toISOString().slice(0, 10);
+  } else if (preset === 'month') {
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    hospitalHistoryFilters.start_date = firstDay.toISOString().slice(0, 10);
+    hospitalHistoryFilters.end_date = now.toISOString().slice(0, 10);
+  } else if (preset === 'all') {
+    hospitalHistoryFilters.start_date = '';
+    hospitalHistoryFilters.end_date = '';
+    hospitalHistoryFilters.building_id = '';
+    hospitalHistoryFilters.status = '';
+    hospitalHistoryFilters.search = '';
+  }
+  navigate('hospital');
+}
+
+function renderHospitalSetup(buildings, rooms, beds, fr) {
+  const buildingOptions = buildings.map(b => `<option value="${b.id}">${escapeHTML(b.name)}${b.code ? ` (${escapeHTML(b.code)})` : ''}</option>`).join('');
+  const roomOptions = rooms.map(r => `<option value="${r.id}">${escapeHTML(r.number_or_name)} (${escapeHTML(r.building_name)})</option>`).join('');
+
+  // Group rooms and beds by building for the overview list
+  const buildingMap = {};
+  buildings.forEach(b => {
+    buildingMap[b.id] = { ...b, rooms: [] };
+  });
+  const roomMap = {};
+  rooms.forEach(r => {
+    const roomObj = { ...r, beds: [] };
+    roomMap[r.id] = roomObj;
+    if (buildingMap[r.building_id]) {
+      buildingMap[r.building_id].rooms.push(roomObj);
+    }
+  });
+  beds.forEach(b => {
+    if (roomMap[b.room_id]) {
+      roomMap[b.room_id].beds.push(b);
+    }
+  });
+
+  const structureListHtml = buildings.length === 0 
+    ? `<div style="text-align:center; padding:30px; color:var(--text-muted); font-size:0.9rem;">
+        <i class="fas fa-info-circle" style="margin-right:6px;"></i> ${fr ? 'Aucun bâtiment configuré pour le moment. Utilisez le formulaire ci-dessus pour ajouter votre premier bâtiment.' : 'لا توجد مباني مضافة حتى الآن.'}
+       </div>`
+    : buildings.map(b => {
+        const bRooms = (buildingMap[b.id] && buildingMap[b.id].rooms) || [];
+        const totalBedsInBuilding = bRooms.reduce((acc, r) => acc + (r.beds ? r.beds.length : 0), 0);
+
+        const roomsHtml = bRooms.length === 0
+          ? `<div style="padding:10px 15px; color:var(--text-muted); font-size:0.85rem; font-style:italic;">
+              ${fr ? 'Aucune chambre dans ce bâtiment.' : 'لا توجد غرف في هذا المبنى.'}
+             </div>`
+          : bRooms.map(r => {
+              const rBeds = r.beds || [];
+              const bedsHtml = rBeds.length === 0
+                ? `<span style="color:var(--text-muted); font-size:0.8rem; font-style:italic;">${fr ? 'Aucun lit' : 'لا يوجد سرير'}</span>`
+                : rBeds.map(bd => {
+                    const isOcc = bd.status === 'OCCUPIED';
+                    const isMaint = bd.status === 'MAINTENANCE';
+                    const statusColor = isOcc ? 'var(--danger)' : isMaint ? 'var(--warning)' : 'var(--success)';
+                    const statusText = isOcc ? (fr ? 'Occupé' : 'مشغول') : isMaint ? (fr ? 'Entretien' : 'صيانة') : (fr ? 'Disponible' : 'متاح');
+
+                    return `
+                      <div style="display:inline-flex; align-items:center; gap:6px; background:var(--bg-main); border:1px solid var(--border-color); padding:4px 10px; border-radius:6px; font-size:0.8rem; margin-right:6px; margin-bottom:6px;">
+                        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${statusColor};"></span>
+                        <strong style="color:var(--text-primary);">${escapeHTML(bd.name)}</strong>
+                        <span style="color:var(--text-muted); font-size:0.75rem;">(${parseFloat(bd.daily_rate).toLocaleString()} XOF)</span>
+                        <span class="badge" style="font-size:0.65rem; background:rgba(0,0,0,0.06); padding:1px 4px;">${statusText}</span>
+                        <button class="btn-icon" style="color:var(--primary); background:none; border:none; padding:0 2px; cursor:pointer; font-size:0.8rem; margin-left:4px;" title="${fr ? 'Modifier ce lit' : 'تعديل السرير'}" onclick="openEditBedModal('${bd.id}', '${bd.room_id}', '${escapeHTML(bd.name)}', '${bd.luxury_level}', ${bd.daily_rate}, '${bd.status}')">
+                          <i class="fas fa-edit"></i>
+                        </button>
+                        ${!isOcc ? `<button class="btn-icon" style="color:var(--danger); background:none; border:none; padding:0 2px; cursor:pointer; font-size:0.8rem;" title="${fr ? 'Supprimer ce lit' : 'حذف السرير'}" onclick="deleteHospitalBed('${bd.id}', '${escapeHTML(bd.name)}')"><i class="fas fa-trash-alt"></i></button>` : ''}
+                      </div>
+                    `;
+                  }).join('');
+
+              return `
+                <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:6px; padding:10px 14px; margin-bottom:8px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <i class="fas fa-door-open" style="color:var(--primary); font-size:0.9rem;"></i>
+                      <strong style="color:var(--text-primary); font-size:0.9rem;">${escapeHTML(r.number_or_name)}</strong>
+                      <span class="badge" style="font-size:0.7rem; background:rgba(59,130,246,0.1); color:var(--primary); border:1px solid rgba(59,130,246,0.2);">${r.room_type || 'STANDARD'}</span>
+                      <span style="font-size:0.75rem; color:var(--text-muted);">(${rBeds.length} ${fr ? 'lit(s)' : 'سرير'})</span>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                      <button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem;" title="${fr ? 'Modifier la chambre' : 'تعديل الغرفة'}" onclick="openEditRoomModal('${r.id}', '${r.building_id}', '${escapeHTML(r.number_or_name)}', '${r.room_type}')">
+                        <i class="fas fa-edit"></i> ${fr ? 'Modifier' : 'تعديل'}
+                      </button>
+                      <button class="btn btn-secondary" style="padding:2px 8px; font-size:0.75rem; color:var(--danger); border-color:var(--border-color);" title="${fr ? 'Supprimer la chambre' : 'حذف الغرفة'}" onclick="deleteHospitalRoom('${r.id}', '${escapeHTML(r.number_or_name)}')">
+                        <i class="fas fa-trash-alt"></i> ${fr ? 'Supprimer' : 'حذف'}
+                      </button>
+                    </div>
+                  </div>
+                  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding-left:12px; border-left:2px solid var(--border-color); margin-top:6px;">
+                    ${bedsHtml}
+                  </div>
+                </div>
+              `;
+            }).join('');
+
+        return `
+          <div class="card" style="margin-bottom:15px; border-left:4px solid var(--primary); padding:15px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px dashed var(--border-color); padding-bottom:8px; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <i class="fas fa-building" style="color:var(--primary); font-size:1.2rem;"></i>
+                <h4 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">
+                  ${escapeHTML(b.name)} ${b.code ? `<span style="font-size:0.8rem; font-weight:400; color:var(--text-muted);">(${escapeHTML(b.code)})</span>` : ''}
+                </h4>
+                <span class="badge" style="background:var(--bg-main); font-size:0.75rem; color:var(--text-secondary); border:1px solid var(--border-color);">
+                  ${bRooms.length} ${fr ? 'chambre(s)' : 'غرف'} | ${totalBedsInBuilding} ${fr ? 'lit(s)' : 'أسرة'}
+                </span>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.8rem;" onclick="openEditBuildingModal('${b.id}', '${escapeHTML(b.name)}', '${escapeHTML(b.code || '')}')">
+                  <i class="fas fa-edit"></i> ${fr ? 'Modifier' : 'تعديل'}
+                </button>
+                <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.8rem; color:var(--danger);" onclick="deleteHospitalBuilding('${b.id}', '${escapeHTML(b.name)}')">
+                  <i class="fas fa-trash-alt"></i> ${fr ? 'Supprimer' : 'حذف'}
+                </button>
+              </div>
+            </div>
+            <div style="padding-left:6px;">
+              ${roomsHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  return `
+    <!-- Top 3 Creation Cards -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:20px; margin-bottom:25px;">
       <!-- A. Add Building -->
       <div class="card" style="padding:15px;">
-        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-building"></i> Ajouter un Bâtiment</h4>
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <i class="fas fa-building" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Ajouter un Bâtiment' : 'إضافة مبنى'}
+        </h4>
         <form onsubmit="saveBuilding(event)">
           <div class="form-group">
-            <label class="form-label">Nom du Bâtiment</label>
+            <label class="form-label">${fr ? 'Nom du Bâtiment (unique)' : 'اسم المبنى'} *</label>
             <input type="text" class="form-control" id="build-name" placeholder="ex: Pavillon A" required />
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:3px;">
+              <i class="fas fa-fingerprint"></i> ${fr ? 'Le nom du bâtiment doit être unique' : 'يجب أن يكون الاسم فريداً'}
+            </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Code (facultatif)</label>
+            <label class="form-label">${fr ? 'Code (facultatif)' : 'رمز المبنى (اختياري)'}</label>
             <input type="text" class="form-control" id="build-code" placeholder="ex: PAV-A" />
           </div>
-          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Bâtiment</button>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> ${fr ? 'Créer Bâtiment' : 'إنشاء المبنى'}</button>
         </form>
       </div>
 
       <!-- B. Add Room -->
       <div class="card" style="padding:15px;">
-        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-door-open"></i> Ajouter une Chambre</h4>
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <i class="fas fa-door-open" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Ajouter une Chambre' : 'إضافة غرفة'}
+        </h4>
         <form onsubmit="saveRoom(event)">
           <div class="form-group">
-            <label class="form-label">Bâtiment</label>
+            <label class="form-label">${fr ? 'Bâtiment' : 'المبنى'} *</label>
             <select class="form-control" id="room-building-id" required>
-              <option value="">-- Choisir un bâtiment --</option>
+              <option value="">-- ${fr ? 'Choisir un bâtiment' : 'اختر مبنى'} --</option>
               ${buildingOptions}
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Nom / Numéro de Chambre</label>
+            <label class="form-label">${fr ? 'Nom / Numéro de Chambre (unique par bâtiment)' : 'اسم / رقم الغرفة'} *</label>
             <input type="text" class="form-control" id="room-number" placeholder="ex: Ch 101" required />
           </div>
           <div class="form-group">
-            <label class="form-label">Type</label>
+            <label class="form-label">${fr ? 'Type de Chambre' : 'نوع الغرفة'}</label>
             <select class="form-control" id="room-type" required>
               <option value="STANDARD">STANDARD</option>
               <option value="VIP">VIP</option>
@@ -13417,27 +13915,29 @@ function renderHospitalSetup(buildings, rooms, beds, fr) {
               <option value="MATERNITE">MATERNITÉ</option>
             </select>
           </div>
-          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Chambre</button>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> ${fr ? 'Créer Chambre' : 'إنشاء الغرفة'}</button>
         </form>
       </div>
 
       <!-- C. Add Bed -->
       <div class="card" style="padding:15px;">
-        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;"><i class="fas fa-bed"></i> Ajouter un Lit</h4>
+        <h4 style="margin-top:0; margin-bottom:15px; color:var(--text-primary); font-size:1.05rem; font-weight:600; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+          <i class="fas fa-bed" style="color:var(--primary); margin-right:6px;"></i> ${fr ? 'Ajouter un Lit' : 'إضافة سرير'}
+        </h4>
         <form onsubmit="saveBed(event)">
           <div class="form-group">
-            <label class="form-label">Chambre / Salle</label>
+            <label class="form-label">${fr ? 'Chambre / Salle' : 'الغرفة / القاعة'} *</label>
             <select class="form-control" id="bed-room-id" required>
-              <option value="">-- Choisir une chambre --</option>
+              <option value="">-- ${fr ? 'Choisir une chambre' : 'اختر غرفة'} --</option>
               ${roomOptions}
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Nom / Numéro de Lit</label>
+            <label class="form-label">${fr ? 'Nom / Numéro de Lit (unique par chambre)' : 'اسم / رقم السرير'} *</label>
             <input type="text" class="form-control" id="bed-name" placeholder="ex: Lit A" required />
           </div>
           <div class="form-group">
-            <label class="form-label">Luxe / Classe</label>
+            <label class="form-label">${fr ? 'Luxe / Classe' : 'الفئة والدرجة'}</label>
             <select class="form-control" id="bed-luxury" required>
               <option value="STANDARD">STANDARD</option>
               <option value="CONFORT">CONFORT</option>
@@ -13446,16 +13946,37 @@ function renderHospitalSetup(buildings, rooms, beds, fr) {
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">Tarif journalier d'hébergement (XOF)</label>
+            <label class="form-label">${fr ? 'Tarif journalier d\'hébergement (XOF)' : 'السعر اليومي (XOF)'} *</label>
             <input type="number" class="form-control" id="bed-rate" placeholder="ex: 15000" min="0" required />
           </div>
-          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> Créer Lit</button>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:10px;"><i class="fas fa-plus"></i> ${fr ? 'Créer Lit' : 'إنشاء السرير'}</button>
         </form>
+      </div>
+    </div>
+
+    <!-- Bottom Structure Overview and Management List -->
+    <div class="card" style="padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom:1px solid var(--border-color); padding-bottom:10px;">
+        <h4 style="margin:0; font-size:1.1rem; color:var(--text-primary); font-weight:600;">
+          <i class="fas fa-sitemap" style="color:var(--primary); margin-right:8px;"></i>
+          ${fr ? 'Inventaire de la Structure Hospitalière' : 'مخطط وهيكل المباني والغرف والأسرة'}
+        </h4>
+        <div style="font-size:0.85rem; color:var(--text-muted); display:flex; gap:12px;">
+          <span><strong style="color:var(--text-primary);">${buildings.length}</strong> ${fr ? 'Bâtiment(s)' : 'مبنى'}</span>
+          <span><strong style="color:var(--text-primary);">${rooms.length}</strong> ${fr ? 'Chambre(s)' : 'غرفة'}</span>
+          <span><strong style="color:var(--text-primary);">${beds.length}</strong> ${fr ? 'Lit(s)' : 'سرير'}</span>
+        </div>
+      </div>
+      <div>
+        ${structureListHtml}
       </div>
     </div>
   `;
 }
 
+// ----------------------------------------------------------------------------
+// Admission Handlers
+// ----------------------------------------------------------------------------
 async function openAdmitModal(bedId) {
   hospitalSelectedBedId = bedId;
   const select = document.getElementById('admit-patient-select');
@@ -13467,18 +13988,16 @@ async function openAdmitModal(bedId) {
       api.request('/hospital/hospitalizations?status=ADMITTED').catch(() => [])
     ]);
 
-    // Exclude only patients who are actively hospitalized in a bed
     const admittedIds = new Set((stays || []).map(s => s.patient_id));
     const availablePatients = (patients || []).filter(p => !admittedIds.has(p.id));
 
     select.innerHTML = `
       <option value="">-- Choisir un patient --</option>
       ${availablePatients.length > 0 ? availablePatients.map(p => `
-        <option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code}) ${p.status ? `— [${p.status}]` : ''}</option>
+        <option value="${p.id}">${escapeHTML(p.first_name)} ${escapeHTML(p.last_name)} (${escapeHTML(p.patient_code)}) ${p.status ? `— [${escapeHTML(p.status)}]` : ''}</option>
       `).join('') : '<option value="" disabled>Aucun patient disponible (tous sont actuellement hospitalisés)</option>'}
     `;
 
-    // Pre-fill admit-date with current local ISO datetime (YYYY-MM-DDTHH:mm)
     const now = new Date();
     const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     const dateInput = document.getElementById('admit-date');
@@ -13518,7 +14037,9 @@ async function saveAdmission(e) {
     showToast('Admission enregistrée avec succès! Le patient est maintenant Hospitalisé.');
     closeAdmitModal();
     navigate('hospital');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de l\'admission du patient', 'error');
+  }
 }
 
 async function dischargeAndInvoice(stayId, bedName) {
@@ -13568,10 +14089,20 @@ async function dischargeAndInvoice(stayId, bedName) {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Building Create, Edit & Delete Handlers
+// ----------------------------------------------------------------------------
 async function saveBuilding(e) {
   e.preventDefault();
-  const name = document.getElementById('build-name').value;
-  const code = document.getElementById('build-code').value;
+  const nameInput = document.getElementById('build-name');
+  const codeInput = document.getElementById('build-code');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const code = codeInput ? codeInput.value.trim() : '';
+
+  if (!name) {
+    showToast('Veuillez renseigner le nom du bâtiment.', 'warning');
+    return;
+  }
 
   try {
     await api.request('/hospital/buildings', {
@@ -13579,15 +14110,39 @@ async function saveBuilding(e) {
       body: JSON.stringify({ name, code })
     });
     showToast('Bâtiment créé avec succès!');
+    if (nameInput) nameInput.value = '';
+    if (codeInput) codeInput.value = '';
     navigate('hospital');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la création du bâtiment', 'error');
+  }
+}
+
+async function deleteHospitalBuilding(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer le bâtiment "${name}" ainsi que toutes ses chambres et lits vides ?`)) return;
+  try {
+    const res = await api.request(`/hospital/buildings/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Bâtiment supprimé avec succès!');
+    navigate('hospital');
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la suppression du bâtiment', 'error');
+  }
 }
 
 async function saveRoom(e) {
   e.preventDefault();
-  const building_id = document.getElementById('room-building-id').value;
-  const number_or_name = document.getElementById('room-number').value;
-  const room_type = document.getElementById('room-type').value;
+  const buildingSelect = document.getElementById('room-building-id');
+  const numberInput = document.getElementById('room-number');
+  const typeSelect = document.getElementById('room-type');
+
+  const building_id = buildingSelect ? buildingSelect.value : '';
+  const number_or_name = numberInput ? numberInput.value.trim() : '';
+  const room_type = typeSelect ? typeSelect.value : 'STANDARD';
+
+  if (!building_id || !number_or_name) {
+    showToast('Veuillez sélectionner un bâtiment et saisir un numéro ou nom de chambre.', 'warning');
+    return;
+  }
 
   try {
     await api.request('/hospital/rooms', {
@@ -13595,16 +14150,40 @@ async function saveRoom(e) {
       body: JSON.stringify({ building_id, number_or_name, room_type })
     });
     showToast('Chambre créée avec succès!');
+    if (numberInput) numberInput.value = '';
     navigate('hospital');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la création de la chambre', 'error');
+  }
+}
+
+async function deleteHospitalRoom(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer la chambre "${name}" ?`)) return;
+  try {
+    const res = await api.request(`/hospital/rooms/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Chambre supprimée avec succès!');
+    navigate('hospital');
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la suppression de la chambre', 'error');
+  }
 }
 
 async function saveBed(e) {
   e.preventDefault();
-  const room_id = document.getElementById('bed-room-id').value;
-  const name = document.getElementById('bed-name').value;
-  const luxury_level = document.getElementById('bed-luxury').value;
-  const daily_rate = parseFloat(document.getElementById('bed-rate').value);
+  const roomSelect = document.getElementById('bed-room-id');
+  const nameInput = document.getElementById('bed-name');
+  const luxurySelect = document.getElementById('bed-luxury');
+  const rateInput = document.getElementById('bed-rate');
+
+  const room_id = roomSelect ? roomSelect.value : '';
+  const name = nameInput ? nameInput.value.trim() : '';
+  const luxury_level = luxurySelect ? luxurySelect.value : 'STANDARD';
+  const daily_rate = rateInput ? parseFloat(rateInput.value) : 0;
+
+  if (!room_id || !name || isNaN(daily_rate)) {
+    showToast('Veuillez sélectionner une chambre, saisir un nom de lit et un tarif valide.', 'warning');
+    return;
+  }
 
   try {
     await api.request('/hospital/beds', {
@@ -13612,8 +14191,23 @@ async function saveBed(e) {
       body: JSON.stringify({ room_id, name, luxury_level, daily_rate })
     });
     showToast('Lit créé avec succès!');
+    if (nameInput) nameInput.value = '';
+    if (rateInput) rateInput.value = '';
     navigate('hospital');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la création du lit', 'error');
+  }
+}
+
+async function deleteHospitalBed(id, name) {
+  if (!confirm(`Êtes-vous sûr de vouloir supprimer le lit "${name}" ?`)) return;
+  try {
+    const res = await api.request(`/hospital/beds/${id}`, { method: 'DELETE' });
+    showToast(res.message || 'Lit supprimé avec succès!');
+    navigate('hospital');
+  } catch (err) {
+    showToast(err.message || 'Erreur lors de la suppression du lit', 'error');
+  }
 }
 
 // ============================================================================
