@@ -195,6 +195,8 @@ app.post('/api/billing/cash-sessions', billingCtrl.openCashSession);
 app.post('/api/billing/cash-sessions/:id/close', billingCtrl.closeCashSession);
 app.post('/api/billing/invoices', billingCtrl.createInvoice);
 app.get('/api/billing/invoices', billingCtrl.getInvoices);
+app.put('/api/billing/invoices/:id', billingCtrl.updateInvoice);
+app.delete('/api/billing/invoices/:id', billingCtrl.deleteInvoice);
 app.get('/api/billing/invoices/:id/details', billingCtrl.getInvoiceDetails);
 app.get('/api/billing/invoices/:id/available-attachments', billingCtrl.getInvoiceAvailableAttachments);
 app.post('/api/billing/invoices/:id/send-email', billingCtrl.sendInvoiceEmailController);

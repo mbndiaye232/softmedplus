@@ -5662,6 +5662,12 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
                       <button class="btn btn-primary btn-sm" onclick="openSendInvoiceEmailModal('${inv.id}')" style="background:#1e40af; border-color:#1e40af;" title="Envoyer la facture et les pièces jointes par email au patient ou à l'IPM">
                         <i class="fas fa-paper-plane"></i> Mail
                       </button>
+                      <button class="btn btn-secondary btn-sm" onclick="openEditInvoiceModal('${inv.id}')" title="Modifier la facture" style="padding:4px 8px;">
+                        <i class="fas fa-edit"></i>
+                      </button>
+                      <button class="btn btn-danger btn-sm" onclick="deleteInvoiceConfirm('${inv.id}', '${inv.invoice_number}')" title="Supprimer la facture" style="padding:4px 8px; background-color:var(--danger); border-color:var(--danger);">
+                        <i class="fas fa-trash-alt"></i>
+                      </button>
                       ${inv.status !== 'PAID' ? `
                         <button class="btn btn-success btn-sm" onclick="openPaymentModal('${inv.id}', '${inv.invoice_number}', ${inv.patient_share_amount - inv.patient_paid_amount})">
                           <i class="fas fa-money-bill-wave"></i> ${t('payBtn')}
@@ -6054,6 +6060,273 @@ async function createInvoice(e) {
     navigate('billing');
   } catch (err) {
     showToast(`Erreur lors de la génération de la facture: ${err.message}`, 'error');
+  }
+}
+
+// ============================================================================
+// 4b. Invoice Editing & Deletion Handlers
+// ============================================================================
+let editingInvoiceLines = [];
+let editingInvoiceCurrentData = null;
+
+async function openEditInvoiceModal(id) {
+  const modal = document.getElementById('edit-invoice-modal');
+  if (!modal) return;
+
+  try {
+    showToast('Chargement des détails de la facture...', 'info');
+    const [details, patients, insurances, services, practitioners] = await Promise.all([
+      api.request(`/billing/invoices/${id}/details`),
+      api.request('/patients').catch(() => []),
+      api.request('/billing/insurances').catch(() => []),
+      api.request('/medical-services').catch(() => []),
+      api.request('/practitioners').catch(() => [])
+    ]);
+
+    const inv = details.invoice;
+    editingInvoiceCurrentData = details;
+    editingInvoiceLines = (details.lines || []).map(l => ({
+      description: l.description,
+      unit_price: parseFloat(l.unit_price) || 0,
+      quantity: parseInt(l.quantity) || 1,
+      service_id: l.service_id || null
+    }));
+
+    document.getElementById('edit-inv-id').value = inv.id;
+    document.getElementById('edit-invoice-modal-title').innerHTML = `<i class="fas fa-edit" style="color:var(--primary);"></i> Modifier la Facture <strong>${inv.invoice_number}</strong>`;
+
+    // Populate patient select
+    const patientSelect = document.getElementById('edit-inv-patient-id');
+    if (patientSelect) {
+      patientSelect.innerHTML = patients.map(p => `
+        <option value="${p.id}" ${p.id === inv.patient_id ? 'selected' : ''}>
+          ${p.first_name} ${p.last_name} (${p.patient_code}) ${p.insurance_name ? `— [IPM: ${p.insurance_name}]` : ''}
+        </option>
+      `).join('');
+    }
+
+    // Populate insurance select
+    const insSelect = document.getElementById('edit-inv-insurance-id');
+    if (insSelect) {
+      insSelect.innerHTML = `<option value="">Privé (Pas de couverture)</option>` +
+        insurances.filter(ic => ic.is_active !== false).map(ic => `
+          <option value="${ic.id}" ${ic.id === inv.insurance_company_id ? 'selected' : ''}>
+            ${ic.name} (${ic.code})
+          </option>
+        `).join('');
+    }
+
+    const statusSelect = document.getElementById('edit-inv-status');
+    if (statusSelect) statusSelect.value = inv.status || 'ISSUED';
+
+    const discountInput = document.getElementById('edit-inv-discount');
+    if (discountInput) discountInput.value = parseFloat(inv.discount_amount) || 0;
+
+    // Populate catalogue select
+    const catSelect = document.getElementById('edit-service-catalogue-select');
+    if (catSelect) {
+      catSelect.innerHTML = `
+        <option value="">-- Ajouter un acte depuis le catalogue / praticien --</option>
+        ${(practitioners && practitioners.length > 0) ? `
+          <optgroup label="🩺 Consultations par Praticien (Tarifs Médecins)">
+            ${practitioners.filter(p => p.is_active !== false).map(p => `
+              <option value="PRAC_${p.id}" data-name="Consultation ${p.title || 'Dr.'} ${p.first_name} ${p.last_name} (${p.specialty_name || 'Médecin'})" data-price="${p.consultation_fee || 15000}">
+                🩺 Consultation ${p.title || 'Dr.'} ${p.first_name} ${p.last_name} — ${(parseFloat(p.consultation_fee) || 15000).toLocaleString()} FCFA
+              </option>
+            `).join('')}
+          </optgroup>
+        ` : ''}
+        <optgroup label="🔬 Actes Médicaux, Traitements & Analyses">
+          ${(services || []).filter(s => s.is_active !== false).map(s => `
+            <option value="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" data-price="${s.price || 0}">
+              [${s.category || 'ACTE'}] ${s.name} ${parseFloat(s.price) > 0 ? `— ${parseFloat(s.price).toLocaleString()} FCFA` : ''}
+            </option>
+          `).join('')}
+        </optgroup>
+      `;
+    }
+
+    renderEditInvoiceLines();
+    modal.style.display = 'flex';
+  } catch (err) {
+    showToast(`Erreur de chargement de la facture: ${err.message}`, 'error');
+  }
+}
+
+function applyEditServiceFromCatalogue(selectEl) {
+  const opt = selectEl.options[selectEl.selectedIndex];
+  if (!opt || !opt.value) return;
+  const name = opt.getAttribute('data-name');
+  const price = opt.getAttribute('data-price');
+  if (name) document.getElementById('edit-line-desc').value = name;
+  if (price !== null && price !== undefined) document.getElementById('edit-line-price').value = price;
+}
+
+function addEditInvoiceLine() {
+  const descEl = document.getElementById('edit-line-desc');
+  const priceEl = document.getElementById('edit-line-price');
+  const qtyEl = document.getElementById('edit-line-qty');
+
+  const description = descEl.value.trim();
+  const unit_price = parseFloat(priceEl.value);
+  const quantity = parseInt(qtyEl.value, 10) || 1;
+
+  if (!description || isNaN(unit_price) || unit_price < 0) {
+    showToast('Veuillez renseigner une désignation et un prix valide', 'error');
+    return;
+  }
+
+  editingInvoiceLines.push({ description, unit_price, quantity });
+  descEl.value = '';
+  priceEl.value = '';
+  qtyEl.value = '1';
+  const catSelect = document.getElementById('edit-service-catalogue-select');
+  if (catSelect) catSelect.value = '';
+  renderEditInvoiceLines();
+}
+
+function removeEditInvoiceLine(idx) {
+  editingInvoiceLines.splice(idx, 1);
+  renderEditInvoiceLines();
+}
+
+function renderEditInvoiceLines() {
+  const listEl = document.getElementById('edit-invoice-lines-list');
+  const totalsEl = document.getElementById('edit-invoice-totals-box');
+  if (!listEl || !totalsEl) return;
+
+  if (editingInvoiceLines.length === 0) {
+    listEl.innerHTML = `<div style="color:var(--text-muted); font-size:0.85rem; font-style:italic;">Aucune ligne de prestation. Ajoutez au moins un acte.</div>`;
+    totalsEl.innerHTML = `<div>Total Brut : 0 FCFA • Net à Payer : 0 FCFA</div>`;
+    return;
+  }
+
+  let totalGross = 0;
+  listEl.innerHTML = `
+    <table class="table" style="font-size:0.82rem; margin-bottom:10px;">
+      <thead>
+        <tr>
+          <th>Désignation</th>
+          <th style="width:70px; text-align:center;">Qté</th>
+          <th style="width:110px; text-align:right;">Prix Unitaire</th>
+          <th style="width:110px; text-align:right;">Total</th>
+          <th style="width:40px; text-align:center;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${editingInvoiceLines.map((line, idx) => {
+          const lineTotal = (line.quantity || 1) * (line.unit_price || 0);
+          totalGross += lineTotal;
+          return `
+            <tr>
+              <td><strong>${line.description}</strong></td>
+              <td style="text-align:center;">${line.quantity}</td>
+              <td style="text-align:right;">${line.unit_price.toLocaleString()} FCFA</td>
+              <td style="text-align:right; font-weight:700;">${lineTotal.toLocaleString()} FCFA</td>
+              <td style="text-align:center;">
+                <i class="fas fa-trash text-danger" style="cursor:pointer;" onclick="removeEditInvoiceLine(${idx})" title="Supprimer cette ligne"></i>
+              </td>
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+
+  const discount = parseFloat(document.getElementById('edit-inv-discount')?.value) || 0;
+  const netAmount = Math.max(0, totalGross - discount);
+  const insSelect = document.getElementById('edit-inv-insurance-id');
+  const hasInsurance = insSelect && insSelect.value !== '';
+  const rate = hasInsurance ? 80 : 0;
+  const insuranceShare = Math.round(netAmount * (rate / 100));
+  const patientShare = netAmount - insuranceShare;
+
+  totalsEl.innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div>
+        <div>Total Brut : <strong>${totalGross.toLocaleString()} FCFA</strong></div>
+        ${discount > 0 ? `<div style="color:var(--danger);">Remise : <strong>- ${discount.toLocaleString()} FCFA</strong></div>` : ''}
+        <div style="font-size:1rem; font-weight:800; color:var(--text-primary); margin-top:4px;">Net à Payer : ${netAmount.toLocaleString()} FCFA</div>
+      </div>
+      <div>
+        <div style="color:var(--success);">Part IPM (${rate}%) : <strong>${insuranceShare.toLocaleString()} FCFA</strong></div>
+        <div style="font-weight:700; color:var(--primary);">Part Patient : <strong>${patientShare.toLocaleString()} FCFA</strong></div>
+      </div>
+    </div>
+  `;
+}
+
+function closeEditInvoiceModal() {
+  const modal = document.getElementById('edit-invoice-modal');
+  if (modal) modal.style.display = 'none';
+  editingInvoiceLines = [];
+  editingInvoiceCurrentData = null;
+}
+
+async function submitEditInvoiceForm(e) {
+  e.preventDefault();
+  const id = document.getElementById('edit-inv-id').value;
+  const patient_id = document.getElementById('edit-inv-patient-id').value;
+  const insurance_company_id = document.getElementById('edit-inv-insurance-id').value || null;
+  const status = document.getElementById('edit-inv-status').value;
+  const discount_amount = parseFloat(document.getElementById('edit-inv-discount').value) || 0;
+
+  if (editingInvoiceLines.length === 0) {
+    showToast('Veuillez ajouter au moins une prestation', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit-edit-invoice');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Enregistrement...`;
+  }
+
+  try {
+    showToast('Mise à jour de la facture en cours...', 'info');
+    const res = await api.request(`/billing/invoices/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        patient_id,
+        insurance_company_id,
+        status,
+        discount_amount,
+        lines: editingInvoiceLines
+      })
+    });
+
+    showToast(`Facture ${res.invoice_number || ''} modifiée avec succès !`, 'success');
+    closeEditInvoiceModal();
+    if (state.currentTab === 'billing') {
+      navigate('billing');
+    }
+  } catch (err) {
+    showToast(`Erreur lors de la modification: ${err.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fas fa-save"></i> Enregistrer les Modifications`;
+    }
+  }
+}
+
+async function deleteInvoiceConfirm(id, invoiceNumber) {
+  if (!confirm(`⚠️ Êtes-vous sûr de vouloir supprimer définitivement la facture "${invoiceNumber}" ?\n\nCette action supprimera également les lignes associées et les éventuels historiques d'envoi.`)) {
+    return;
+  }
+
+  try {
+    showToast('Suppression de la facture en cours...', 'info');
+    const res = await api.request(`/billing/invoices/${id}`, {
+      method: 'DELETE'
+    });
+
+    showToast(res.message || 'Facture supprimée avec succès !', 'success');
+    if (state.currentTab === 'billing') {
+      navigate('billing');
+    }
+  } catch (err) {
+    showToast(`Erreur de suppression: ${err.message}`, 'error');
   }
 }
 
@@ -10637,6 +10910,87 @@ function renderAppLayout() {
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
             <button class="btn btn-secondary" type="button" onclick="closeInsuranceModal()">Annuler</button>
             <button class="btn btn-primary" type="submit" id="insurance-submit-btn">Enregistrer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 7b. Edit Invoice Modal -->
+    <div class="modal-overlay" id="edit-invoice-modal" style="display:none; justify-content:center; align-items:center; z-index:1150;">
+      <div class="modal-container" style="width:740px; max-width:96%; max-height:94vh; overflow-y:auto; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+          <h4 class="modal-title" id="edit-invoice-modal-title" style="margin:0; font-size:1.15rem; font-weight:800; color:var(--text-primary);">
+            <i class="fas fa-file-invoice-dollar" style="color:var(--primary);"></i> Modifier la Facture
+          </h4>
+          <button class="modal-close" onclick="closeEditInvoiceModal()">&times;</button>
+        </div>
+        <form id="edit-invoice-form" onsubmit="submitEditInvoiceForm(event)">
+          <input type="hidden" id="edit-inv-id" />
+          
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;">Patient *</label>
+              <select class="form-control" id="edit-inv-patient-id" required>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;">Prise en charge / IPM</label>
+              <select class="form-control" id="edit-inv-insurance-id" onchange="renderEditInvoiceLines()">
+                <option value="">Privé (Pas de couverture)</option>
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;">Statut de la Facture</label>
+              <select class="form-control" id="edit-inv-status">
+                <option value="ISSUED">ÉMISE / EN ATTENTE</option>
+                <option value="PARTIALLY_PAID">PARTIELLEMENT RÉGLÉE</option>
+                <option value="PAID">RÉGLÉE / PAYÉE</option>
+                <option value="OVERDUE">EN RETARD</option>
+                <option value="CANCELED">ANNULÉE</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;">Remise Accordée (FCFA)</label>
+              <input type="number" class="form-control" id="edit-inv-discount" value="0" min="0" oninput="renderEditInvoiceLines()" />
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px;">
+            <div style="font-size:0.9rem; font-weight:700; color:var(--text-primary); margin-bottom:10px;">
+              <i class="fas fa-list-ul" style="color:var(--primary);"></i> Lignes de Facturation & Actes
+            </div>
+
+            <!-- Quick selection from catalogue for edit -->
+            <div class="form-group" style="margin-bottom:10px; background:var(--bg-surface); padding:8px 10px; border-radius:6px; border:1px dashed var(--border-color);">
+              <select class="form-control" id="edit-service-catalogue-select" onchange="applyEditServiceFromCatalogue(this)" style="font-size:0.85rem;">
+                <option value="">-- Ajouter un acte depuis le catalogue / praticien --</option>
+              </select>
+            </div>
+
+            <div style="display:flex; gap:10px; margin-bottom:12px;">
+              <input type="text" class="form-control" id="edit-line-desc" placeholder="Désignation de l'acte / consultation" style="flex:3;" />
+              <input type="number" class="form-control" id="edit-line-price" placeholder="Prix Unitaire (FCFA)" style="flex:2;" />
+              <input type="number" class="form-control" id="edit-line-qty" value="1" min="1" placeholder="Qté" style="flex:1;" />
+              <button class="btn btn-secondary" type="button" onclick="addEditInvoiceLine()"><i class="fas fa-plus"></i> Ajouter</button>
+            </div>
+
+            <div id="edit-invoice-lines-list" style="margin-bottom:15px;"></div>
+          </div>
+
+          <div class="card" style="background-color:var(--bg-surface); padding:14px; font-size:0.88rem; margin-bottom:15px;" id="edit-invoice-totals-box">
+            <!-- Live totals -->
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:10px; border-top:1px solid var(--border-color); padding-top:15px;">
+            <button class="btn btn-secondary" type="button" onclick="closeEditInvoiceModal()">Annuler</button>
+            <button class="btn btn-primary" type="submit" id="btn-submit-edit-invoice" style="background:linear-gradient(135deg, #1e40af, #2563eb); font-weight:700; padding:8px 20px;">
+              <i class="fas fa-save"></i> Enregistrer les Modifications
+            </button>
           </div>
         </form>
       </div>

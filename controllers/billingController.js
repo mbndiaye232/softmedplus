@@ -219,6 +219,148 @@ const createInvoice = async (req, res) => {
   }
 };
 
+// 3b. Update Invoice
+const updateInvoice = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+  const { patient_id, insurance_company_id, discount_amount, lines, status } = req.body;
+
+  if (!patient_id || !lines || lines.length === 0) {
+    return res.status(400).json({ error: 'Champs requis manquants : patient, lignes de facturation' });
+  }
+
+  const isValidUUID = str => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+  const validInsuranceId = isValidUUID(insurance_company_id) ? insurance_company_id : null;
+
+  try {
+    const checkRes = await req.dbClient.query(
+      `SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    if (checkRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+
+    const existingInv = checkRes.rows[0];
+
+    // Calculate gross amount
+    let totalGross = 0;
+    for (const line of lines) {
+      line.total = parseFloat(line.quantity || 1) * parseFloat(line.unit_price || 0);
+      totalGross += line.total;
+    }
+
+    const discount = parseFloat(discount_amount || 0);
+    const netAmount = Math.max(0, totalGross - discount);
+
+    // Insurance coverage rate
+    let finalInsuranceId = validInsuranceId;
+    let coverageRate = 0;
+    if (finalInsuranceId) {
+      const policyRes = await req.dbClient.query(
+        `SELECT coverage_rate_percent FROM patient_insurance_policies 
+         WHERE patient_id = $1 AND insurance_company_id = $2 AND is_primary = true`,
+        [patient_id, finalInsuranceId]
+      );
+      if (policyRes.rowCount > 0) {
+        coverageRate = parseFloat(policyRes.rows[0].coverage_rate_percent);
+      } else {
+        coverageRate = 80;
+      }
+    }
+
+    const insuranceShare = Math.round(netAmount * (coverageRate / 100));
+    const patientShare = netAmount - insuranceShare;
+
+    // Update invoice
+    const updateRes = await req.dbClient.query(
+      `UPDATE invoices 
+       SET patient_id = $1,
+           insurance_company_id = $2,
+           total_amount_gross = $3,
+           discount_amount = $4,
+           total_amount_net = $5,
+           patient_share_amount = $6,
+           insurance_share_amount = $7,
+           status = COALESCE($8, status)
+       WHERE id = $9 AND tenant_id = $10
+       RETURNING *`,
+      [
+        patient_id,
+        finalInsuranceId,
+        totalGross,
+        discount,
+        netAmount,
+        patientShare,
+        insuranceShare,
+        status || existingInv.status,
+        id,
+        tenantId
+      ]
+    );
+
+    // Replace lines
+    await req.dbClient.query(`DELETE FROM invoice_lines WHERE invoice_id = $1`, [id]);
+    const updatedInvoice = updateRes.rows[0];
+    updatedInvoice.lines = [];
+
+    for (const line of lines) {
+      const validServiceId = isValidUUID(line.service_id) ? line.service_id : null;
+      const lineRes = await req.dbClient.query(
+        `INSERT INTO invoice_lines (invoice_id, service_id, description, quantity, unit_price, total_line_amount)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [
+          id,
+          validServiceId,
+          line.description || 'Prestation Médicale',
+          parseInt(line.quantity || 1),
+          parseFloat(line.unit_price || 0),
+          line.total
+        ]
+      );
+      updatedInvoice.lines.push(lineRes.rows[0]);
+    }
+
+    await logAudit(req, 'UPDATE_INVOICE', 'invoices', id);
+    return res.status(200).json(updatedInvoice);
+  } catch (err) {
+    console.error('Update invoice error:', err.message);
+    return res.status(500).json({ error: `Échec de modification de la facture : ${err.message}` });
+  }
+};
+
+// 3c. Delete Invoice
+const deleteInvoice = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const checkRes = await req.dbClient.query(
+      `SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    if (checkRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Facture introuvable' });
+    }
+
+    // Cascade delete related records
+    await req.dbClient.query(`DELETE FROM invoice_lines WHERE invoice_id = $1`, [id]);
+    await req.dbClient.query(`DELETE FROM payments WHERE invoice_id = $1`, [id]);
+    await req.dbClient.query(`DELETE FROM invoice_email_logs WHERE invoice_id = $1`, [id]);
+    await req.dbClient.query(`DELETE FROM ipm_claims_items WHERE invoice_id = $1`, [id]).catch(() => {});
+    await req.dbClient.query(`DELETE FROM debt_recovery_actions WHERE invoice_id = $1`, [id]).catch(() => {});
+
+    await req.dbClient.query(`DELETE FROM invoices WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
+
+    await logAudit(req, 'DELETE_INVOICE', 'invoices', id);
+    return res.status(200).json({ success: true, message: 'Facture supprimée avec succès' });
+  } catch (err) {
+    console.error('Delete invoice error:', err.message);
+    return res.status(500).json({ error: `Échec de suppression de la facture : ${err.message}` });
+  }
+};
+
 // 4. Get Invoices
 const getInvoices = async (req, res) => {
   const tenantId = req.user.tenant_id;
@@ -779,6 +921,8 @@ module.exports = {
   openCashSession,
   closeCashSession,
   createInvoice,
+  updateInvoice,
+  deleteInvoice,
   getInvoices,
   getCashRegisters,
   getInsurances,
