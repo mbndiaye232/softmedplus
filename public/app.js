@@ -6003,13 +6003,19 @@ async function createInvoice(e) {
   const patient_id = document.getElementById('inv-patient-id').value;
   const insurance_company_id = document.getElementById('inv-insurance-id').value || null;
 
+  if (!patient_id) {
+    showToast('Veuillez sélectionner un patient', 'error');
+    return;
+  }
+
   if (invoiceLines.length === 0) {
     showToast('Ajoutez au moins un acte facturé', 'error');
     return;
   }
 
   try {
-    await api.request('/billing/invoices', {
+    showToast('Génération de la facture en cours...', 'info');
+    const res = await api.request('/billing/invoices', {
       method: 'POST',
       body: JSON.stringify({
         patient_id,
@@ -6019,10 +6025,12 @@ async function createInvoice(e) {
       })
     });
 
-    showToast('Facture émise avec succès!');
+    showToast(`Facture ${res.invoice_number || ''} émise avec succès !`, 'success');
     invoiceLines = [];
     navigate('billing');
-  } catch (err) {}
+  } catch (err) {
+    showToast(`Erreur lors de la génération de la facture: ${err.message}`, 'error');
+  }
 }
 
 async function openPaymentModal(invoiceId, invoiceNumber, amountDue) {
