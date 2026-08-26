@@ -605,7 +605,17 @@ async function uploadMedicalDocument(inputEl, targetInputId, previewContainerId)
 
   try {
     showToast(`Enregistrement du document ${file.name}...`, 'info');
-    const response = await fetch('/api/upload', {
+
+    // Resolve backend URL the same way as api.request() to avoid hitting the static frontend (405)
+    let uploadBaseUrl = window.API_BASE_URL;
+    if (!uploadBaseUrl) {
+      uploadBaseUrl = (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+        ? 'https://softmed-backend.onrender.com/api'
+        : '/api';
+    }
+    const uploadUrl = uploadBaseUrl.replace(/\/$/, '') + '/upload';
+
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         ...(state.token ? { 'Authorization': `Bearer ${state.token}` } : {})
