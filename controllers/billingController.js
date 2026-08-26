@@ -458,7 +458,7 @@ const getInvoiceAvailableAttachments = async (req, res) => {
   try {
     const invRes = await req.dbClient.query(
       `SELECT i.*, 
-              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.email AS patient_email, p.phone_number AS patient_phone,
+              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone,
               ic.name AS insurance_name, ic.code AS insurance_code, ic.contact_email AS insurance_email
        FROM invoices i
        JOIN patients p ON i.patient_id = p.id
@@ -560,7 +560,7 @@ const sendInvoiceEmailController = async (req, res) => {
     // 1. Fetch complete invoice details
     const invRes = await req.dbClient.query(
       `SELECT i.*, 
-              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone, p.email AS patient_email, p.date_of_birth, p.gender,
+              p.id AS patient_id, p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.phone_number AS patient_phone, p.date_of_birth, p.gender,
               ic.name AS insurance_name, ic.code AS insurance_code, ic.address AS insurance_address, ic.contact_email AS insurance_email, ic.contact_phone AS insurance_phone,
               pip.policy_number, pip.coverage_rate_percent AS policy_coverage_rate
        FROM invoices i
@@ -682,6 +682,14 @@ const sendInvoiceEmailController = async (req, res) => {
         [tenantId]
       );
       if (defaultSmtpRes.rowCount > 0) smtpAccount = defaultSmtpRes.rows[0];
+    }
+
+    // 6b. Guard: no SMTP account configured
+    if (!smtpAccount) {
+      return res.status(422).json({
+        error: 'Aucun compte de messagerie (SMTP) configuré pour cette clinique. Veuillez en ajouter un dans Paramètres → Comptes de messagerie avant d\'envoyer des emails.',
+        code: 'NO_SMTP_ACCOUNT'
+      });
     }
 
     // 7. Dispatch Email via mailer service

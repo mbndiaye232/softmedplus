@@ -6870,22 +6870,42 @@ function renderInvoiceEmailModalContent() {
     </div>
 
     <!-- Sender SMTP Account Selection -->
-    <div class="form-group" style="margin-bottom:14px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px 14px;">
-      <label class="form-label" style="font-weight:700; color:#1e3a8a; display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-        <i class="fas fa-at text-primary"></i> Expéditeur (Compte de messagerie de la Clinique) :
-      </label>
-      <select class="form-control" id="inv-smtp-account-select" style="font-size:0.85rem; font-weight:600; background:#ffffff;">
-        ${(smtp_accounts && smtp_accounts.length > 0) ? smtp_accounts.map(acc => `
-          <option value="${acc.id}" ${acc.is_default ? 'selected' : ''}>
-            ${acc.account_name} — "${acc.from_name}" &lt;${acc.from_email}&gt; ${acc.is_default ? '(Par défaut)' : ''}
-          </option>
-        `).join('') : `
-          <option value="">Compte Système / Configuration générale (.env)</option>
-        `}
-      </select>
-      <div style="font-size:0.75rem; color:#64748b; margin-top:3px;">
-        <i class="fas fa-shield-alt text-success"></i> Le patient et l'IPM recevront le courriel avec cette adresse d'expédition vérifiée.
-      </div>
+    <div class="form-group" style="margin-bottom:14px;">
+      ${(smtp_accounts && smtp_accounts.length > 0) ? `
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px 14px;">
+          <label class="form-label" style="font-weight:700; color:#1e3a8a; display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+            <i class="fas fa-at text-primary"></i> Expéditeur (Compte de messagerie de la Clinique) :
+          </label>
+          <select class="form-control" id="inv-smtp-account-select" style="font-size:0.85rem; font-weight:600; background:#ffffff;">
+            ${smtp_accounts.map(acc => `
+              <option value="${acc.id}" ${acc.is_default ? 'selected' : ''}>
+                ${acc.account_name} — "${acc.from_name}" &lt;${acc.from_email}&gt; ${acc.is_default ? '(Par défaut)' : ''}
+              </option>
+            `).join('')}
+          </select>
+          <div style="font-size:0.75rem; color:#64748b; margin-top:3px;">
+            <i class="fas fa-shield-alt text-success"></i> Le patient et l'IPM recevront le courriel avec cette adresse d'expédition vérifiée.
+          </div>
+        </div>
+      ` : `
+        <div id="smtp-missing-banner" style="background:#fff7ed; border:2px solid #f97316; border-radius:10px; padding:14px 18px; display:flex; align-items:flex-start; gap:14px;">
+          <div style="flex-shrink:0; width:36px; height:36px; border-radius:50%; background:#f97316; display:flex; align-items:center; justify-content:center;">
+            <i class="fas fa-exclamation-triangle" style="color:#fff; font-size:1rem;"></i>
+          </div>
+          <div style="flex:1;">
+            <div style="font-weight:800; color:#c2410c; font-size:0.95rem; margin-bottom:4px;">
+              Aucun compte de messagerie configuré
+            </div>
+            <div style="font-size:0.83rem; color:#78350f; line-height:1.5;">
+              Vous devez d'abord configurer un compte SMTP pour votre clinique avant de pouvoir envoyer des emails.
+              <br/>Rendez-vous dans <strong>Paramètres → Comptes de messagerie</strong> pour en ajouter un.
+            </div>
+            <button type="button" onclick="closeInvoiceEmailModal(); navigate('settings');" class="btn btn-sm" style="margin-top:10px; background:#f97316; color:#fff; border:none; font-weight:700; font-size:0.8rem; padding:5px 14px; border-radius:6px;">
+              <i class="fas fa-cog"></i> Aller dans les Paramètres
+            </button>
+          </div>
+        </div>
+      `}
     </div>
 
     <!-- Recipient Type Switcher -->
@@ -6994,7 +7014,9 @@ function renderInvoiceEmailModalContent() {
       <!-- Action Buttons -->
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; border-top:1px solid var(--border-color); padding-top:15px;">
         <button class="btn btn-secondary" type="button" onclick="closeInvoiceEmailModal()">Annuler</button>
-        <button class="btn btn-primary" type="submit" id="btn-submit-invoice-email" style="background:linear-gradient(135deg, #1e40af, #2563eb); font-weight:700; padding:8px 20px; box-shadow:0 2px 8px rgba(37,99,235,0.3);">
+        <button class="btn btn-primary" type="submit" id="btn-submit-invoice-email"
+          ${(!smtp_accounts || smtp_accounts.length === 0) ? 'disabled title="Configurez d\'abord un compte de messagerie SMTP"' : ''}
+          style="background:${(!smtp_accounts || smtp_accounts.length === 0) ? '#94a3b8' : 'linear-gradient(135deg, #1e40af, #2563eb)'}; font-weight:700; padding:8px 20px; box-shadow:${(!smtp_accounts || smtp_accounts.length === 0) ? 'none' : '0 2px 8px rgba(37,99,235,0.3)'}; cursor:${(!smtp_accounts || smtp_accounts.length === 0) ? 'not-allowed' : 'pointer'};">
           <i class="fas fa-paper-plane"></i> <span>Envoyer la Facture et les Pièces Jointes</span>
         </button>
       </div>
