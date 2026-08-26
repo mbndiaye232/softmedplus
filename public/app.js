@@ -5440,12 +5440,13 @@ async function renderBilling(container) {
     activeBillingSubTab = 'invoices';
   }
 
-  const [invoices, patients, registers, insurances, services] = await Promise.all([
+  const [invoices, patients, registers, insurances, services, practitioners] = await Promise.all([
     api.request('/billing/invoices').catch(() => []),
     api.request('/patients').catch(() => []),
     api.request('/billing/cash-registers').catch(() => []),
     api.request('/billing/insurances').catch(() => []),
-    api.request('/medical-services').catch(() => [])
+    api.request('/medical-services').catch(() => []),
+    api.request('/practitioners').catch(() => [])
   ]);
 
   state.patients = patients;
@@ -5471,7 +5472,7 @@ async function renderBilling(container) {
 
     <div id="billing-subtab-content">
       ${activeBillingSubTab === 'invoices' 
-        ? renderBillingInvoicesContent(invoices, patients, registers, insurances, services) 
+        ? renderBillingInvoicesContent(invoices, patients, registers, insurances, services, practitioners) 
         : renderBillingServicesContent(services)
       }
     </div>
@@ -5517,7 +5518,7 @@ async function renderInsurances(container) {
   `;
 }
 
-function renderBillingInvoicesContent(invoices, patients, registers, insurances, services) {
+function renderBillingInvoicesContent(invoices, patients, registers, insurances, services, practitioners = []) {
   return `
     <div class="agenda-grid" style="grid-template-columns: 420px 1fr;">
       <div>
@@ -5576,23 +5577,34 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
             <div style="border-top:1px solid var(--border-color); padding-top:15px; margin-top:15px;">
               <h5 style="margin-bottom:10px;"><i class="fas fa-hand-holding-medical"></i> Prestations & Traitements Facturés</h5>
               
-              <!-- Quick selection from catalogue -->
+              <!-- Quick selection from catalogue & practitioner fees -->
               <div class="form-group" style="margin-bottom:12px; background:var(--bg-surface); padding:8px 10px; border-radius:6px; border:1px dashed var(--border-color);">
                 <label class="form-label" style="font-size:0.78rem; color:var(--text-muted); margin-bottom:4px; display:flex; align-items:center; gap:6px;">
-                  <i class="fas fa-magic" style="color:var(--primary);"></i> Catalogue (Consultations & Traitements) :
+                  <i class="fas fa-magic" style="color:var(--primary);"></i> Catalogue (Consultations Praticiens & Actes) :
                 </label>
                 <select class="form-control" id="service-catalogue-select" onchange="applyServiceFromCatalogue(this)" style="font-size:0.85rem;">
-                  <option value="">-- Choisir un acte ou traitement pour remplir --</option>
-                  ${(services || []).filter(s => s.is_active !== false).map(s => `
-                    <option value="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" data-price="${s.price}">
-                      [${s.category || 'ACTE'}] ${s.name} — ${parseFloat(s.price).toLocaleString()} FCFA
-                    </option>
-                  `).join('')}
+                  <option value="">-- Choisir une consultation ou un acte pour remplir --</option>
+                  ${(practitioners && practitioners.length > 0) ? `
+                    <optgroup label="🩺 Consultations par Praticien (Tarifs Médecins)">
+                      ${practitioners.filter(p => p.is_active !== false).map(p => `
+                        <option value="PRAC_${p.id}" data-name="Consultation ${p.title || 'Dr.'} ${p.first_name} ${p.last_name} (${p.specialty_name || 'Médecin'})" data-price="${p.consultation_fee || 15000}">
+                          🩺 Consultation ${p.title || 'Dr.'} ${p.first_name} ${p.last_name} (${p.specialty_name || 'Médecin'}) — ${(parseFloat(p.consultation_fee) || 15000).toLocaleString()} FCFA
+                        </option>
+                      `).join('')}
+                    </optgroup>
+                  ` : ''}
+                  <optgroup label="🔬 Actes Médicaux, Traitements & Analyses">
+                    ${(services || []).filter(s => s.is_active !== false).map(s => `
+                      <option value="${s.id}" data-name="${s.name.replace(/"/g, '&quot;')}" data-price="${s.price || 0}">
+                        [${s.category || 'ACTE'}] ${s.name} ${parseFloat(s.price) > 0 ? `— ${parseFloat(s.price).toLocaleString()} FCFA` : ''}
+                      </option>
+                    `).join('')}
+                  </optgroup>
                 </select>
               </div>
 
               <div class="form-group">
-                <input type="text" class="form-control" id="line-desc" placeholder="Désignation de l'acte (ex: Perfusion sanguine)" />
+                <input type="text" class="form-control" id="line-desc" placeholder="Désignation de l'acte (ex: Consultation Dr. ...)" />
               </div>
               <div style="display:flex; gap:10px; margin-bottom:15px;">
                 <input type="number" class="form-control" id="line-price" placeholder="Tarif (FCFA)" style="flex:2;" />
