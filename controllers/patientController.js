@@ -777,7 +777,6 @@ const deleteConsultation = async (req, res) => {
 // 7. Get Complete Prescription Details for Printing / View
 const getPrescriptionDetails = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
 
   try {
     const prescrRes = await req.dbClient.query(
@@ -792,10 +791,10 @@ const getPrescriptionDetails = async (req, res) => {
        LEFT JOIN patients p ON rx.patient_id = p.id
        LEFT JOIN practitioners pr ON rx.practitioner_id = pr.id
        LEFT JOIN consultation_notes cn ON rx.consultation_id = cn.id
-       LEFT JOIN tenants t ON COALESCE(rx.tenant_id, $2) = t.id
-       WHERE rx.id = $1 OR rx.prescription_code = $1 OR rx.consultation_id = $1
+       LEFT JOIN tenants t ON rx.tenant_id = t.id
+       WHERE rx.id::text = $1 OR rx.prescription_code = $1 OR rx.consultation_id::text = $1
        ORDER BY rx.issued_at DESC LIMIT 1`,
-      [id, tenantId]
+      [id]
     );
 
     if (prescrRes.rowCount === 0) {
@@ -805,7 +804,7 @@ const getPrescriptionDetails = async (req, res) => {
     return res.status(200).json(prescrRes.rows[0]);
   } catch (err) {
     console.error('Get prescription details error:', err.message);
-    return res.status(500).json({ error: 'Failed to get prescription details' });
+    return res.status(500).json({ error: 'Failed to get prescription details: ' + err.message });
   }
 };
 
