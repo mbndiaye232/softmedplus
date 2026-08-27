@@ -3,13 +3,19 @@ const crypto = require('crypto');
 
 // 1. Create Stock Item (medication or consumable template)
 const createStockItem = async (req, res) => {
-  const { sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price } = req.body;
+  let { sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price } = req.body;
 
-  if (!sku || !name || !category || !unit || !unit_cost_price || !selling_price) {
-    return res.status(400).json({ error: 'Champs requis manquants : sku, name, category, unit, unit_cost_price, selling_price' });
+  if (!name || !category || !unit || unit_cost_price === undefined || selling_price === undefined) {
+    return res.status(400).json({ error: 'Champs requis manquants : name, category, unit, unit_cost_price, selling_price' });
   }
 
   const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+
+  if (!sku || !sku.trim()) {
+    const slugName = (name || 'MED').replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toUpperCase();
+    const randSuffix = Math.floor(100 + Math.random() * 900);
+    sku = `${slugName || 'MED'}-${randSuffix}`;
+  }
 
   try {
     const result = await req.dbClient.query(
@@ -36,7 +42,7 @@ const createStockItem = async (req, res) => {
     if (err.message && err.message.includes('unique_tenant_sku')) {
       return res.status(409).json({ error: 'Un article avec ce SKU existe déjà dans votre inventaire' });
     }
-    return res.status(500).json({ error: 'Failed to create stock item' });
+    return res.status(500).json({ error: 'Erreur lors de la création : ' + err.message });
   }
 };
 

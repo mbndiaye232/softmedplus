@@ -7919,15 +7919,25 @@ function filterInventoryTable() {
 
 async function createStockItem(e) {
   e.preventDefault();
-  const sku = document.getElementById('st-sku').value;
-  const name = document.getElementById('st-name').value;
-  const category = document.getElementById('st-category').value;
-  const target_specialty = document.getElementById('st-specialty').value;
-  const default_dosage = document.getElementById('st-dosage').value;
-  const unit = document.getElementById('st-unit').value;
-  const minimum_threshold_alert = document.getElementById('st-threshold').value;
-  const unit_cost_price = document.getElementById('st-cost').value;
-  const selling_price = document.getElementById('st-selling').value;
+  const skuEl = document.getElementById('st-sku');
+  const nameEl = document.getElementById('st-name');
+  const catEl = document.getElementById('st-category');
+  const specEl = document.getElementById('st-specialty');
+  const dosEl = document.getElementById('st-dosage');
+  const unitEl = document.getElementById('st-unit');
+  const threshEl = document.getElementById('st-threshold');
+  const costEl = document.getElementById('st-cost');
+  const sellEl = document.getElementById('st-selling');
+
+  const name = nameEl ? nameEl.value.trim() : '';
+  const sku = (skuEl && skuEl.value.trim()) ? skuEl.value.trim() : ((name || 'MED').replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toUpperCase() + '-' + Math.floor(100 + Math.random() * 900));
+  const category = catEl ? catEl.value : 'MEDICATION';
+  const target_specialty = specEl ? specEl.value : 'GENERAL';
+  const default_dosage = dosEl ? dosEl.value : '';
+  const unit = unitEl ? unitEl.value.trim() : 'Boîte';
+  const minimum_threshold_alert = threshEl ? parseInt(threshEl.value || 10, 10) : 10;
+  const unit_cost_price = costEl ? parseFloat(costEl.value || 0) : 0;
+  const selling_price = sellEl ? parseFloat(sellEl.value || 0) : 0;
 
   try {
     await api.request('/inventory/items', {

@@ -291,6 +291,21 @@ app.get('*', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+const pool = require('./config/db');
+async function runAutoMigrations() {
+  try {
+    await pool.query(`
+      ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS target_specialty VARCHAR(50) DEFAULT 'GENERAL';
+      ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS default_dosage VARCHAR(255);
+      ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
+    `);
+    console.log('Database schema verified / auto-migrated.');
+  } catch (err) {
+    console.error('Auto-migration notice:', err.message);
+  }
+}
+
+app.listen(PORT, async () => {
   console.log(`SoftMed API server running on port ${PORT}`);
+  await runAutoMigrations();
 });
