@@ -208,7 +208,7 @@ const getStockItems = async (req, res) => {
   const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
-      `SELECT * FROM stock_items WHERE tenant_id = $1 ORDER BY name ASC`,
+      `SELECT * FROM stock_items WHERE tenant_id = $1 ORDER BY is_active DESC, name ASC`,
       [tenantId]
     );
     return res.status(200).json(result.rows);
@@ -218,9 +218,189 @@ const getStockItems = async (req, res) => {
   }
 };
 
+// 5. Update Stock Item
+const updateStockItem = async (req, res) => {
+  const { id } = req.params;
+  const { sku, name, category, unit, minimum_threshold_alert, unit_cost_price, selling_price, is_active } = req.body;
+
+  if (!sku || !name || !category || !unit || unit_cost_price === undefined || selling_price === undefined) {
+    return res.status(400).json({ error: 'Champs requis manquants : sku, name, category, unit, unit_cost_price, selling_price' });
+  }
+
+  const tenantId = req.user.tenant_id;
+  const cleanSku = sku.toUpperCase().trim();
+  const cleanName = name.trim();
+  const cleanUnit = unit.trim();
+  const thresholdInt = parseInt(minimum_threshold_alert !== undefined ? minimum_threshold_alert : 10);
+  const costPrice = parseFloat(unit_cost_price);
+  const sellPrice = parseFloat(selling_price);
+
+  if (isNaN(thresholdInt) || thresholdInt < 0) {
+    return res.status(400).json({ error: "Le seuil d'alerte doit être un nombre positif ou nul" });
+  }
+  if (isNaN(costPrice) || costPrice < 0) {
+    return res.status(400).json({ error: "Le prix d'achat doit être un montant valide" });
+  }
+  if (isNaN(sellPrice) || sellPrice < 0) {
+    return res.status(400).json({ error: "Le prix de vente doit être un montant valide" });
+  }
+
+  try {
+    // Check uniqueness of SKU within the tenant excluding this item
+    const existingSku = await req.dbClient.query(
+      `SELECT id FROM stock_items WHERE tenant_id = $1 AND sku = $2 AND id != $3`,
+      [tenantId, cleanSku, id]
+    );
+    if (existingSku.rowCount > 0) {
+      return res.status(409).json({ error: `Un autre article avec le SKU "${cleanSku}" existe déjà dans votre inventaire.` });
+    }
+
+    const isActiveBool = typeof is_active === 'boolean' ? is_active : (is_active === 'false' ? false : true);
+
+    const result = await req.dbClient.query(
+      `UPDATE stock_items
+       SET sku = $1,
+           name = $2,
+           category = $3,
+           unit = $4,
+           minimum_threshold_alert = $5,
+           unit_cost_price = $6,
+           selling_price = $7,
+           is_active = $8
+       WHERE id = $9 AND tenant_id = $10
+       RETURNING *`,
+      [
+        cleanSku,
+        cleanName,
+        category,
+        cleanUnit,
+        thresholdInt,
+        costPrice,
+        sellPrice,
+        isActiveBool,
+        id,
+        tenantId
+      ]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Article introuvable' });
+    }
+
+    await logAudit(req, 'UPDATE_STOCK_ITEM', 'stock_items', id);
+
+    return res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Update stock item error:', err.message);
+    if (err.message && err.message.includes('unique_tenant_sku')) {
+      return res.status(409).json({ error: 'Un article avec ce SKU existe déjà dans votre inventaire' });
+    }
+    return res.status(500).json({ error: "Échec de modification de l'article de stock" });
+  }
+};
+
+// 6. Delete Stock Item (with traceability protection & movement checks)
+const deleteStockItem = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    // A. Check if item exists
+    const itemRes = await req.dbClient.query(
+      `SELECT id, sku, name, current_stock_quantity, is_active FROM stock_items WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    if (itemRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Article introuvable' });
+    }
+
+    const item = itemRes.rows[0];
+
+    // B. Check if there is active stock remaining
+    if (item.current_stock_quantity > 0) {
+      return res.status(400).json({
+        error: `Impossible de supprimer cet article car son stock actuel est de ${item.current_stock_quantity} unité(s). Vous devez d'abord décréter/solder le stock ou archiver l'article.`,
+        can_archive: true,
+        current_quantity: item.current_stock_quantity
+      });
+    }
+
+    // C. Check if stock movements exist (historical traceability for medical / compliance audit)
+    const movRes = await req.dbClient.query(
+      `SELECT COUNT(*)::INT as count FROM stock_movements WHERE stock_item_id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    const movementCount = movRes.rows[0].count;
+
+    if (movementCount > 0) {
+      return res.status(400).json({
+        error: `Impossible de supprimer définitivement "${item.name}" car ${movementCount} mouvement(s) de stock y sont rattachés (traçabilité médicale et comptable). Vous pouvez désactiver / archiver cet article à la place.`,
+        can_archive: true,
+        has_movements: true
+      });
+    }
+
+    // D. Delete associated empty lots if any
+    await req.dbClient.query(
+      `DELETE FROM stock_lots WHERE stock_item_id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+
+    // E. Perform physical deletion of stock item
+    const deleteRes = await req.dbClient.query(
+      `DELETE FROM stock_items WHERE id = $1 AND tenant_id = $2 RETURNING id, sku, name`,
+      [id, tenantId]
+    );
+
+    await logAudit(req, 'DELETE_STOCK_ITEM', 'stock_items', id);
+
+    return res.status(200).json({
+      message: `L'article "${item.name}" (${item.sku}) a été supprimé définitivement avec succès.`,
+      deleted_item: deleteRes.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Delete stock item error:', err.message);
+    return res.status(500).json({ error: "Échec de suppression de l'article de stock" });
+  }
+};
+
+// 7. Toggle Stock Item Active / Archived status
+const toggleStockItemStatus = async (req, res) => {
+  const { id } = req.params;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const result = await req.dbClient.query(
+      `UPDATE stock_items
+       SET is_active = NOT is_active
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING *`,
+      [id, tenantId]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Article introuvable' });
+    }
+
+    const updated = result.rows[0];
+    await logAudit(req, updated.is_active ? 'ACTIVATE_STOCK_ITEM' : 'ARCHIVE_STOCK_ITEM', 'stock_items', id);
+
+    return res.status(200).json(updated);
+  } catch (err) {
+    console.error('Toggle stock item status error:', err.message);
+    return res.status(500).json({ error: "Échec de mise à jour du statut de l'article" });
+  }
+};
+
 module.exports = {
   createStockItem,
   addStockLot,
   depleteStock,
-  getStockItems
+  getStockItems,
+  updateStockItem,
+  deleteStockItem,
+  toggleStockItemStatus
 };
+

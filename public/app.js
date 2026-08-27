@@ -121,10 +121,15 @@ const i18n = {
     purchaseCost: "Prix d'achat unitaire",
     sellingPrice: "Prix de vente unitaire",
     addStockItem: "Créer un Article en Inventaire",
+    editStockItem: "Modifier le Médicament / Article",
+    deleteStockItem: "Supprimer / Archiver",
     restock: "Approvisionner Lot",
     lotNum: "N° Lot",
     expiry: "Date d'expiration",
     deplete: "Simuler Consommation",
+    statusActive: "Actif",
+    statusArchived: "Archivé",
+    filterAll: "Tous",
     
     // Settings
     onlinePaymentSetup: "Configuration des Paiements en Ligne",
@@ -299,10 +304,15 @@ const i18n = {
     purchaseCost: "سعر الشراء للوحدة",
     sellingPrice: "سعر البيع للوحدة",
     addStockItem: "إضافة صنف جديد للمخزون",
+    editStockItem: "تعديل بيانات الدواء / الصنف",
+    deleteStockItem: "حذف / أرشفة",
     restock: "توريد شحنة جديدة",
     lotNum: "رقم الشحنة / اللوت",
     expiry: "تاريخ انتهاء الصلاحية",
     deplete: "محاكاة صرف واستهلاك",
+    statusActive: "نشط",
+    statusArchived: "مؤرشف",
+    filterAll: "الكل",
     
     // Settings
     onlinePaymentSetup: "إعداد بوابات الدفع الإلكتروني",
@@ -7508,52 +7518,115 @@ async function submitInvoiceEmailForm(e) {
 // ============================================================================
 async function renderInventory(container) {
   const stock = await api.request('/inventory/items');
+  window._currentStockItems = stock || [];
+
+  const totalItems = window._currentStockItems.length;
+  const lowStockItems = window._currentStockItems.filter(i => (i.current_stock_quantity || 0) <= (i.minimum_threshold_alert || 0)).length;
+  const totalStockValue = window._currentStockItems.reduce((acc, i) => acc + ((i.current_stock_quantity || 0) * (parseFloat(i.selling_price) || 0)), 0);
 
   container.innerHTML = `
-    <div class="agenda-grid" style="grid-template-columns: 350px 1fr;">
-      <div class="card">
-        <div class="card-title"><i class="fas fa-folder-plus"></i> ${t('addStockItem')}</div>
+    <!-- Top Statistics / Metrics -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:15px; margin-bottom:20px;">
+      <div class="card" style="margin:0; padding:15px; display:flex; align-items:center; gap:15px; border-left:4px solid var(--primary);">
+        <div style="width:45px; height:45px; border-radius:10px; background:rgba(37,99,235,0.1); color:var(--primary); display:flex; align-items:center; justify-content:center; font-size:1.3rem;">
+          <i class="fas fa-pills"></i>
+        </div>
+        <div>
+          <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Articles Enregistrés</div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--text-main);">${totalItems}</div>
+        </div>
+      </div>
+      <div class="card" style="margin:0; padding:15px; display:flex; align-items:center; gap:15px; border-left:4px solid var(--danger);">
+        <div style="width:45px; height:45px; border-radius:10px; background:rgba(239,68,68,0.1); color:var(--danger); display:flex; align-items:center; justify-content:center; font-size:1.3rem;">
+          <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <div>
+          <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Alertes Seuil Bas</div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--danger);">${lowStockItems}</div>
+        </div>
+      </div>
+      <div class="card" style="margin:0; padding:15px; display:flex; align-items:center; gap:15px; border-left:4px solid var(--success);">
+        <div style="width:45px; height:45px; border-radius:10px; background:rgba(16,185,129,0.1); color:var(--success); display:flex; align-items:center; justify-content:center; font-size:1.3rem;">
+          <i class="fas fa-coins"></i>
+        </div>
+        <div>
+          <div style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Valeur Marchande Stock</div>
+          <div style="font-size:1.4rem; font-weight:800; color:var(--success);">${Math.round(totalStockValue).toLocaleString()} XOF</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="agenda-grid" style="grid-template-columns: 340px 1fr; gap:20px;">
+      <!-- Left Card: Add Stock Item -->
+      <div class="card" style="align-self:start;">
+        <div class="card-title" style="display:flex; align-items:center; gap:8px;">
+          <i class="fas fa-folder-plus text-primary"></i> ${t('addStockItem')}
+        </div>
         <form onsubmit="createStockItem(event)">
           <div class="form-group">
-            <label class="form-label">SKU (Code Unique)</label>
-            <input type="text" class="form-control" id="st-sku" placeholder="PARACETAMOL-1G" required />
+            <label class="form-label">SKU (Code Unique) *</label>
+            <input type="text" class="form-control" id="st-sku" placeholder="ex: PARACETAMOL-1G" required />
           </div>
           <div class="form-group">
-            <label class="form-label">Désignation Produit</label>
-            <input type="text" class="form-control" id="st-name" placeholder="Paracétamol 1g" required />
+            <label class="form-label">Désignation Produit *</label>
+            <input type="text" class="form-control" id="st-name" placeholder="ex: Paracétamol 1g" required />
           </div>
           <div class="form-group">
-            <label class="form-label">Catégorie</label>
-            <select class="form-control" id="st-category">
+            <label class="form-label">Catégorie *</label>
+            <select class="form-control" id="st-category" required>
               <option value="MEDICATION">Médicament (MEDICATION)</option>
               <option value="CONSUMABLE">Matériel Clinique (CONSUMABLE)</option>
               <option value="SURGICAL">Chirurgical (SURGICAL)</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label">${t('unit')}</label>
-            <input type="text" class="form-control" id="st-unit" placeholder="BOITE" required />
+            <label class="form-label">${t('unit')} *</label>
+            <input type="text" class="form-control" id="st-unit" placeholder="ex: BOITE, PLAQUETTE, FLACON" required />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('threshold')}</label>
-            <input type="number" class="form-control" id="st-threshold" value="10" required />
+            <label class="form-label">${t('threshold')} *</label>
+            <input type="number" class="form-control" id="st-threshold" value="10" min="0" required />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('purchaseCost')}</label>
-            <input type="number" class="form-control" id="st-cost" required />
+            <label class="form-label">${t('purchaseCost')} (XOF) *</label>
+            <input type="number" class="form-control" id="st-cost" placeholder="ex: 500" min="0" step="any" required />
           </div>
           <div class="form-group">
-            <label class="form-label">${t('sellingPrice')}</label>
-            <input type="number" class="form-control" id="st-selling" required />
+            <label class="form-label">${t('sellingPrice')} (XOF) *</label>
+            <input type="number" class="form-control" id="st-selling" placeholder="ex: 1000" min="0" step="any" required />
           </div>
-          <button class="btn btn-primary" style="width:100%;"><i class="fas fa-save"></i> Enregistrer</button>
+          <button class="btn btn-primary" style="width:100%;"><i class="fas fa-save"></i> Enregistrer l'Article</button>
         </form>
       </div>
       
+      <!-- Right Card: Stock List & Actions -->
       <div class="card">
-        <div class="card-title"><i class="fas fa-boxes"></i> ${t('pharmacyStock')}</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+          <div class="card-title" style="margin:0; display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-boxes text-primary"></i> ${t('pharmacyStock')}
+          </div>
+          <!-- Filter Controls -->
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <div style="position:relative;">
+              <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem;"></i>
+              <input type="text" id="stock-search" class="form-control" placeholder="Rechercher par SKU ou nom..." style="padding-left:30px; width:220px; font-size:0.85rem;" oninput="filterInventoryTable()" />
+            </div>
+            <select id="stock-category-filter" class="form-control" style="width:160px; font-size:0.85rem;" onchange="filterInventoryTable()">
+              <option value="">Toutes catégories</option>
+              <option value="MEDICATION">Médicaments</option>
+              <option value="CONSUMABLE">Matériel Clinique</option>
+              <option value="SURGICAL">Chirurgical</option>
+            </select>
+            <select id="stock-status-filter" class="form-control" style="width:130px; font-size:0.85rem;" onchange="filterInventoryTable()">
+              <option value="ALL">Tous statuts</option>
+              <option value="ACTIVE" selected>Actifs</option>
+              <option value="ARCHIVED">Archivés</option>
+            </select>
+          </div>
+        </div>
+
         <div class="table-responsive">
-          <table class="table">
+          <table class="table" id="inventory-table">
             <thead>
               <tr>
                 <th>SKU</th>
@@ -7563,42 +7636,92 @@ async function renderInventory(container) {
                 <th>Quantité</th>
                 <th>P. Achat</th>
                 <th>P. Vente</th>
-                <th>Actions</th>
+                <th>Statut</th>
+                <th style="text-align:right;">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              ${stock.map(item => {
-                const isLow = item.current_stock_quantity <= item.minimum_threshold_alert;
-                return `
-                  <tr>
-                    <td><strong>${item.sku}</strong></td>
-                    <td>${item.name}</td>
-                    <td>${item.category}</td>
-                    <td>${item.unit}</td>
-                    <td>
-                      <span class="status-badge ${isLow ? 'externe' : 'interne'}" style="background-color: ${isLow ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${isLow ? 'var(--danger)' : 'var(--success)'};">
-                        ${item.current_stock_quantity}
-                      </span>
-                    </td>
-                    <td>${parseFloat(item.unit_cost_price).toLocaleString()} XOF</td>
-                    <td>${parseFloat(item.selling_price).toLocaleString()} XOF</td>
-                    <td style="display:flex; gap:6px;">
-                      <button class="btn btn-secondary" style="font-size:0.75rem; padding:6px 10px;" onclick="openRestockModal('${item.id}', '${item.name}')">
-                        <i class="fas fa-plus-circle"></i> Approvisionner
-                      </button>
-                      <button class="btn btn-danger" style="font-size:0.75rem; padding:6px 10px; background-color:rgba(239,68,68,0.1); color:var(--danger); border:1px solid rgba(239,68,68,0.2);" onclick="simulateDepletion('${item.id}', '${item.name}')">
-                        <i class="fas fa-minus-circle"></i> Consommer
-                      </button>
-                    </td>
-                  </tr>
-                `;
-              }).join('')}
+            <tbody id="inventory-table-body">
+              ${renderInventoryRows(window._currentStockItems)}
             </tbody>
           </table>
         </div>
       </div>
     </div>
   `;
+}
+
+function renderInventoryRows(items) {
+  if (!items || items.length === 0) {
+    return `<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fas fa-box-open" style="font-size:2rem; margin-bottom:10px; display:block;"></i> Aucun article trouvé dans l'inventaire</td></tr>`;
+  }
+
+  return items.map(item => {
+    const isLow = (item.current_stock_quantity || 0) <= (item.minimum_threshold_alert || 0);
+    const isActive = item.is_active !== false;
+    const catLabel = item.category === 'MEDICATION' ? 'Médicament' : (item.category === 'CONSUMABLE' ? 'Matériel' : (item.category === 'SURGICAL' ? 'Chirurgical' : item.category));
+    const safeName = (item.name || '').replace(/'/g, "\\'");
+
+    return `
+      <tr data-sku="${(item.sku || '').toLowerCase()}" data-name="${(item.name || '').toLowerCase()}" data-category="${item.category || ''}" data-active="${isActive ? 'ACTIVE' : 'ARCHIVED'}" style="${!isActive ? 'opacity:0.65; background:rgba(0,0,0,0.02);' : ''}">
+        <td><strong>${item.sku}</strong></td>
+        <td>
+          <div style="font-weight:600; color:var(--text-main);">${item.name}</div>
+          ${!isActive ? '<span style="font-size:0.7rem; color:var(--text-muted);"><i class="fas fa-archive"></i> Archivé</span>' : ''}
+        </td>
+        <td><span class="badge" style="font-size:0.75rem; background:rgba(37,99,235,0.08); color:var(--primary); padding:3px 8px; border-radius:4px;">${catLabel}</span></td>
+        <td>${item.unit}</td>
+        <td>
+          <span class="status-badge ${isLow ? 'externe' : 'interne'}" style="background-color: ${isLow ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'}; color: ${isLow ? 'var(--danger)' : 'var(--success)'}; font-weight:700;">
+            ${item.current_stock_quantity || 0}
+          </span>
+          ${isLow ? '<span style="font-size:0.68rem; color:var(--danger); display:block; margin-top:2px;"><i class="fas fa-exclamation-circle"></i> Stock bas</span>' : ''}
+        </td>
+        <td>${parseFloat(item.unit_cost_price || 0).toLocaleString()} XOF</td>
+        <td><strong>${parseFloat(item.selling_price || 0).toLocaleString()} XOF</strong></td>
+        <td>
+          <span class="badge" style="font-size:0.75rem; padding:4px 8px; border-radius:12px; background:${isActive ? 'rgba(16,185,129,0.12)' : 'rgba(100,116,139,0.15)'}; color:${isActive ? 'var(--success)' : '#64748b'}; font-weight:600;">
+            <i class="fas ${isActive ? 'fa-check-circle' : 'fa-archive'}"></i> ${isActive ? 'Actif' : 'Archivé'}
+          </span>
+        </td>
+        <td style="text-align:right;">
+          <div style="display:inline-flex; gap:5px; justify-content:flex-end;">
+            <button class="btn btn-secondary" style="font-size:0.72rem; padding:5px 9px;" onclick="openRestockModal('${item.id}', '${safeName}')" title="Approvisionner">
+              <i class="fas fa-plus"></i> <span style="display:none; @media(min-width:1200px){display:inline;}">Entrée</span>
+            </button>
+            <button class="btn btn-danger" style="font-size:0.72rem; padding:5px 9px; background-color:rgba(239,68,68,0.08); color:var(--danger); border:1px solid rgba(239,68,68,0.2);" onclick="simulateDepletion('${item.id}', '${safeName}')" title="Consommer / Décréter">
+              <i class="fas fa-minus"></i> <span style="display:none; @media(min-width:1200px){display:inline;}">Sortie</span>
+            </button>
+            <button class="btn btn-outline" style="font-size:0.72rem; padding:5px 9px; border:1px solid var(--border-color); color:var(--text-main);" onclick="openEditStockModal('${item.id}')" title="Modifier le médicament">
+              <i class="fas fa-pen"></i>
+            </button>
+            <button class="btn btn-danger" style="font-size:0.72rem; padding:5px 9px; border:1px solid rgba(239,68,68,0.2); color:var(--danger); background:transparent;" onclick="deleteOrArchiveStockItem('${item.id}', '${safeName}', ${item.current_stock_quantity || 0})" title="Supprimer ou Archiver">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterInventoryTable() {
+  const search = (document.getElementById('stock-search')?.value || '').toLowerCase().trim();
+  const cat = document.getElementById('stock-category-filter')?.value || '';
+  const status = document.getElementById('stock-status-filter')?.value || 'ALL';
+
+  const rows = document.querySelectorAll('#inventory-table-body tr');
+  rows.forEach(r => {
+    if (!r.dataset.sku) return;
+    const matchSearch = !search || r.dataset.sku.includes(search) || r.dataset.name.includes(search);
+    const matchCat = !cat || r.dataset.category === cat;
+    const matchStatus = status === 'ALL' || r.dataset.active === status;
+
+    if (matchSearch && matchCat && matchStatus) {
+      r.style.display = '';
+    } else {
+      r.style.display = 'none';
+    }
+  });
 }
 
 async function createStockItem(e) {
@@ -7620,7 +7743,129 @@ async function createStockItem(e) {
     });
     showToast('Article inventorié créé avec succès!');
     navigate('inventory');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.error || 'Erreur lors de la création de l\'article', 'error');
+  }
+}
+
+// Edit Stock Item Modal handlers
+function openEditStockModal(id) {
+  const item = (window._currentStockItems || []).find(i => i.id === id);
+  if (!item) {
+    showToast('Article introuvable', 'error');
+    return;
+  }
+
+  document.getElementById('edit-st-id').value = item.id;
+  document.getElementById('edit-st-sku').value = item.sku || '';
+  document.getElementById('edit-st-name').value = item.name || '';
+  document.getElementById('edit-st-category').value = item.category || 'MEDICATION';
+  document.getElementById('edit-st-unit').value = item.unit || '';
+  document.getElementById('edit-st-threshold').value = item.minimum_threshold_alert !== undefined ? item.minimum_threshold_alert : 10;
+  document.getElementById('edit-st-cost').value = item.unit_cost_price !== undefined ? item.unit_cost_price : '';
+  document.getElementById('edit-st-selling').value = item.selling_price !== undefined ? item.selling_price : '';
+  document.getElementById('edit-st-active').checked = item.is_active !== false;
+
+  const deleteBtn = document.getElementById('edit-st-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.onclick = () => {
+      closeEditStockModal();
+      deleteOrArchiveStockItem(item.id, item.name, item.current_stock_quantity || 0);
+    };
+  }
+
+  const modal = document.getElementById('edit-stock-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+  }
+}
+
+function closeEditStockModal() {
+  const modal = document.getElementById('edit-stock-modal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+async function submitEditStock(e) {
+  e.preventDefault();
+  const id = document.getElementById('edit-st-id').value;
+  const sku = document.getElementById('edit-st-sku').value;
+  const name = document.getElementById('edit-st-name').value;
+  const category = document.getElementById('edit-st-category').value;
+  const unit = document.getElementById('edit-st-unit').value;
+  const minimum_threshold_alert = document.getElementById('edit-st-threshold').value;
+  const unit_cost_price = document.getElementById('edit-st-cost').value;
+  const selling_price = document.getElementById('edit-st-selling').value;
+  const is_active = document.getElementById('edit-st-active').checked;
+
+  try {
+    await api.request(`/inventory/items/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        sku,
+        name,
+        category,
+        unit,
+        minimum_threshold_alert,
+        unit_cost_price,
+        selling_price,
+        is_active
+      })
+    });
+
+    showToast('Article modifié avec succès!');
+    closeEditStockModal();
+    navigate('inventory');
+  } catch (err) {
+    showToast(err.error || 'Erreur lors de la modification de l\'article', 'error');
+  }
+}
+
+async function deleteOrArchiveStockItem(id, name, currentQty) {
+  if (currentQty > 0) {
+    const doArchive = confirm(
+      `⚠️ Impossible de supprimer définitivement le médicament "${name}" car il dispose encore d'un stock de ${currentQty} unité(s).\n\nSouhaitez-vous le désactiver / archiver à la place pour qu'il n'apparaisse plus dans les sélections courantes ?`
+    );
+    if (doArchive) {
+      await toggleStockStatus(id);
+    }
+    return;
+  }
+
+  const confirmDelete = confirm(`Êtes-vous sûr de vouloir supprimer définitivement le médicament "${name}" ?`);
+  if (!confirmDelete) return;
+
+  try {
+    const res = await api.request(`/inventory/items/${id}`, {
+      method: 'DELETE'
+    });
+    showToast(res.message || 'Article supprimé avec succès!');
+    navigate('inventory');
+  } catch (err) {
+    if (err.can_archive || err.has_movements) {
+      const doArchive = confirm(
+        `⚠️ ${err.error || 'Ce médicament a un historique de mouvements de stock (traçabilité médicale).'}\n\nSouhaitez-vous désactiver / archiver cet article à la place ?`
+      );
+      if (doArchive) {
+        await toggleStockStatus(id);
+      }
+    } else {
+      showToast(err.error || 'Erreur lors de la suppression de l\'article', 'error');
+    }
+  }
+}
+
+async function toggleStockStatus(id) {
+  try {
+    const res = await api.request(`/inventory/items/${id}/toggle-status`, {
+      method: 'PATCH'
+    });
+    showToast(res.is_active ? 'Article réactivé avec succès!' : 'Article archivé / désactivé avec succès!');
+    navigate('inventory');
+  } catch (err) {
+    showToast(err.error || 'Erreur lors de la mise à jour du statut', 'error');
+  }
 }
 
 let activeRestockItem = null;
@@ -7655,11 +7900,13 @@ async function submitRestock(e) {
     showToast('Réapprovisionnement du lot enregistré!');
     closeRestockModal();
     navigate('inventory');
-  } catch (err) {}
+  } catch (err) {
+    showToast(err.error || 'Erreur lors de l\'approvisionnement', 'error');
+  }
 }
 
 async function simulateDepletion(id, name) {
-  const qtyStr = prompt(`Quantité de [ ${name} ] à consommer/décréter (Simule consultation médicale ou utilisation clinique) :`, "1");
+  const qtyStr = prompt(`Quantité de [ ${name} ] à consommer / décréter (simulation consultation ou usage clinique) :`, "1");
   if (!qtyStr) return;
   const qty = parseInt(qtyStr);
   if (isNaN(qty) || qty <= 0) {
@@ -7678,7 +7925,7 @@ async function simulateDepletion(id, name) {
     showToast('Consommation effectuée, lots décrétés!');
     navigate('inventory');
   } catch (err) {
-    // Catch-all triggers 422 if stock is insufficient
+    showToast(err.error || 'Stock insuffisant ou indisponible', 'error');
   }
 }
 
@@ -10743,6 +10990,72 @@ function renderAppLayout() {
           <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
             <button class="btn btn-secondary" type="button" onclick="closeRestockModal()">Annuler</button>
             <button class="btn btn-primary" type="submit">Entrée Stock</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 4b. Edit Stock Item Modal -->
+    <div class="modal-overlay" id="edit-stock-modal" style="display:none; justify-content:center; align-items:center; z-index:3000;">
+      <div class="modal-container" style="width:580px; max-width:95%; max-height:90vh; overflow-y:auto; position:relative; animation: modalFadeIn 0.3s ease;">
+        <div class="modal-header">
+          <h4 class="modal-title" id="edit-stock-modal-title" style="display:flex; align-items:center; gap:8px;">
+            <i class="fas fa-edit text-primary"></i> Modifier le Médicament / Article
+          </h4>
+          <button class="modal-close" onclick="closeEditStockModal()">&times;</button>
+        </div>
+        <form id="edit-stock-form" onsubmit="submitEditStock(event)">
+          <input type="hidden" id="edit-st-id" />
+          <div class="form-group">
+            <label class="form-label">SKU (Code Unique) *</label>
+            <input type="text" class="form-control" id="edit-st-sku" placeholder="ex: PARACETAMOL-1G" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Désignation Produit *</label>
+            <input type="text" class="form-control" id="edit-st-name" placeholder="ex: Paracétamol 1g" required />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Catégorie *</label>
+              <select class="form-control" id="edit-st-category" required>
+                <option value="MEDICATION">Médicament (MEDICATION)</option>
+                <option value="CONSUMABLE">Matériel Clinique (CONSUMABLE)</option>
+                <option value="SURGICAL">Chirurgical (SURGICAL)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Unité *</label>
+              <input type="text" class="form-control" id="edit-st-unit" placeholder="ex: BOITE, PLAQUETTE, FLACON" required />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Seuil d'Alerte Minimum *</label>
+            <input type="number" class="form-control" id="edit-st-threshold" min="0" required />
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Prix d'achat unitaire (XOF) *</label>
+              <input type="number" class="form-control" id="edit-st-cost" min="0" step="any" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Prix de vente unitaire (XOF) *</label>
+              <input type="number" class="form-control" id="edit-st-selling" min="0" step="any" required />
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:10px; background:var(--bg-light); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+            <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-weight:600; margin:0;">
+              <input type="checkbox" id="edit-st-active" style="width:18px; height:18px; accent-color:var(--primary);" />
+              <span>Article Actif (décocher pour archiver / masquer des sélections courantes)</span>
+            </label>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
+            <button class="btn btn-danger" type="button" id="edit-st-delete-btn" style="background-color:rgba(239,68,68,0.1); color:var(--danger); border:1px solid rgba(239,68,68,0.3);">
+              <i class="fas fa-trash-alt"></i> Supprimer
+            </button>
+            <div style="display:flex; gap:10px;">
+              <button class="btn btn-secondary" type="button" onclick="closeEditStockModal()">Annuler</button>
+              <button class="btn btn-primary" type="submit"><i class="fas fa-save"></i> Enregistrer les modifications</button>
+            </div>
           </div>
         </form>
       </div>

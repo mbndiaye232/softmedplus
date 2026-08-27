@@ -205,6 +205,9 @@ app.get('/api/billing/invoices/:id/email-logs', billingCtrl.getInvoiceEmailLogs)
 // 5. Inventory & Pharmacy Lots
 app.post('/api/inventory/items', stockCtrl.createStockItem);
 app.get('/api/inventory/items', stockCtrl.getStockItems);
+app.put('/api/inventory/items/:id', stockCtrl.updateStockItem);
+app.delete('/api/inventory/items/:id', stockCtrl.deleteStockItem);
+app.patch('/api/inventory/items/:id/toggle-status', stockCtrl.toggleStockItemStatus);
 app.post('/api/inventory/lots', stockCtrl.addStockLot);
 app.post('/api/inventory/deplete', stockCtrl.depleteStock);
 
