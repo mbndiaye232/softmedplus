@@ -7939,7 +7939,7 @@ async function createStockItem(e) {
     showToast('Article inventorié créé avec succès!');
     navigate('inventory');
   } catch (err) {
-    showToast(err.error || 'Erreur lors de la création de l\'article', 'error');
+    showToast(err.message || 'Erreur lors de la création de l\'article', 'error');
   }
 }
 

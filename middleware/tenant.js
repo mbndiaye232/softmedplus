@@ -8,16 +8,26 @@ const tenantIsolator = async (req, res, next) => {
     return next();
   }
 
-  // Extract tenant ID from authenticated user (set by auth middleware)
-  // or fall back to 'x-tenant-id' header
-  let tenantId = req.user ? req.user.tenant_id : null;
+  // Extract tenant ID from x-tenant-id header (for active switch/Super Admin) or authenticated user token
+  let tenantId = req.headers['x-tenant-id'] || (req.user ? req.user.tenant_id : null);
+  
   if (!tenantId) {
-    tenantId = req.headers['x-tenant-id'];
+    try {
+      const t = await pool.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
+      if (t.rows.length > 0) tenantId = t.rows[0].id;
+    } catch (e) {
+      console.error('Tenant fallback error:', e.message);
+    }
   }
 
   if (!tenantId) {
     return res.status(400).json({ error: 'Tenant context (X-Tenant-ID or Auth token) is required' });
   }
+
+  if (req.user) {
+    req.user.tenant_id = tenantId;
+  }
+  req.tenantId = tenantId;
 
   try {
     // Check out a client from the pool for transaction execution
