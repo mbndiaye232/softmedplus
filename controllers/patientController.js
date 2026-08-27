@@ -8,15 +8,28 @@ const HMAC_SECRET = process.env.HMAC_SECRET || 'clinicos-hmac-prescription-secur
 const autoRegisterPrescriptionMedications = async (dbClient, tenantId, practitionerId, items) => {
   if (!items || !Array.isArray(items) || items.length === 0 || !tenantId) return;
 
+  // Best-effort side effect isolated in a savepoint : sans cela, la moindre erreur ici
+  // avorte la transaction en cours et l'enregistrement de la consultation / ordonnance est
+  // silencieusement annulé au moment du COMMIT.
   try {
-    // 1. Determine practitioner specialty code
+    await dbClient.query('SAVEPOINT auto_register_meds');
+  } catch (err) {
+    console.error('Cannot open savepoint for medication auto-registration:', err.message);
+    return;
+  }
+
+  try {
+    // 1. Determine practitioner specialty code (le code vit dans medical_specialties)
     let targetSpec = 'GENERAL';
     if (practitionerId) {
       const pracSpecRes = await dbClient.query(
-        `SELECT ps.code, pr.specialty_name 
+        `SELECT ms.code, pr.specialty_name
          FROM practitioners pr
          LEFT JOIN practitioner_specialties ps ON ps.practitioner_id = pr.id
-         WHERE pr.id = $1 LIMIT 1`,
+         LEFT JOIN medical_specialties ms ON ms.id = ps.specialty_id
+         WHERE pr.id = $1
+         ORDER BY ps.is_primary DESC NULLS LAST
+         LIMIT 1`,
         [practitionerId]
       );
       if (pracSpecRes.rowCount > 0 && pracSpecRes.rows[0].code) {
@@ -61,8 +74,14 @@ const autoRegisterPrescriptionMedications = async (dbClient, tenantId, practitio
         );
       }
     }
+    await dbClient.query('RELEASE SAVEPOINT auto_register_meds');
   } catch (err) {
     console.error('Error auto-registering prescribed medication in stock:', err.message);
+    try {
+      await dbClient.query('ROLLBACK TO SAVEPOINT auto_register_meds');
+    } catch (e) {
+      console.error('Savepoint rollback failed:', e.message);
+    }
   }
 };
 
