@@ -3110,15 +3110,19 @@ let allPatientStatuses = [];
 
 async function renderPatients(container) {
   const [patients, rawStatuses, practitioners] = await Promise.all([
-    api.request('/patients'),
+    api.request('/patients').catch(() => []),
     api.request('/patient-statuses').catch(() => []),
     api.request('/practitioners').catch(() => [])
   ]);
 
-  allPractitionersList = practitioners || [];
+  const patientList = Array.isArray(patients) ? patients : [];
+  const statusList = Array.isArray(rawStatuses) ? rawStatuses : [];
+  const pracList = Array.isArray(practitioners) ? practitioners : [];
+
+  allPractitionersList = pracList;
 
   // Ensure strict uniqueness by name
-  const statuses = Array.from(new Map(rawStatuses.map(s => [s.name.trim().toLowerCase(), s])).values());
+  const statuses = Array.from(new Map(statusList.filter(s => s && s.name).map(s => [s.name.trim().toLowerCase(), s])).values());
   allPatientStatuses = statuses;
 
   container.innerHTML = `
@@ -3142,7 +3146,7 @@ async function renderPatients(container) {
           <div class="form-group" style="margin-bottom:12px;">
             <label class="form-label" style="font-weight:700; color:var(--primary);"><i class="fas fa-user-md"></i> Médecin Traitant Référent *</label>
             <select class="form-control" id="p-attending-doc" required style="border:1.5px solid var(--primary);">
-              ${practitioners.map(doc => `
+              ${pracList.map(doc => `
                 <option value="${doc.id}">
                   ${doc.title || 'Dr.'} ${doc.first_name} ${doc.last_name} (${doc.specialty_name || 'Généraliste'})
                 </option>
@@ -3221,8 +3225,8 @@ async function renderPatients(container) {
               </tr>
             </thead>
             <tbody>
-              ${patients.length === 0 ? '<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted);">Aucun patient enregistré</td></tr>' : ''}
-              ${patients.map(p => {
+              ${patientList.length === 0 ? '<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted);">Aucun patient enregistré</td></tr>' : ''}
+              ${patientList.map(p => {
                 const height = p.height_cm ? parseFloat(p.height_cm) : null;
                 const weight = p.weight_kg ? parseFloat(p.weight_kg) : null;
                 const imc = (height && weight) ? (weight / Math.pow(height / 100, 2)).toFixed(1) : null;
