@@ -993,6 +993,7 @@ async function renderDashboard(container) {
   // Calculate doctor max invoiced for relative progress
   const maxDocInvoiced = Math.max(...doctors.map(d => parseFloat(d.total_invoiced || 0)), 1);
   const maxPathPatients = Math.max(...pathologies.map(p => parseInt(p.patient_count || 0, 10)), 1);
+  const maxTrendVal = Math.max(...(monthlyTrend.length > 0 ? monthlyTrend.map(m => parseInt(m.new_patients || 0, 10)) : [1]), 1);
 
   container.innerHTML = `
     <!-- Top 5 Executive Metric Cards -->
