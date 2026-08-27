@@ -45,6 +45,9 @@ const tenantIsolator = async (req, res, next) => {
 
     // Track transaction status
     let isFinished = false;
+    // True when a COMMIT was silently downgraded to a ROLLBACK by PostgreSQL
+    // (transaction already aborted by a previous failed statement) : les écritures sont perdues.
+    let commitWasRolledBack = false;
 
     const commitAndRelease = async (shouldCommit = true) => {
       if (isFinished) return;
@@ -53,7 +56,11 @@ const tenantIsolator = async (req, res, next) => {
       if (req.dbClient) {
         try {
           if (shouldCommit) {
-            await req.dbClient.query('COMMIT');
+            const result = await req.dbClient.query('COMMIT');
+            if (result && result.command === 'ROLLBACK') {
+              commitWasRolledBack = true;
+              console.error(`Transaction aborted before COMMIT on ${req.method} ${req.originalUrl} : aucune donnée enregistrée.`);
+            }
           } else {
             await req.dbClient.query('ROLLBACK');
           }
@@ -73,6 +80,13 @@ const tenantIsolator = async (req, res, next) => {
       const shouldCommit = statusCode >= 200 && statusCode < 400;
       
       commitAndRelease(shouldCommit).then(() => {
+        // Uniquement sur les écritures : sur un GET, on préfère renvoyer les données partielles
+        if (commitWasRolledBack && shouldCommit && req.method !== 'GET') {
+          res.statusCode = 500;
+          return originalJson.call(this, {
+            error: "Enregistrement annulé : la transaction a échoué côté base de données. Aucune donnée n'a été sauvegardée."
+          });
+        }
         originalJson.call(this, data);
       });
     };

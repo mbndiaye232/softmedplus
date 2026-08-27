@@ -218,11 +218,11 @@ const getDashboardAnalytics = async (req, res) => {
     const hospitalStats = await req.dbClient.query(`
       SELECT 
         COUNT(*)::int as total_beds,
-        COUNT(*) FILTER (WHERE is_occupied = true)::int as occupied_beds,
-        COUNT(*) FILTER (WHERE is_occupied = false AND is_active = true)::int as available_beds
+        COUNT(*) FILTER (WHERE status = 'OCCUPIED')::int as occupied_beds,
+        COUNT(*) FILTER (WHERE status <> 'OCCUPIED' AND is_active = true)::int as available_beds
       FROM hospital_beds
       WHERE tenant_id = $1
-    `).catch(() => ({ rows: [{ total_beds: 0, occupied_beds: 0, available_beds: 0 }] }));
+    `, [tenantId]).catch(() => ({ rows: [{ total_beds: 0, occupied_beds: 0, available_beds: 0 }] }));
 
     // 7. Payment Methods Breakdown
     const paymentsBreakdown = await req.dbClient.query(`
@@ -234,7 +234,7 @@ const getDashboardAnalytics = async (req, res) => {
       WHERE tenant_id = $1
       GROUP BY payment_method
       ORDER BY total_amount DESC
-    `).catch(() => ({ rows: [] }));
+    `, [tenantId]).catch(() => ({ rows: [] }));
 
     const fin = financialStats.rows[0] || {};
     const totalInvoiced = parseFloat(fin.total_invoiced || 0);
