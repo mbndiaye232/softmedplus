@@ -5077,9 +5077,26 @@ async function submitConsultation(e) {
     }
   };
 
+  // Auto-include pending medication if user typed into input fields without clicking + Ajouter
+  const pendingDrug = (document.getElementById('rx-drug')?.value || '').trim();
+  const pendingDosage = (document.getElementById('rx-dosage')?.value || '').trim();
+  const pendingFrequency = (document.getElementById('rx-frequency')?.value || '').trim();
+  const pendingDuration = parseInt(document.getElementById('rx-duration')?.value || '5', 10);
+  const pendingInstructions = (document.getElementById('rx-instructions')?.value || '').trim();
+
+  if (pendingDrug) {
+    currentPrescriptionItems.push({
+      drug_name: pendingDrug,
+      dosage: pendingDosage || '1 cp',
+      frequency: pendingFrequency || '2x/jour',
+      duration_days: isNaN(pendingDuration) || pendingDuration <= 0 ? 5 : pendingDuration,
+      instructions: pendingInstructions
+    });
+  }
+
   if (currentPrescriptionItems.length > 0) {
     payload.prescription = {
-      valid_until: document.getElementById('dpi-rx-expiry').value || null,
+      valid_until: document.getElementById('dpi-rx-expiry')?.value || null,
       items: currentPrescriptionItems
     };
   }
@@ -5101,13 +5118,16 @@ async function submitConsultation(e) {
     }
 
     closeNewConsultationModal();
-    await openDPIModal(activeDPIPatient.id, activeDPIPatient.name);
+    if (activeDPIPatient) {
+      await openDPIModal(activeDPIPatient.id, activeDPIPatient.name);
+      activeDPITab = 'consultations';
+      renderDPI360Modal();
+    }
     
     // If prescription exists, open official print preview
-    if (res.prescription && res.prescription.id) {
-      openPrescriptionPrintModal(res.prescription.id);
-    } else if (res.prescription) {
-      showPrescriptionConfirmation(res.prescription);
+    const rxObj = res.prescription;
+    if (rxObj && (rxObj.id || rxObj.prescription_code)) {
+      openPrescriptionPrintModal(rxObj.id || rxObj.prescription_code);
     }
   } catch (err) {
     showToast(`Erreur : ${err.message}`, 'danger');
