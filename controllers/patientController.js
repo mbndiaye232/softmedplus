@@ -469,15 +469,40 @@ const updatePatient = async (req, res) => {
   }
 };
 
-// 3. Create Consultation Note & Prescription
+// 4. Record New Consultation Note & Optional Prescription
 const createConsultation = async (req, res) => {
-  const { patient_id, practitioner_id, reason_for_visit, vital_signs, clinical_examination, icd10_diagnosis_codes, diagnosis_text, confidential_notes, prescription } = req.body;
+  const { 
+    patient_id, 
+    practitioner_id, 
+    reason_for_visit, 
+    vital_signs, 
+    clinical_examination, 
+    icd10_diagnosis_codes, 
+    diagnosis_text, 
+    confidential_notes,
+    prescription 
+  } = req.body;
 
-  if (!patient_id || !practitioner_id || !reason_for_visit || !diagnosis_text) {
-    return res.status(400).json({ error: 'Required fields missing: patient_id, practitioner_id, reason_for_visit, diagnosis_text' });
+  if (!patient_id || !reason_for_visit || !diagnosis_text) {
+    return res.status(400).json({ error: 'Required fields missing: patient_id, reason_for_visit, diagnosis_text' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  if (!tenantId) {
+    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
+    if (t.rows.length > 0) tenantId = t.rows[0].id;
+  }
+
+  let activePracId = practitioner_id;
+  if (!activePracId) {
+    const prCheck = await req.dbClient.query('SELECT id FROM practitioners WHERE tenant_id = $1 AND is_active = true LIMIT 1', [tenantId]);
+    if (prCheck.rows.length > 0) {
+      activePracId = prCheck.rows[0].id;
+    } else {
+      const prAny = await req.dbClient.query('SELECT id FROM practitioners ORDER BY id ASC LIMIT 1');
+      if (prAny.rows.length > 0) activePracId = prAny.rows[0].id;
+    }
+  }
 
   try {
     // A. Insert Consultation note
@@ -488,13 +513,13 @@ const createConsultation = async (req, res) => {
       [
         tenantId,
         patient_id,
-        practitioner_id,
+        activePracId,
         reason_for_visit,
         JSON.stringify(vital_signs || {}),
         clinical_examination || null,
         icd10_diagnosis_codes || null,
         diagnosis_text,
-        confidential_notes || null // in production, encrypt this using doctor keys
+        confidential_notes || null
       ]
     );
 
@@ -508,10 +533,10 @@ const createConsultation = async (req, res) => {
 
       // Retrieve patient code and practitioner license for HMAC validation
       const patientRes = await req.dbClient.query(`SELECT patient_code FROM patients WHERE id = $1`, [patient_id]);
-      const practitionerRes = await req.dbClient.query(`SELECT license_number FROM practitioners WHERE id = $1`, [practitioner_id]);
+      const practitionerRes = await req.dbClient.query(`SELECT license_number FROM practitioners WHERE id = $1`, [activePracId]);
 
-      const patientCode = patientRes.rows[0].patient_code;
-      const licenseNumber = practitionerRes.rows[0].license_number || 'NOLICENSE';
+      const patientCode = patientRes.rows[0]?.patient_code || 'SM-0000';
+      const licenseNumber = practitionerRes.rows[0]?.license_number || 'NOLICENSE';
       const validUntil = prescription.valid_until || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
       // Generate Cryptographic HMAC-SHA256 signature
@@ -527,7 +552,7 @@ const createConsultation = async (req, res) => {
           tenantId,
           consultation.id,
           patient_id,
-          practitioner_id,
+          activePracId,
           prescriptionCode,
           qrHash,
           validUntil
@@ -556,7 +581,7 @@ const createConsultation = async (req, res) => {
       }
 
       // Automatically register any newly prescribed medication into stock_items
-      await autoRegisterPrescriptionMedications(req.dbClient, tenantId, practitioner_id, prescription.items);
+      await autoRegisterPrescriptionMedications(req.dbClient, tenantId, activePracId, prescription.items);
     }
 
     await logAudit(req, 'CREATE_CONSULTATION', 'consultation_notes', consultation.id);
@@ -565,10 +590,9 @@ const createConsultation = async (req, res) => {
       consultation,
       prescription: createdPrescription
     });
-
   } catch (err) {
     console.error('Create consultation error:', err.message);
-    return res.status(500).json({ error: 'Failed to create consultation record' });
+    return res.status(500).json({ error: 'Failed to record consultation: ' + err.message });
   }
 };
 
@@ -655,12 +679,29 @@ const verifyPrescription = async (req, res) => {
 // 5. Update Consultation Note & Prescription
 const updateConsultation = async (req, res) => {
   const { id } = req.params;
-  const { reason_for_visit, vital_signs, clinical_examination, icd10_diagnosis_codes, diagnosis_text, confidential_notes, prescription } = req.body;
+  const { reason_for_visit, vital_signs, clinical_examination, icd10_diagnosis_codes, diagnosis_text, confidential_notes, prescription, practitioner_id } = req.body;
+
+  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  if (!tenantId) {
+    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
+    if (t.rows.length > 0) tenantId = t.rows[0].id;
+  }
 
   try {
     const existing = await req.dbClient.query(`SELECT * FROM consultation_notes WHERE id = $1`, [id]);
     if (existing.rowCount === 0) {
       return res.status(404).json({ error: 'Consultation note not found' });
+    }
+
+    let activePracId = practitioner_id || existing.rows[0].practitioner_id;
+    if (!activePracId) {
+      const p = await req.dbClient.query('SELECT id FROM practitioners WHERE tenant_id = $1 AND is_active = true LIMIT 1', [tenantId]);
+      if (p.rows.length > 0) {
+        activePracId = p.rows[0].id;
+      } else {
+        const pAny = await req.dbClient.query('SELECT id FROM practitioners ORDER BY id ASC LIMIT 1');
+        if (pAny.rows.length > 0) activePracId = pAny.rows[0].id;
+      }
     }
 
     const consultRes = await req.dbClient.query(
@@ -670,8 +711,9 @@ const updateConsultation = async (req, res) => {
            clinical_examination = COALESCE($3, clinical_examination),
            icd10_diagnosis_codes = COALESCE($4, icd10_diagnosis_codes),
            diagnosis_text = COALESCE($5, diagnosis_text),
-           confidential_notes = COALESCE($6, confidential_notes)
-       WHERE id = $7
+           confidential_notes = COALESCE($6, confidential_notes),
+           practitioner_id = COALESCE($7, practitioner_id)
+       WHERE id = $8
        RETURNING *`,
       [
         reason_for_visit,
@@ -680,6 +722,7 @@ const updateConsultation = async (req, res) => {
         icd10_diagnosis_codes,
         diagnosis_text,
         confidential_notes,
+        activePracId,
         id
       ]
     );
@@ -693,7 +736,7 @@ const updateConsultation = async (req, res) => {
         const rxId = exRx.rows[0].id;
         const validUntil = prescription.valid_until || exRx.rows[0].valid_until;
         
-        await req.dbClient.query(`UPDATE prescriptions SET valid_until = $1 WHERE id = $2`, [validUntil, rxId]);
+        await req.dbClient.query(`UPDATE prescriptions SET valid_until = $1, practitioner_id = COALESCE(practitioner_id, $2) WHERE id = $3`, [validUntil, activePracId, rxId]);
         await req.dbClient.query(`DELETE FROM prescription_items WHERE prescription_id = $1`, [rxId]);
 
         for (const item of prescription.items) {
@@ -714,7 +757,7 @@ const updateConsultation = async (req, res) => {
         const prescriptionId = crypto.randomUUID();
         const prescriptionCode = `RX-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
         const patientRes = await req.dbClient.query(`SELECT patient_code FROM patients WHERE id = $1`, [updatedConsultation.patient_id]);
-        const practitionerRes = await req.dbClient.query(`SELECT license_number FROM practitioners WHERE id = $1`, [updatedConsultation.practitioner_id]);
+        const practitionerRes = await req.dbClient.query(`SELECT license_number FROM practitioners WHERE id = $1`, [activePracId]);
 
         const patientCode = patientRes.rows[0]?.patient_code || 'SM-0000';
         const licenseNumber = practitionerRes.rows[0]?.license_number || 'NOLICENSE';
@@ -723,12 +766,11 @@ const updateConsultation = async (req, res) => {
         const hashData = `${prescriptionId}|${patientCode}|${licenseNumber}|${validUntil}`;
         const qrHash = crypto.createHmac('sha256', HMAC_SECRET).update(hashData).digest('hex');
 
-        const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
         const prescrRes = await req.dbClient.query(
           `INSERT INTO prescriptions (id, tenant_id, consultation_id, patient_id, practitioner_id, prescription_code, qr_cryptographic_hash, valid_until)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *`,
-          [prescriptionId, tenantId, id, updatedConsultation.patient_id, updatedConsultation.practitioner_id, prescriptionCode, qrHash, validUntil]
+          [prescriptionId, tenantId, id, updatedConsultation.patient_id, activePracId, prescriptionCode, qrHash, validUntil]
         );
         updatedPrescription = prescrRes.rows[0];
         updatedPrescription.items = [];
@@ -745,8 +787,7 @@ const updateConsultation = async (req, res) => {
       }
 
       // Automatically register any newly prescribed medication into stock_items
-      const activeTenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
-      await autoRegisterPrescriptionMedications(req.dbClient, activeTenantId, updatedConsultation.practitioner_id, prescription.items);
+      await autoRegisterPrescriptionMedications(req.dbClient, tenantId, activePracId, prescription.items);
     }
 
     await logAudit(req, 'UPDATE_CONSULTATION', 'consultation_notes', id);
@@ -757,7 +798,7 @@ const updateConsultation = async (req, res) => {
     });
   } catch (err) {
     console.error('Update consultation error:', err.message);
-    return res.status(500).json({ error: 'Failed to update consultation record' });
+    return res.status(500).json({ error: 'Failed to update consultation record: ' + err.message });
   }
 };
 

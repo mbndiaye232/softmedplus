@@ -183,7 +183,7 @@ const getPatientDossier = async (req, res) => {
     // 6. Prescriptions
     const rxRes = await req.dbClient.query(
       `SELECT rx.*, prac.first_name AS doc_first, prac.last_name AS doc_last,
-              (SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id) AS items
+              COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json) AS items
        FROM prescriptions rx
        LEFT JOIN practitioners prac ON rx.practitioner_id = prac.id
        WHERE rx.patient_id = $1
