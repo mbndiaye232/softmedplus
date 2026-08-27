@@ -366,23 +366,26 @@ const deleteDepartment = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const linkedRooms = await req.dbClient.query(
-      `SELECT 1 FROM hospital_rooms WHERE department_id = $1 LIMIT 1`,
-      [id]
-    ).catch(() => ({ rowCount: 0 }));
-
-    if (linkedRooms.rowCount > 0) {
+    // Savepoint : si la suppression viole une contrainte, on doit pouvoir continuer
+    // dans la même transaction pour désactiver le service à la place.
+    await req.dbClient.query('SAVEPOINT delete_department');
+    try {
+      await req.dbClient.query(
+        `DELETE FROM medical_departments WHERE id = $1 AND tenant_id = $2`,
+        [id, tenantId]
+      );
+      await req.dbClient.query('RELEASE SAVEPOINT delete_department');
+    } catch (err) {
+      await req.dbClient.query('ROLLBACK TO SAVEPOINT delete_department');
+      if (err.code !== '23503') throw err;
+      // Le service est encore référencé ailleurs : on le désactive au lieu de le supprimer
       await req.dbClient.query(
         `UPDATE medical_departments SET is_active = false WHERE id = $1 AND tenant_id = $2`,
         [id, tenantId]
       );
-      return res.status(200).json({ message: 'Service désactivé (lié à des chambres/lits hospitaliers)' });
+      await logAudit(req, 'DEACTIVATE_DEPARTMENT', 'medical_departments', id);
+      return res.status(200).json({ message: 'Service désactivé (encore rattaché à des données existantes)' });
     }
-
-    await req.dbClient.query(
-      `DELETE FROM medical_departments WHERE id = $1 AND tenant_id = $2`,
-      [id, tenantId]
-    );
 
     await logAudit(req, 'DELETE_DEPARTMENT', 'medical_departments', id);
     return res.status(200).json({ message: 'Service hospitalier supprimé avec succès' });
