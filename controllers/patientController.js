@@ -88,7 +88,7 @@ const generatePatientCode = async (dbClient, tenantId) => {
 // 1b. Verify Patient Code & Cross-Check Identity (First name & Last name)
 const verifyPatientCode = async (req, res) => {
   const { patient_code, first_name, last_name } = req.method === 'POST' ? req.body : req.query;
-  const tenantId = req.user.tenant_id;
+  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
 
   if (!patient_code) {
     return res.status(400).json({ error: 'Code patient requis' });
@@ -197,7 +197,7 @@ const registerPatient = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: phone_number, first_name, last_name, gender, date_of_birth' });
   }
 
-  const tenantId = req.user.tenant_id;
+  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
   const patientCode = await generatePatientCode(req.dbClient, tenantId);
 
   // Default attending doctor to first available practitioner if not provided
@@ -350,7 +350,7 @@ const getPatients = async (req, res) => {
 // 2b. Update Patient
 const updatePatient = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.user.tenant_id;
+  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
   const { 
     phone_number, 
     first_name, 
@@ -477,7 +477,7 @@ const createConsultation = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: patient_id, practitioner_id, reason_for_visit, diagnosis_text' });
   }
 
-  const tenantId = req.user.tenant_id;
+  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
 
   try {
     // A. Insert Consultation note
@@ -723,11 +723,12 @@ const updateConsultation = async (req, res) => {
         const hashData = `${prescriptionId}|${patientCode}|${licenseNumber}|${validUntil}`;
         const qrHash = crypto.createHmac('sha256', HMAC_SECRET).update(hashData).digest('hex');
 
+        const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
         const prescrRes = await req.dbClient.query(
           `INSERT INTO prescriptions (id, tenant_id, consultation_id, patient_id, practitioner_id, prescription_code, qr_cryptographic_hash, valid_until)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *`,
-          [prescriptionId, req.user.tenant_id, id, updatedConsultation.patient_id, updatedConsultation.practitioner_id, prescriptionCode, qrHash, validUntil]
+          [prescriptionId, tenantId, id, updatedConsultation.patient_id, updatedConsultation.practitioner_id, prescriptionCode, qrHash, validUntil]
         );
         updatedPrescription = prescrRes.rows[0];
         updatedPrescription.items = [];
@@ -744,7 +745,8 @@ const updateConsultation = async (req, res) => {
       }
 
       // Automatically register any newly prescribed medication into stock_items
-      await autoRegisterPrescriptionMedications(req.dbClient, req.user.tenant_id, updatedConsultation.practitioner_id, prescription.items);
+      const activeTenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+      await autoRegisterPrescriptionMedications(req.dbClient, activeTenantId, updatedConsultation.practitioner_id, prescription.items);
     }
 
     await logAudit(req, 'UPDATE_CONSULTATION', 'consultation_notes', id);
