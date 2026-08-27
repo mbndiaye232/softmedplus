@@ -5160,23 +5160,26 @@ function createPrescriptionPrintModalContainer() {
 }
 
 async function openPrescriptionPrintModal(prescriptionId) {
+  if (!prescriptionId || prescriptionId === 'undefined' || prescriptionId === 'null') {
+    return;
+  }
   const modal = createPrescriptionPrintModalContainer();
 
   // 1. First, search locally in currentDossierData for instant display without waiting or failing
   let localRx = null;
   if (currentDossierData) {
-    localRx = (currentDossierData.prescriptions || []).find(p => p.id === prescriptionId || p.prescription_code === prescriptionId);
+    localRx = (currentDossierData.prescriptions || []).find(p => p.id === prescriptionId || p.prescription_code === prescriptionId || p.consultation_id === prescriptionId);
     if (!localRx && Array.isArray(currentDossierData.consultations)) {
       for (const c of currentDossierData.consultations) {
-        if (c.prescription && (c.prescription.id === prescriptionId || c.prescription.prescription_code === prescriptionId)) {
-          localRx = {
+        if (c.id === prescriptionId || (c.prescription && (c.prescription.id === prescriptionId || c.prescription.prescription_code === prescriptionId))) {
+          localRx = c.prescription ? {
             ...c.prescription,
             doc_first: c.doc_first,
             doc_last: c.doc_last,
             doc_title: c.doc_title,
             doc_specialty: c.doc_specialty,
             doc_license: c.doc_license
-          };
+          } : null;
           break;
         }
       }
@@ -5209,14 +5212,14 @@ async function openPrescriptionPrintModal(prescriptionId) {
   // 2. Fetch latest details from backend in background to ensure fresh data
   try {
     const data = await api.request(`/clinical/prescriptions/${prescriptionId}`);
-    if (data && data.prescription_code) {
+    if (data && (data.prescription_code || data.id)) {
       currentPrintPrescriptionData = data;
       renderPrescriptionPrintModalContent();
       modal.style.display = 'flex';
     }
   } catch (err) {
     if (!currentPrintPrescriptionData) {
-      showToast('Erreur lors du chargement de l\'ordonnance: ' + err.message, 'error');
+      console.warn('Prescription details lookup notice:', err.message);
     }
   }
 }

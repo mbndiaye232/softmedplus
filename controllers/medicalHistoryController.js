@@ -94,8 +94,8 @@ const getPatientDossier = async (req, res) => {
        LEFT JOIN practitioners doc ON p.attending_practitioner_id = doc.id
        LEFT JOIN patient_insurance_policies pip ON p.id = pip.patient_id AND pip.is_primary = true
        LEFT JOIN insurance_companies ic ON pip.insurance_company_id = ic.id
-       WHERE p.id = $1 AND p.tenant_id = $2`,
-      [patientId, tenantId]
+       WHERE p.id = $1`,
+      [patientId]
     );
 
     if (patientRes.rowCount === 0) {
@@ -169,7 +169,7 @@ const getPatientDossier = async (req, res) => {
                  'valid_until', rx.valid_until,
                  'is_dispensed', rx.is_dispensed,
                  'items', COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json)
-              ) FROM prescriptions rx WHERE rx.consultation_id = cn.id LIMIT 1) AS prescription
+              ) FROM prescriptions rx WHERE rx.consultation_id = cn.id OR (rx.patient_id = cn.patient_id AND rx.created_at::date = cn.created_at::date) ORDER BY rx.created_at DESC LIMIT 1) AS prescription
        FROM consultation_notes cn
        LEFT JOIN practitioners prac ON cn.practitioner_id = prac.id
        WHERE cn.patient_id = $1
