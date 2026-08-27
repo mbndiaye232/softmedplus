@@ -4042,16 +4042,17 @@ async function openEditPatientModal(patientId, fromDPI = false) {
   modal.style.display = 'flex';
 
   try {
-    const [dossier, statuses, rawPractitioners, rawInsurances] = await Promise.all([
-      api.request(`/patients/${patientId}/dossier`),
+    const [dossier, rawStatuses, rawPractitioners, rawInsurances] = await Promise.all([
+      api.request(`/patients/${patientId}/dossier`).catch(() => ({ patient: {} })),
       api.request('/patient-statuses').catch(() => allPatientStatuses || []),
       api.request('/practitioners').catch(() => allPractitionersList || []),
       api.request('/billing/insurances').catch(() => [])
     ]);
 
-    const p = dossier.patient || {};
-    const practitioners = rawPractitioners || [];
-    const insurances = rawInsurances || [];
+    const p = (dossier && dossier.patient) ? dossier.patient : {};
+    const practitioners = Array.isArray(rawPractitioners) ? rawPractitioners : [];
+    const insurances = Array.isArray(rawInsurances) ? rawInsurances : [];
+    const statuses = Array.isArray(rawStatuses) ? rawStatuses : (allPatientStatuses || []);
     const formattedDob = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : '';
     const allergiesStr = Array.isArray(p.allergies) ? p.allergies.join(', ') : (p.allergies || '');
 
