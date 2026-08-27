@@ -8,14 +8,23 @@ const isSaasAdmin = (user) => {
 
 // 1. Get current tenant profile
 const getTenantProfile = async (req, res) => {
-  const tenantId = req.user.tenant_id;
+  let tenantId = req.headers['x-tenant-id'] || req.user.tenant_id;
   try {
-    const result = await req.dbClient.query(
-      `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings 
-       FROM tenants WHERE id = $1`,
-      [tenantId]
-    );
-    if (result.rowCount === 0) {
+    let result;
+    if (tenantId) {
+      result = await req.dbClient.query(
+        `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings 
+         FROM tenants WHERE id = $1`,
+        [tenantId]
+      );
+    }
+    if (!result || result.rowCount === 0) {
+      result = await req.dbClient.query(
+        `SELECT id, name, slug, phone_number, ninea_rc, logo_url, stamp_url, address, email, gps_coordinates, settings 
+         FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1`
+      );
+    }
+    if (!result || result.rowCount === 0) {
       return res.status(404).json({ error: 'Clinic profile not found' });
     }
     return res.status(200).json(result.rows[0]);

@@ -960,9 +960,11 @@ async function renderDashboard(container) {
   const totalDue = parseFloat(fSum.total_due || 0);
   const recoveryRate = fSum.recovery_rate !== undefined ? fSum.recovery_rate : (totalInvoiced > 0 ? Math.round((totalCollected/totalInvoiced)*100) : 100);
 
-  const lowStockCount = stock.filter(item => item.current_stock_quantity <= item.minimum_threshold_alert).length;
+  const stockList = Array.isArray(stock) ? stock : [];
+  const apptsList = Array.isArray(appointments) ? appointments : [];
+  const lowStockCount = stockList.filter(item => (item.current_stock_quantity || 0) <= (item.minimum_threshold_alert || 0)).length;
   const todayISO = new Date().toISOString().split('T')[0];
-  const apptsToday = appointments.filter(a => (a.start_time || '').startsWith(todayISO)).length;
+  const apptsToday = apptsList.filter(a => (a.start_time || '').startsWith(todayISO)).length;
 
   // Max value in 12 months for relative bar heights
   const maxTrendVal = Math.max(...monthlyTrend.map(m => parseInt(m.new_patients || 0, 10)), 1);
@@ -10689,12 +10691,12 @@ function renderAppLayout() {
               <div style="display:flex; align-items:center; gap:8px; background:rgba(37,99,235,0.08); border:1px solid rgba(37,99,235,0.25); padding:4px 10px; border-radius:8px;">
                 <span style="font-size:0.8rem; font-weight:700; color:#1e40af;"><i class="fas fa-exchange-alt"></i> Clinique active :</span>
                 <select id="header-clinic-switcher" onchange="switchSuperAdminClinic(this.value)" style="font-size:0.82rem; font-weight:600; padding:4px 8px; border:1px solid #bfdbfe; border-radius:6px; background:#fff; color:#1e293b; cursor:pointer;">
-                  <option value="${state.tenant.id}">🏥 ${state.tenant.name} (${state.tenant.slug})</option>
+                  <option value="${state.tenant?.id || ''}">🏥 ${state.tenant?.name || 'Clinique active'} (${state.tenant?.slug || ''})</option>
                 </select>
               </div>
             ` : `
               <div style="font-size:0.85rem; color:var(--text-muted);">
-                <i class="fas fa-clinic-medical"></i> ${state.tenant.name} (Slug: <strong>${state.tenant.slug}</strong>)
+                <i class="fas fa-clinic-medical"></i> ${state.tenant?.name || 'Clinique'} (Slug: <strong>${state.tenant?.slug || ''}</strong>)
               </div>
             `}
           </div>
@@ -12239,11 +12241,31 @@ function renderAppLayout() {
     api.request('/tenants').then(tenants => {
       const switcher = document.getElementById('header-clinic-switcher');
       if (switcher && Array.isArray(tenants)) {
+        if (!state.tenant && tenants.length > 0) {
+          state.tenant = tenants[0];
+          localStorage.setItem('tenant', JSON.stringify(tenants[0]));
+        }
         switcher.innerHTML = tenants.map(t => `<option value="${t.id}" ${t.id === state.tenant?.id ? 'selected' : ''}>🏥 ${t.name} (${t.slug})</option>`).join('');
       }
     }).catch(() => {});
   }
 }
+
+async function switchSuperAdminClinic(tenantId) {
+  try {
+    const tenants = await api.request('/tenants');
+    const matched = Array.isArray(tenants) ? tenants.find(t => t.id === tenantId) : null;
+    if (matched) {
+      state.tenant = matched;
+      localStorage.setItem('tenant', JSON.stringify(matched));
+      showToast(`Clinique active : ${matched.name}`, 'info');
+      navigate(state.currentTab || 'dashboard');
+    }
+  } catch (err) {
+    console.error('switchSuperAdminClinic error:', err);
+  }
+}
+window.switchSuperAdminClinic = switchSuperAdminClinic;
 
 function copyPublicBookingLink(slug) {
   const url = `${window.location.origin}/rdv/${slug || 'paix'}`;
@@ -14137,7 +14159,10 @@ function initApp() {
   if (state.token) {
     // Pre-fetch complete tenant profile
     api.request('/tenant/profile').then(profile => {
-      state.tenant = profile;
+      if (profile && profile.id) {
+        state.tenant = profile;
+        try { localStorage.setItem('tenant', JSON.stringify(profile)); } catch (e) {}
+      }
       renderAppLayout();
     }).catch(() => {
       if (state.token) {
