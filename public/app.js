@@ -972,7 +972,9 @@ async function renderDashboard(container) {
   const apptsToday = apptsList.filter(a => (a.start_time || '').startsWith(todayISO)).length;
 
   // Max value in 12 months for relative bar heights
-  const maxTrendVal = Math.max(...monthlyTrend.map(m => parseInt(m.new_patients || 0, 10)), 1);
+  const agingData = (agingReport && Array.isArray(agingReport.data)) ? agingReport.data : [];
+  const agingSummary = (agingReport && agingReport.summary) ? agingReport.summary : { total_balance_due: 0, patient_balance_due: 0, insurance_balance_due: 0, count: 0 };
+  const totalAgingDue = parseFloat(agingSummary.total_balance_due || 0);
 
   // Compile aging buckets totals
   const brackets = {
@@ -982,8 +984,8 @@ async function renderDashboard(container) {
     '61_90_DAYS': 0,
     OVER_90_DAYS: 0
   };
-  (agingReport.data || []).forEach(inv => {
-    if (brackets[inv.aging_bracket] !== undefined) {
+  agingData.forEach(inv => {
+    if (inv && brackets[inv.aging_bracket] !== undefined) {
       brackets[inv.aging_bracket] += parseFloat(inv.total_balance_due || 0);
     }
   });
@@ -1061,7 +1063,7 @@ async function renderDashboard(container) {
         <div class="stat-main-number" style="color:#dc2626;">${lowStockCount}</div>
         <div class="stat-sub-label">Alertes rupture stock pharmacie</div>
         <div class="stat-tags-row">
-          <span class="stat-tag warning">${(agingReport.data || []).length} Factures en retard</span>
+          <span class="stat-tag warning">${agingData.length} Factures en retard</span>
           <span class="stat-tag">${totalDue.toLocaleString('fr-FR')} XOF dus</span>
         </div>
       </div>
@@ -1193,7 +1195,7 @@ async function renderDashboard(container) {
     <div class="card" style="margin-bottom: 24px;">
       <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
         <span><i class="fas fa-chart-bar"></i> Balance Âgée des Créances (Retards de Paiement)</span>
-        <span class="badge" style="background:#fef2f2; color:#dc2626; font-weight:700;">Total Dû : ${agingReport.summary.total_balance_due.toLocaleString('fr-FR')} XOF</span>
+        <span class="badge" style="background:#fef2f2; color:#dc2626; font-weight:700;">Total Dû : ${totalAgingDue.toLocaleString('fr-FR')} XOF</span>
       </div>
       <div class="table-responsive">
         <table class="table">
@@ -1214,7 +1216,7 @@ async function renderDashboard(container) {
               <td><span class="aging-bracket-badge delay-60">${brackets['31_60_DAYS'].toLocaleString('fr-FR')} XOF</span></td>
               <td><span class="aging-bracket-badge delay-60">${brackets['61_90_DAYS'].toLocaleString('fr-FR')} XOF</span></td>
               <td><span class="aging-bracket-badge delay-90">${brackets.OVER_90_DAYS.toLocaleString('fr-FR')} XOF</span></td>
-              <td><strong style="color:#dc2626;">${agingReport.summary.total_balance_due.toLocaleString('fr-FR')} XOF</strong></td>
+              <td><strong style="color:#dc2626;">${totalAgingDue.toLocaleString('fr-FR')} XOF</strong></td>
             </tr>
           </tbody>
         </table>
@@ -1225,7 +1227,7 @@ async function renderDashboard(container) {
     <div class="card">
       <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
         <span><i class="fas fa-bell" style="color:#f59e0b;"></i> Factures en Attente de Règlement</span>
-        <span class="badge" style="background:#eff6ff; color:#1d4ed8; font-weight:700;">${agingReport.data.length} Factures</span>
+        <span class="badge" style="background:#eff6ff; color:#1d4ed8; font-weight:700;">${agingData.length} Factures</span>
       </div>
       <div class="table-responsive">
         <table class="table">
@@ -1240,8 +1242,8 @@ async function renderDashboard(container) {
             </tr>
           </thead>
           <tbody>
-            ${agingReport.data.length === 0 ? '<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Toutes les factures sont à jour ! Aucune créance en retard.</td></tr>' : ''}
-            ${agingReport.data.map(inv => `
+            ${agingData.length === 0 ? '<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Toutes les factures sont à jour ! Aucune créance en retard.</td></tr>' : ''}
+            ${agingData.map(inv => `
               <tr>
                 <td><strong>${inv.invoice_number}</strong></td>
                 <td><strong>${inv.patient_name}</strong> <span style="font-size:0.8rem; color:var(--text-muted);">(${inv.patient_code})</span></td>

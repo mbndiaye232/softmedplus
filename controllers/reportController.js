@@ -3,7 +3,11 @@ const { logAudit } = require('../middleware/audit');
 // 1. Get Aging Balance Receivables Report
 const getAgingBalance = async (req, res) => {
   const { bracket, insurance_company_id } = req.query;
-  const tenantId = req.user.tenant_id;
+  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id;
+  if (!tenantId) {
+    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
+    if (t.rows.length > 0) tenantId = t.rows[0].id;
+  }
 
   let queryStr = `SELECT * FROM view_aging_balance WHERE tenant_id = $1`;
   const params = [tenantId];
@@ -109,7 +113,11 @@ const triggerRecoveryAction = async (req, res) => {
 
 // 3. Complete Clinical & Financial Dashboard Analytics
 const getDashboardAnalytics = async (req, res) => {
-  const tenantId = req.user.tenant_id;
+  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id;
+  if (!tenantId) {
+    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
+    if (t.rows.length > 0) tenantId = t.rows[0].id;
+  }
 
   try {
     // 1. Total Patients, Status breakdown, and This Month Growth
