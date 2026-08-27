@@ -4707,9 +4707,133 @@ async function revokeGrant(grantId) {
 }
 
 // -------------------------------------------------------------
-// New Consultation, Edit & Duplicate from DPI
+// New Consultation, Edit & Duplicate from DPI with Specialty Filtering
 // -------------------------------------------------------------
-function openNewConsultationFromDPI() {
+window._cachedPractitioners = [];
+window._filteredPrescriptionMedications = [];
+
+async function loadConsultationPractitionersAndMedications(defaultPracId) {
+  try {
+    const pracList = await api.request('/practitioners').catch(() => []);
+    window._cachedPractitioners = pracList || [];
+
+    const select = document.getElementById('dpi-practitioner-select');
+    if (!select) return;
+
+    if (window._cachedPractitioners.length === 0) {
+      select.innerHTML = '<option value="">-- Aucun médecin configuré --</option>';
+      await loadPrescriptionMedicationsForSpecialty('GENERAL');
+      return;
+    }
+
+    select.innerHTML = window._cachedPractitioners.map(p => {
+      const spec = (p.specialties && p.specialties[0] ? p.specialties[0].name : '') || p.specialty_name || 'Médecine Générale';
+      const specCode = (p.specialties && p.specialties[0] ? p.specialties[0].code : '') || p.specialty_code || (p.grade && p.grade.includes('Cardio') ? 'CARDIO' : 'GENERAL');
+      return `<option value="${p.id}" data-spec-code="${specCode}" data-spec-name="${spec}">${p.title || 'Dr'} ${p.first_name} ${p.last_name} (${spec})</option>`;
+    }).join('');
+
+    if (defaultPracId) {
+      select.value = defaultPracId;
+    } else {
+      // Default to first practitioner or match logged in doctor email
+      const matched = window._cachedPractitioners.find(p => p.email && state.user && p.email.toLowerCase() === state.user.email?.toLowerCase());
+      if (matched) {
+        select.value = matched.id;
+      } else {
+        select.selectedIndex = 0;
+      }
+    }
+
+    await onConsultationPractitionerChange();
+  } catch (err) {
+    console.error('Error loading consultation practitioners:', err);
+  }
+}
+
+async function onConsultationPractitionerChange() {
+  const select = document.getElementById('dpi-practitioner-select');
+  if (!select) return;
+
+  const selectedOpt = select.selectedOptions[0];
+  const specCode = selectedOpt ? selectedOpt.dataset.specCode || 'GENERAL' : 'GENERAL';
+  const specName = selectedOpt ? selectedOpt.dataset.specName || 'Médecine Générale' : 'Médecine Générale';
+
+  const badgeNameEl = document.getElementById('dpi-active-spec-name');
+  if (badgeNameEl) {
+    badgeNameEl.innerText = specName;
+  }
+
+  const noticeEl = document.getElementById('rx-specialty-filter-notice');
+  if (noticeEl) {
+    noticeEl.innerHTML = `<i class="fas fa-filter"></i> Filtré : ${specName} + Médicaments généraux`;
+  }
+
+  await loadPrescriptionMedicationsForSpecialty(specCode);
+}
+
+async function loadPrescriptionMedicationsForSpecialty(specialtyCode) {
+  try {
+    const meds = await api.request(`/inventory/items?specialty=${encodeURIComponent(specialtyCode || 'GENERAL')}`).catch(() => []);
+    window._filteredPrescriptionMedications = meds || [];
+
+    const datalist = document.getElementById('rx-medications-datalist');
+    if (datalist) {
+      datalist.innerHTML = window._filteredPrescriptionMedications.map(m => {
+        const isGeneral = !m.target_specialty || ['GENERAL', 'MED-GEN', 'TOUS'].includes(m.target_specialty.toUpperCase());
+        const tag = isGeneral ? '💊 [Général]' : `🩺 [${m.target_specialty}]`;
+        return `<option value="${m.name}">${tag} - ${m.name} (${parseFloat(m.selling_price || 0).toLocaleString()} XOF)</option>`;
+      }).join('');
+    }
+
+    // Populate quick suggestion pills (top 6 medications)
+    const pillsContainer = document.getElementById('rx-quick-pills-container');
+    if (pillsContainer) {
+      const topMeds = window._filteredPrescriptionMedications.slice(0, 7);
+      if (topMeds.length > 0) {
+        pillsContainer.innerHTML = `
+          <div style="font-size:0.75rem; color:var(--text-muted); width:100%; margin-bottom:2px;">Suggestions rapides (cliquez pour insérer) :</div>
+          ${topMeds.map(m => {
+            const isSpec = m.target_specialty && !['GENERAL', 'MED-GEN', 'TOUS'].includes(m.target_specialty.toUpperCase());
+            const safeName = (m.name || '').replace(/'/g, "\\'");
+            const safeDosage = (m.default_dosage || '1 cp matin et soir').replace(/'/g, "\\'");
+            return `
+              <button type="button" class="btn btn-outline" style="font-size:0.75rem; padding:3px 9px; border-radius:14px; border:1px solid ${isSpec ? 'rgba(239,68,68,0.3)' : 'rgba(37,99,235,0.3)'}; background:${isSpec ? 'rgba(239,68,68,0.06)' : 'rgba(37,99,235,0.06)'}; color:${isSpec ? 'var(--danger)' : 'var(--primary)'}; font-weight:600;" onclick="selectQuickMedication('${safeName}', '${safeDosage}')">
+                <i class="fas ${isSpec ? 'fa-heartbeat' : 'fa-pills'}"></i> ${m.name.length > 25 ? m.name.substring(0, 25) + '...' : m.name}
+              </button>
+            `;
+          }).join('')}
+        `;
+      } else {
+        pillsContainer.innerHTML = '';
+      }
+    }
+  } catch (err) {
+    console.error('Error loading specialty medications:', err);
+  }
+}
+
+function onRxDrugInput(val) {
+  if (!val || !window._filteredPrescriptionMedications) return;
+  const cleanVal = val.toLowerCase().trim();
+  const matched = window._filteredPrescriptionMedications.find(m => m.name.toLowerCase() === cleanVal || m.name.toLowerCase().startsWith(cleanVal));
+  if (matched && matched.default_dosage) {
+    const dosageInput = document.getElementById('rx-dosage');
+    if (dosageInput && !dosageInput.value.trim()) {
+      dosageInput.value = matched.default_dosage;
+    }
+  }
+}
+
+function selectQuickMedication(name, defaultDosage) {
+  const drugInput = document.getElementById('rx-drug');
+  const dosageInput = document.getElementById('rx-dosage');
+  if (drugInput) drugInput.value = name;
+  if (dosageInput && defaultDosage) dosageInput.value = defaultDosage;
+  const freqInput = document.getElementById('rx-frequency');
+  if (freqInput && !freqInput.value) freqInput.value = '2 fois/jour';
+}
+
+async function openNewConsultationFromDPI() {
   if (!activeDPIPatient) return;
   currentPrescriptionItems = [];
   renderPrescriptionItems();
@@ -4734,11 +4858,13 @@ function openNewConsultationFromDPI() {
       d.setDate(d.getDate() + 30);
       expEl.value = d.toISOString().split('T')[0];
     }
+    
+    await loadConsultationPractitionersAndMedications();
     modal.style.display = 'flex';
   }
 }
 
-function openEditConsultationModal(consultId) {
+async function openEditConsultationModal(consultId) {
   if (!activeDPIPatient || !currentDossierData) return;
   const consult = (currentDossierData.consultations || []).find(c => c.id === consultId);
   if (!consult) return;
@@ -4777,11 +4903,12 @@ function openEditConsultationModal(consultId) {
       currentPrescriptionItems = [];
     }
     renderPrescriptionItems();
+    await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
   }
 }
 
-function duplicateConsultationPrescription(consultId) {
+async function duplicateConsultationPrescription(consultId) {
   if (!activeDPIPatient || !currentDossierData) return;
   const consult = (currentDossierData.consultations || []).find(c => c.id === consultId);
   if (!consult) return;
@@ -4824,6 +4951,7 @@ function duplicateConsultationPrescription(consultId) {
     }
 
     renderPrescriptionItems();
+    await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
     showToast('Ordonnance dupliquée pour renouvellement. Vous pouvez ajuster les posologies et valider.', 'info');
   }
@@ -4849,11 +4977,11 @@ function closeNewConsultationModal() {
 }
 
 function addPrescriptionItem() {
-  const drug_name = document.getElementById('rx-drug').value;
-  const dosage = document.getElementById('rx-dosage').value;
-  const frequency = document.getElementById('rx-frequency').value;
+  const drug_name = document.getElementById('rx-drug').value.trim();
+  const dosage = document.getElementById('rx-dosage').value.trim();
+  const frequency = document.getElementById('rx-frequency').value.trim();
   const duration_days = parseInt(document.getElementById('rx-duration').value);
-  const instructions = document.getElementById('rx-instructions').value;
+  const instructions = document.getElementById('rx-instructions').value.trim();
 
   if (!drug_name || !dosage || !frequency || !duration_days) {
     showToast('Veuillez renseigner le médicament, dosage, fréquence et durée', 'error');
@@ -4924,8 +5052,8 @@ async function submitConsultation(e) {
 
   const icd10_diagnosis_codes = icd10 ? icd10.split(',').map(s => s.trim()) : [];
 
-  const pracList = await api.request('/practitioners').catch(() => []);
-  const practitioner_id = pracList.length > 0 ? pracList[0].id : null;
+  const selectedPracId = document.getElementById('dpi-practitioner-select')?.value;
+  const practitioner_id = selectedPracId || (window._cachedPractitioners && window._cachedPractitioners.length > 0 ? window._cachedPractitioners[0].id : null);
 
   const payload = {
     patient_id: activeDPIPatient.id,
@@ -7565,11 +7693,27 @@ async function renderInventory(container) {
         <form onsubmit="createStockItem(event)">
           <div class="form-group">
             <label class="form-label">SKU (Code Unique) *</label>
-            <input type="text" class="form-control" id="st-sku" placeholder="ex: PARACETAMOL-1G" required />
+            <input type="text" class="form-control" id="st-sku" placeholder="ex: AMLO-5-CP" required />
           </div>
           <div class="form-group">
             <label class="form-label">Désignation Produit *</label>
-            <input type="text" class="form-control" id="st-name" placeholder="ex: Paracétamol 1g" required />
+            <input type="text" class="form-control" id="st-name" placeholder="ex: Amlodipine 5mg" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Spécialité Cible *</label>
+            <select class="form-control" id="st-specialty" required>
+              <option value="GENERAL">💊 Tous / Médecine Générale (Commun)</option>
+              <option value="CARDIO">❤️ Cardiologie & Vasculaire</option>
+              <option value="PED">👶 Pédiatrie & Néonatalogie</option>
+              <option value="GYN-OBS">🤰 Gynécologie-Obstétrique</option>
+              <option value="DERMA">🧴 Dermatologie</option>
+              <option value="OPHTA">👁️ Ophtalmologie</option>
+              <option value="GASTRO">🫁 Gastro-entérologie</option>
+              <option value="ORL">👂 Oto-Rhino-Laryngologie (ORL)</option>
+              <option value="NEURO">🧠 Neurologie & Psychiatrie</option>
+              <option value="TRAUMA-ORTHO">🦴 Traumatologie & Orthopédie</option>
+              <option value="CHIR-GEN">✂️ Chirurgie Générale</option>
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label">Catégorie *</label>
@@ -7580,8 +7724,12 @@ async function renderInventory(container) {
             </select>
           </div>
           <div class="form-group">
+            <label class="form-label">Posologie usuelle / Dosage</label>
+            <input type="text" class="form-control" id="st-dosage" placeholder="ex: 1 cp matin et soir" />
+          </div>
+          <div class="form-group">
             <label class="form-label">${t('unit')} *</label>
-            <input type="text" class="form-control" id="st-unit" placeholder="ex: BOITE, PLAQUETTE, FLACON" required />
+            <input type="text" class="form-control" id="st-unit" placeholder="ex: BOITE, FLACON, TUBE" required />
           </div>
           <div class="form-group">
             <label class="form-label">${t('threshold')} *</label>
@@ -7589,11 +7737,11 @@ async function renderInventory(container) {
           </div>
           <div class="form-group">
             <label class="form-label">${t('purchaseCost')} (XOF) *</label>
-            <input type="number" class="form-control" id="st-cost" placeholder="ex: 500" min="0" step="any" required />
+            <input type="number" class="form-control" id="st-cost" placeholder="ex: 1500" min="0" step="any" required />
           </div>
           <div class="form-group">
             <label class="form-label">${t('sellingPrice')} (XOF) *</label>
-            <input type="number" class="form-control" id="st-selling" placeholder="ex: 1000" min="0" step="any" required />
+            <input type="number" class="form-control" id="st-selling" placeholder="ex: 2500" min="0" step="any" required />
           </div>
           <button class="btn btn-primary" style="width:100%;"><i class="fas fa-save"></i> Enregistrer l'Article</button>
         </form>
@@ -7606,19 +7754,27 @@ async function renderInventory(container) {
             <i class="fas fa-boxes text-primary"></i> ${t('pharmacyStock')}
           </div>
           <!-- Filter Controls -->
-          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <div style="position:relative;">
               <i class="fas fa-search" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted); font-size:0.85rem;"></i>
-              <input type="text" id="stock-search" class="form-control" placeholder="Rechercher par SKU ou nom..." style="padding-left:30px; width:220px; font-size:0.85rem;" oninput="filterInventoryTable()" />
+              <input type="text" id="stock-search" class="form-control" placeholder="Rechercher par SKU ou nom..." style="padding-left:30px; width:190px; font-size:0.85rem;" oninput="filterInventoryTable()" />
             </div>
-            <select id="stock-category-filter" class="form-control" style="width:160px; font-size:0.85rem;" onchange="filterInventoryTable()">
-              <option value="">Toutes catégories</option>
-              <option value="MEDICATION">Médicaments</option>
-              <option value="CONSUMABLE">Matériel Clinique</option>
-              <option value="SURGICAL">Chirurgical</option>
+            <select id="stock-specialty-filter" class="form-control" style="width:160px; font-size:0.85rem;" onchange="filterInventoryTable()">
+              <option value="">Toutes spécialités</option>
+              <option value="GENERAL">💊 Général / Tous</option>
+              <option value="CARDIO">❤️ Cardiologie</option>
+              <option value="PED">👶 Pédiatrie</option>
+              <option value="GYN-OBS">🤰 Gynécologie</option>
+              <option value="DERMA">🧴 Dermatologie</option>
+              <option value="OPHTA">👁️ Ophtalmologie</option>
+              <option value="GASTRO">🫁 Gastro-entérologie</option>
+              <option value="ORL">👂 ORL</option>
+              <option value="NEURO">🧠 Neurologie</option>
+              <option value="TRAUMA-ORTHO">🦴 Traumato-Ortho</option>
+              <option value="CHIR-GEN">✂️ Chirurgie</option>
             </select>
-            <select id="stock-status-filter" class="form-control" style="width:130px; font-size:0.85rem;" onchange="filterInventoryTable()">
-              <option value="ALL">Tous statuts</option>
+            <select id="stock-status-filter" class="form-control" style="width:110px; font-size:0.85rem;" onchange="filterInventoryTable()">
+              <option value="ALL">Tous</option>
               <option value="ACTIVE" selected>Actifs</option>
               <option value="ARCHIVED">Archivés</option>
             </select>
@@ -7630,7 +7786,7 @@ async function renderInventory(container) {
             <thead>
               <tr>
                 <th>SKU</th>
-                <th>Désignation</th>
+                <th>Désignation & Spécialité</th>
                 <th>Catégorie</th>
                 <th>Unité</th>
                 <th>Quantité</th>
@@ -7650,6 +7806,34 @@ async function renderInventory(container) {
   `;
 }
 
+function getSpecialtyBadgeInfo(specCode) {
+  const code = (specCode || 'GENERAL').toUpperCase();
+  switch (code) {
+    case 'CARDIO':
+      return { label: 'Cardiologie', bg: 'rgba(239,68,68,0.12)', color: '#dc2626', icon: 'fa-heartbeat' };
+    case 'PED':
+      return { label: 'Pédiatrie', bg: 'rgba(59,130,246,0.12)', color: '#2563eb', icon: 'fa-baby' };
+    case 'GYN-OBS':
+      return { label: 'Gynécologie', bg: 'rgba(236,72,153,0.12)', color: '#db2777', icon: 'fa-female' };
+    case 'DERMA':
+      return { label: 'Dermatologie', bg: 'rgba(139,92,246,0.12)', color: '#7c3aed', icon: 'fa-hand-sparkles' };
+    case 'OPHTA':
+      return { label: 'Ophtalmologie', bg: 'rgba(6,182,212,0.12)', color: '#0891b2', icon: 'fa-eye' };
+    case 'GASTRO':
+      return { label: 'Gastro-entéro', bg: 'rgba(245,158,11,0.12)', color: '#d97706', icon: 'fa-utensils' };
+    case 'ORL':
+      return { label: 'ORL', bg: 'rgba(20,184,166,0.12)', color: '#0d9488', icon: 'fa-head-side-cough' };
+    case 'NEURO':
+      return { label: 'Neurologie', bg: 'rgba(99,102,241,0.12)', color: '#4f46e5', icon: 'fa-brain' };
+    case 'TRAUMA-ORTHO':
+      return { label: 'Traumato-Ortho', bg: 'rgba(234,88,12,0.12)', color: '#c2410c', icon: 'fa-bone' };
+    case 'CHIR-GEN':
+      return { label: 'Chirurgie', bg: 'rgba(220,38,38,0.12)', color: '#b91c1c', icon: 'fa-scalpel' };
+    default:
+      return { label: 'Tous / Général', bg: 'rgba(16,185,129,0.12)', color: '#059669', icon: 'fa-pills' };
+  }
+}
+
 function renderInventoryRows(items) {
   if (!items || items.length === 0) {
     return `<tr><td colspan="9" style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fas fa-box-open" style="font-size:2rem; margin-bottom:10px; display:block;"></i> Aucun article trouvé dans l'inventaire</td></tr>`;
@@ -7660,13 +7844,19 @@ function renderInventoryRows(items) {
     const isActive = item.is_active !== false;
     const catLabel = item.category === 'MEDICATION' ? 'Médicament' : (item.category === 'CONSUMABLE' ? 'Matériel' : (item.category === 'SURGICAL' ? 'Chirurgical' : item.category));
     const safeName = (item.name || '').replace(/'/g, "\\'");
+    const specInfo = getSpecialtyBadgeInfo(item.target_specialty);
 
     return `
-      <tr data-sku="${(item.sku || '').toLowerCase()}" data-name="${(item.name || '').toLowerCase()}" data-category="${item.category || ''}" data-active="${isActive ? 'ACTIVE' : 'ARCHIVED'}" style="${!isActive ? 'opacity:0.65; background:rgba(0,0,0,0.02);' : ''}">
+      <tr data-sku="${(item.sku || '').toLowerCase()}" data-name="${(item.name || '').toLowerCase()}" data-category="${item.category || ''}" data-specialty="${(item.target_specialty || 'GENERAL').toUpperCase()}" data-active="${isActive ? 'ACTIVE' : 'ARCHIVED'}" style="${!isActive ? 'opacity:0.65; background:rgba(0,0,0,0.02);' : ''}">
         <td><strong>${item.sku}</strong></td>
         <td>
           <div style="font-weight:600; color:var(--text-main);">${item.name}</div>
-          ${!isActive ? '<span style="font-size:0.7rem; color:var(--text-muted);"><i class="fas fa-archive"></i> Archivé</span>' : ''}
+          <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
+            <span class="badge" style="font-size:0.7rem; padding:2px 7px; border-radius:10px; background:${specInfo.bg}; color:${specInfo.color}; font-weight:700;">
+              <i class="fas ${specInfo.icon}"></i> ${specInfo.label}
+            </span>
+            ${item.default_dosage ? `<span style="font-size:0.7rem; color:var(--text-muted);"><i class="fas fa-prescription-bottle-alt"></i> ${item.default_dosage}</span>` : ''}
+          </div>
         </td>
         <td><span class="badge" style="font-size:0.75rem; background:rgba(37,99,235,0.08); color:var(--primary); padding:3px 8px; border-radius:4px;">${catLabel}</span></td>
         <td>${item.unit}</td>
@@ -7707,6 +7897,7 @@ function renderInventoryRows(items) {
 function filterInventoryTable() {
   const search = (document.getElementById('stock-search')?.value || '').toLowerCase().trim();
   const cat = document.getElementById('stock-category-filter')?.value || '';
+  const spec = document.getElementById('stock-specialty-filter')?.value || '';
   const status = document.getElementById('stock-status-filter')?.value || 'ALL';
 
   const rows = document.querySelectorAll('#inventory-table-body tr');
@@ -7714,9 +7905,10 @@ function filterInventoryTable() {
     if (!r.dataset.sku) return;
     const matchSearch = !search || r.dataset.sku.includes(search) || r.dataset.name.includes(search);
     const matchCat = !cat || r.dataset.category === cat;
+    const matchSpec = !spec || r.dataset.specialty === spec;
     const matchStatus = status === 'ALL' || r.dataset.active === status;
 
-    if (matchSearch && matchCat && matchStatus) {
+    if (matchSearch && matchCat && matchSpec && matchStatus) {
       r.style.display = '';
     } else {
       r.style.display = 'none';
@@ -7729,6 +7921,8 @@ async function createStockItem(e) {
   const sku = document.getElementById('st-sku').value;
   const name = document.getElementById('st-name').value;
   const category = document.getElementById('st-category').value;
+  const target_specialty = document.getElementById('st-specialty').value;
+  const default_dosage = document.getElementById('st-dosage').value;
   const unit = document.getElementById('st-unit').value;
   const minimum_threshold_alert = document.getElementById('st-threshold').value;
   const unit_cost_price = document.getElementById('st-cost').value;
@@ -7738,7 +7932,7 @@ async function createStockItem(e) {
     await api.request('/inventory/items', {
       method: 'POST',
       body: JSON.stringify({
-        sku, name, category, unit, minimum_threshold_alert, unit_cost_price, selling_price
+        sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price
       })
     });
     showToast('Article inventorié créé avec succès!');
@@ -7760,6 +7954,8 @@ function openEditStockModal(id) {
   document.getElementById('edit-st-sku').value = item.sku || '';
   document.getElementById('edit-st-name').value = item.name || '';
   document.getElementById('edit-st-category').value = item.category || 'MEDICATION';
+  document.getElementById('edit-st-specialty').value = (item.target_specialty || 'GENERAL').toUpperCase();
+  document.getElementById('edit-st-dosage').value = item.default_dosage || '';
   document.getElementById('edit-st-unit').value = item.unit || '';
   document.getElementById('edit-st-threshold').value = item.minimum_threshold_alert !== undefined ? item.minimum_threshold_alert : 10;
   document.getElementById('edit-st-cost').value = item.unit_cost_price !== undefined ? item.unit_cost_price : '';
@@ -7793,6 +7989,8 @@ async function submitEditStock(e) {
   const sku = document.getElementById('edit-st-sku').value;
   const name = document.getElementById('edit-st-name').value;
   const category = document.getElementById('edit-st-category').value;
+  const target_specialty = document.getElementById('edit-st-specialty').value;
+  const default_dosage = document.getElementById('edit-st-dosage').value;
   const unit = document.getElementById('edit-st-unit').value;
   const minimum_threshold_alert = document.getElementById('edit-st-threshold').value;
   const unit_cost_price = document.getElementById('edit-st-cost').value;
@@ -7806,6 +8004,8 @@ async function submitEditStock(e) {
         sku,
         name,
         category,
+        target_specialty,
+        default_dosage,
         unit,
         minimum_threshold_alert,
         unit_cost_price,
@@ -10576,14 +10776,31 @@ function renderAppLayout() {
 
         <form onsubmit="submitConsultation(event)">
           <input type="hidden" id="dpi-consult-id" value="" />
+
+          <!-- Doctor Prescriber & Active Specialty Selector -->
+          <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:15px; margin-bottom:15px; background:var(--bg-light); padding:12px; border-radius:8px; border:1px solid var(--border-color);">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;"><i class="fas fa-user-md text-primary"></i> Médecin / Praticien Prescripteur *</label>
+              <select class="form-control" id="dpi-practitioner-select" onchange="onConsultationPractitionerChange()" required>
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" style="font-weight:700;"><i class="fas fa-stethoscope text-primary"></i> Spécialité Active</label>
+              <div id="dpi-practitioner-spec-badge" style="padding:7px 10px; background:rgba(37,99,235,0.08); border:1px solid rgba(37,99,235,0.2); border-radius:6px; font-weight:700; color:var(--primary); font-size:0.85rem; display:flex; align-items:center; gap:6px;">
+                <i class="fas fa-award"></i> <span id="dpi-active-spec-name">Médecine Générale</span>
+              </div>
+            </div>
+          </div>
+
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
             <div class="form-group">
               <label class="form-label">${t('reason')} *</label>
-              <input type="text" class="form-control" id="dpi-reason" required placeholder="ex: Céphalées fébriles" />
+              <input type="text" class="form-control" id="dpi-reason" required placeholder="ex: Céphalées fébriles, Bilan HTA..." />
             </div>
             <div class="form-group">
               <label class="form-label">${t('diagnosis')} *</label>
-              <input type="text" class="form-control" id="dpi-diagnosis" required placeholder="ex: Accès palustre simple" />
+              <input type="text" class="form-control" id="dpi-diagnosis" required placeholder="ex: Accès palustre simple, HTA Grade II..." />
             </div>
           </div>
           <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; margin-bottom:15px;">
@@ -10602,25 +10819,41 @@ function renderAppLayout() {
           </div>
           <div class="form-group">
             <label class="form-label">${t('icd10')} (Codes CIM-10)</label>
-            <input type="text" class="form-control" id="dpi-icd10" placeholder="B54, R50.9, R51" />
+            <input type="text" class="form-control" id="dpi-icd10" placeholder="I10, B54, R50.9, R51" />
           </div>
           <div class="form-group">
             <label class="form-label">${t('confidentialNotes')}</label>
             <textarea class="form-control" id="dpi-confidential" rows="2" placeholder="Saisie confidentielle médicale..."></textarea>
           </div>
           
-          <div class="card" style="margin-top:15px; padding:15px; border-color:var(--primary);">
-            <h5 style="margin-bottom:10px; color:#fff;"><i class="fas fa-file-prescription"></i> ${t('prescribe')} (Ordonnance Sécurisée)</h5>
-            <div style="display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:10px; margin-bottom:10px;">
-              <input type="text" class="form-control" id="rx-drug" placeholder="Médicament (ex: Coartem 80/480mg)" />
-              <input type="text" class="form-control" id="rx-dosage" placeholder="Dosage (ex: 1 cp)" />
-              <input type="text" class="form-control" id="rx-frequency" placeholder="2 fois/jour" />
-              <input type="number" class="form-control" id="rx-duration" value="3" placeholder="Durée (jours)" />
+          <div class="card" style="margin-top:15px; padding:15px; border:1px solid var(--border-color); background:var(--bg-surface);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+              <h5 style="margin:0; color:var(--text-primary); font-weight:700; display:flex; align-items:center; gap:8px;">
+                <i class="fas fa-file-prescription text-primary"></i> ${t('prescribe')} (Ordonnance Sécurisée)
+              </h5>
+              <span id="rx-specialty-filter-notice" style="font-size:0.75rem; font-weight:600; padding:4px 9px; border-radius:12px; background:rgba(16,185,129,0.12); color:var(--success);">
+                <i class="fas fa-filter"></i> Filtré : Spécialité + Médicaments généraux
+              </span>
             </div>
-            <div style="display:flex; gap:10px; margin-bottom:15px;">
-              <input type="text" class="form-control" id="rx-instructions" placeholder="Instructions (ex: Au cours d'un repas gras)" style="flex:1;" />
-              <button class="btn btn-secondary" type="button" onclick="addPrescriptionItem()">${t('addItem')}</button>
+            
+            <div style="display:grid; grid-template-columns:2.5fr 1.2fr 1fr 0.8fr; gap:10px; margin-bottom:10px;">
+              <div>
+                <input type="text" class="form-control" id="rx-drug" list="rx-medications-datalist" placeholder="Médicament (tapez ou choisissez...)" oninput="onRxDrugInput(this.value)" autocomplete="off" />
+                <datalist id="rx-medications-datalist"></datalist>
+              </div>
+              <input type="text" class="form-control" id="rx-dosage" placeholder="Posologie / Dosage" />
+              <input type="text" class="form-control" id="rx-frequency" placeholder="Fréquence (ex: 2x/j)" />
+              <input type="number" class="form-control" id="rx-duration" value="5" min="1" placeholder="Jours" />
             </div>
+            
+            <div style="display:flex; gap:10px; margin-bottom:10px;">
+              <input type="text" class="form-control" id="rx-instructions" placeholder="Instructions particulières (ex: Au cours du repas, le matin à jeun...)" style="flex:1;" />
+              <button class="btn btn-secondary" type="button" onclick="addPrescriptionItem()"><i class="fas fa-plus"></i> ${t('addItem')}</button>
+            </div>
+
+            <!-- Quick medication suggestion pills -->
+            <div id="rx-quick-pills-container" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;"></div>
+
             <div id="rx-items-list"></div>
             <div class="form-group" style="margin-top:15px; margin-bottom:0;">
               <label class="form-label">${t('validity')}</label>
@@ -11022,6 +11255,28 @@ function renderAppLayout() {
                 <option value="CONSUMABLE">Matériel Clinique (CONSUMABLE)</option>
                 <option value="SURGICAL">Chirurgical (SURGICAL)</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Spécialité Cible *</label>
+              <select class="form-control" id="edit-st-specialty" required>
+                <option value="GENERAL">💊 Tous / Médecine Générale (Commun)</option>
+                <option value="CARDIO">❤️ Cardiologie & Vasculaire</option>
+                <option value="PED">👶 Pédiatrie & Néonatalogie</option>
+                <option value="GYN-OBS">🤰 Gynécologie-Obstétrique</option>
+                <option value="DERMA">🧴 Dermatologie</option>
+                <option value="OPHTA">👁️ Ophtalmologie</option>
+                <option value="GASTRO">🫁 Gastro-entérologie</option>
+                <option value="ORL">👂 Oto-Rhino-Laryngologie (ORL)</option>
+                <option value="NEURO">🧠 Neurologie & Psychiatrie</option>
+                <option value="TRAUMA-ORTHO">🦴 Traumatologie & Orthopédie</option>
+                <option value="CHIR-GEN">✂️ Chirurgie Générale</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px;">
+            <div class="form-group">
+              <label class="form-label">Posologie usuelle / Dosage</label>
+              <input type="text" class="form-control" id="edit-st-dosage" placeholder="ex: 1 cp matin et soir" />
             </div>
             <div class="form-group">
               <label class="form-label">Unité *</label>

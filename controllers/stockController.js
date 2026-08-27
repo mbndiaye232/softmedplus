@@ -3,25 +3,27 @@ const crypto = require('crypto');
 
 // 1. Create Stock Item (medication or consumable template)
 const createStockItem = async (req, res) => {
-  const { sku, name, category, unit, minimum_threshold_alert, unit_cost_price, selling_price } = req.body;
+  const { sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price } = req.body;
 
   if (!sku || !name || !category || !unit || !unit_cost_price || !selling_price) {
-    return res.status(400).json({ error: 'Required fields missing: sku, name, category, unit, unit_cost_price, selling_price' });
+    return res.status(400).json({ error: 'Champs requis manquants : sku, name, category, unit, unit_cost_price, selling_price' });
   }
 
   const tenantId = req.user.tenant_id;
 
   try {
     const result = await req.dbClient.query(
-      `INSERT INTO stock_items (tenant_id, sku, name, category, unit, minimum_threshold_alert, unit_cost_price, selling_price, current_stock_quantity)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0)
+      `INSERT INTO stock_items (tenant_id, sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price, current_stock_quantity)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0)
        RETURNING *`,
       [
         tenantId,
         sku.toUpperCase().trim(),
-        name,
+        name.trim(),
         category,
-        unit,
+        (target_specialty || 'GENERAL').toUpperCase().trim(),
+        default_dosage ? default_dosage.trim() : null,
+        unit.trim(),
         parseInt(minimum_threshold_alert || 10),
         parseFloat(unit_cost_price),
         parseFloat(selling_price)
@@ -31,8 +33,8 @@ const createStockItem = async (req, res) => {
     return res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Create stock item error:', err.message);
-    if (err.message.includes('unique_tenant_sku')) {
-      return res.status(409).json({ error: 'An item with this SKU is already registered in your inventory' });
+    if (err.message && err.message.includes('unique_tenant_sku')) {
+      return res.status(409).json({ error: 'Un article avec ce SKU existe déjà dans votre inventaire' });
     }
     return res.status(500).json({ error: 'Failed to create stock item' });
   }
@@ -203,14 +205,33 @@ const depleteStock = async (req, res) => {
   }
 };
 
-// 4. Get Stock items list
+// 4. Get Stock items list (optionally filtered by practitioner specialty: returns specialty specific items + general medications)
 const getStockItems = async (req, res) => {
   const tenantId = req.user.tenant_id;
+  const { specialty, category } = req.query;
+
   try {
-    const result = await req.dbClient.query(
-      `SELECT * FROM stock_items WHERE tenant_id = $1 ORDER BY is_active DESC, name ASC`,
-      [tenantId]
-    );
+    let result;
+    if (specialty && specialty.trim()) {
+      const spec = specialty.toUpperCase().trim();
+      result = await req.dbClient.query(
+        `SELECT * FROM stock_items 
+         WHERE tenant_id = $1 AND is_active = true 
+           AND (
+             UPPER(COALESCE(target_specialty, 'GENERAL')) = $2 
+             OR UPPER(COALESCE(target_specialty, 'GENERAL')) IN ('GENERAL', 'MED-GEN', 'TOUS')
+             OR target_specialty IS NULL 
+             OR target_specialty = ''
+           )
+         ORDER BY (UPPER(COALESCE(target_specialty, 'GENERAL')) = $2) DESC, name ASC`,
+        [tenantId, spec]
+      );
+    } else {
+      result = await req.dbClient.query(
+        `SELECT * FROM stock_items WHERE tenant_id = $1 ORDER BY is_active DESC, name ASC`,
+        [tenantId]
+      );
+    }
     return res.status(200).json(result.rows);
   } catch (err) {
     console.error('Get stock items error:', err.message);
@@ -221,7 +242,7 @@ const getStockItems = async (req, res) => {
 // 5. Update Stock Item
 const updateStockItem = async (req, res) => {
   const { id } = req.params;
-  const { sku, name, category, unit, minimum_threshold_alert, unit_cost_price, selling_price, is_active } = req.body;
+  const { sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price, is_active } = req.body;
 
   if (!sku || !name || !category || !unit || unit_cost_price === undefined || selling_price === undefined) {
     return res.status(400).json({ error: 'Champs requis manquants : sku, name, category, unit, unit_cost_price, selling_price' });
@@ -230,6 +251,9 @@ const updateStockItem = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const cleanSku = sku.toUpperCase().trim();
   const cleanName = name.trim();
+  const cleanCategory = category.trim();
+  const cleanSpec = (target_specialty || 'GENERAL').toUpperCase().trim();
+  const cleanDosage = default_dosage ? default_dosage.trim() : null;
   const cleanUnit = unit.trim();
   const thresholdInt = parseInt(minimum_threshold_alert !== undefined ? minimum_threshold_alert : 10);
   const costPrice = parseFloat(unit_cost_price);
@@ -262,17 +286,21 @@ const updateStockItem = async (req, res) => {
        SET sku = $1,
            name = $2,
            category = $3,
-           unit = $4,
-           minimum_threshold_alert = $5,
-           unit_cost_price = $6,
-           selling_price = $7,
-           is_active = $8
-       WHERE id = $9 AND tenant_id = $10
+           target_specialty = $4,
+           default_dosage = $5,
+           unit = $6,
+           minimum_threshold_alert = $7,
+           unit_cost_price = $8,
+           selling_price = $9,
+           is_active = $10
+       WHERE id = $11 AND tenant_id = $12
        RETURNING *`,
       [
         cleanSku,
         cleanName,
-        category,
+        cleanCategory,
+        cleanSpec,
+        cleanDosage,
         cleanUnit,
         thresholdInt,
         costPrice,
