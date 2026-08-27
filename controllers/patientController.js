@@ -4,6 +4,68 @@ const pool = require('../config/db');
 
 const HMAC_SECRET = process.env.HMAC_SECRET || 'clinicos-hmac-prescription-security-key-2026';
 
+// Helper to automatically register any prescribed medication into stock_items if not already present
+const autoRegisterPrescriptionMedications = async (dbClient, tenantId, practitionerId, items) => {
+  if (!items || !Array.isArray(items) || items.length === 0 || !tenantId) return;
+
+  try {
+    // 1. Determine practitioner specialty code
+    let targetSpec = 'GENERAL';
+    if (practitionerId) {
+      const pracSpecRes = await dbClient.query(
+        `SELECT ps.code, pr.specialty_name 
+         FROM practitioners pr
+         LEFT JOIN practitioner_specialties ps ON ps.practitioner_id = pr.id
+         WHERE pr.id = $1 LIMIT 1`,
+        [practitionerId]
+      );
+      if (pracSpecRes.rowCount > 0 && pracSpecRes.rows[0].code) {
+        targetSpec = pracSpecRes.rows[0].code;
+      }
+    }
+
+    for (const item of items) {
+      const drugName = (item.drug_name || '').trim();
+      if (!drugName) continue;
+
+      // Check if item exists in stock_items for this tenant
+      const existing = await dbClient.query(
+        `SELECT id, default_dosage FROM stock_items WHERE tenant_id = $1 AND LOWER(TRIM(name)) = LOWER($2)`,
+        [tenantId, drugName]
+      );
+
+      if (existing.rowCount === 0) {
+        // Generate a clean SKU
+        const baseSku = drugName
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-zA-Z0-9]/g, "-")
+          .toUpperCase()
+          .replace(/-+/g, "-")
+          .substring(0, 20);
+        const randomSuffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+        const sku = `${baseSku || 'MED'}-${randomSuffix}`;
+
+        const defaultDosage = (item.dosage || '').trim() || null;
+
+        await dbClient.query(
+          `INSERT INTO stock_items (tenant_id, sku, name, category, target_specialty, default_dosage, unit, minimum_threshold_alert, unit_cost_price, selling_price, current_stock_quantity, is_active)
+           VALUES ($1, $2, $3, 'MEDICATION', $4, $5, 'BOITE', 10, 1000, 2000, 0, true)
+           ON CONFLICT DO NOTHING`,
+          [tenantId, sku, drugName, targetSpec, defaultDosage]
+        );
+      } else if (!existing.rows[0].default_dosage && item.dosage) {
+        // Enrich default dosage if it was empty
+        await dbClient.query(
+          `UPDATE stock_items SET default_dosage = $1 WHERE id = $2`,
+          [item.dosage.trim(), existing.rows[0].id]
+        );
+      }
+    }
+  } catch (err) {
+    console.error('Error auto-registering prescribed medication in stock:', err.message);
+  }
+};
+
 // Helper to generate a patient code: SM-4Digits (e.g., SM-4821)
 const generatePatientCode = async (dbClient, tenantId) => {
   if (dbClient && tenantId) {
@@ -488,6 +550,9 @@ const createConsultation = async (req, res) => {
         );
         createdPrescription.items.push(itemRes.rows[0]);
       }
+
+      // Automatically register any newly prescribed medication into stock_items
+      await autoRegisterPrescriptionMedications(req.dbClient, tenantId, practitioner_id, prescription.items);
     }
 
     await logAudit(req, 'CREATE_CONSULTATION', 'consultation_notes', consultation.id);
@@ -673,6 +738,9 @@ const updateConsultation = async (req, res) => {
           updatedPrescription.items.push(itemRes.rows[0]);
         }
       }
+
+      // Automatically register any newly prescribed medication into stock_items
+      await autoRegisterPrescriptionMedications(req.dbClient, req.user.tenant_id, updatedConsultation.practitioner_id, prescription.items);
     }
 
     await logAudit(req, 'UPDATE_CONSULTATION', 'consultation_notes', id);

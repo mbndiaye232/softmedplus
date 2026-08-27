@@ -1,4 +1,5 @@
 const { logAudit } = require('../middleware/audit');
+const { seedTenantMedications } = require('../db/seed_senegal_medications');
 
 // Helper to check if user is the SaaS Super Administrator
 const isSaasAdmin = (user) => {
@@ -182,6 +183,13 @@ const createTenant = async (req, res) => {
           isSaasSuper ? 'SUPER_ADMIN_SAAS' : 'ADMIN'
         ]
       );
+    }
+
+    // Automatically seed official Senegalese medications inventory for the new clinic
+    try {
+      await seedTenantMedications(req.dbClient, tenantId, name);
+    } catch (seedErr) {
+      console.warn('Could not auto-seed medications for new tenant:', seedErr.message);
     }
 
     await logAudit(req, 'CREATE_TENANT', 'tenants', tenantId);

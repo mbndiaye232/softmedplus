@@ -10854,6 +10854,10 @@ function renderAppLayout() {
             <!-- Quick medication suggestion pills -->
             <div id="rx-quick-pills-container" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;"></div>
 
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <i class="fas fa-magic text-primary"></i> <span>Tout médicament nouveau saisi ici est automatiquement enregistré et ajouté au catalogue de la clinique.</span>
+            </div>
+
             <div id="rx-items-list"></div>
             <div class="form-group" style="margin-top:15px; margin-bottom:0;">
               <label class="form-label">${t('validity')}</label>

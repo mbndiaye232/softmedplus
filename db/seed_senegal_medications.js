@@ -932,6 +932,94 @@ const SENEGAL_MEDICATIONS = [
   }
 ];
 
+async function seedTenantMedications(client, tenantId, tenantName = '') {
+  let insertedCount = 0;
+  let updatedCount = 0;
+
+  for (const med of SENEGAL_MEDICATIONS) {
+    // Check if item already exists by SKU or by Name in this tenant
+    const existing = await client.query(
+      `SELECT id, current_stock_quantity FROM stock_items WHERE tenant_id = $1 AND (sku = $2 OR LOWER(TRIM(name)) = LOWER($3))`,
+      [tenantId, med.sku, med.name]
+    );
+
+    let stockItemId;
+
+    if (existing.rowCount === 0) {
+      // Insert new stock item with initial quantity
+      const insertRes = await client.query(
+        `INSERT INTO stock_items (
+          tenant_id, sku, name, category, target_specialty, default_dosage,
+          unit, minimum_threshold_alert, unit_cost_price, selling_price,
+          current_stock_quantity, is_active
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+        RETURNING id`,
+        [
+          tenantId,
+          med.sku,
+          med.name,
+          med.category,
+          med.target_specialty,
+          med.default_dosage,
+          med.unit,
+          med.minimum_threshold_alert,
+          med.unit_cost_price,
+          med.selling_price,
+          med.quantity
+        ]
+      );
+      stockItemId = insertRes.rows[0].id;
+      insertedCount++;
+
+      // Create an active lot for this stock item
+      const lotNumber = `LOT-SN-${new Date().getFullYear()}-${med.sku.substring(0, 5)}`;
+      const expiryDate = new Date();
+      expiryDate.setFullYear(expiryDate.getFullYear() + 2); // Expiration in 2 years
+
+      await client.query(
+        `INSERT INTO stock_lots (tenant_id, stock_item_id, lot_number, expiration_date, quantity_remaining)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [tenantId, stockItemId, lotNumber, expiryDate.toISOString().split('T')[0], med.quantity]
+      );
+    } else {
+      // Update existing item details (price, target_specialty, default_dosage)
+      stockItemId = existing.rows[0].id;
+      await client.query(
+        `UPDATE stock_items 
+         SET name = $1,
+             category = $2,
+             target_specialty = $3,
+             default_dosage = $4,
+             unit = $5,
+             minimum_threshold_alert = $6,
+             unit_cost_price = $7,
+             selling_price = $8,
+             is_active = true
+         WHERE id = $9 AND tenant_id = $10`,
+        [
+          med.name,
+          med.category,
+          med.target_specialty,
+          med.default_dosage,
+          med.unit,
+          med.minimum_threshold_alert,
+          med.unit_cost_price,
+          med.selling_price,
+          stockItemId,
+          tenantId
+        ]
+      );
+      updatedCount++;
+    }
+  }
+
+  if (tenantName) {
+    console.log(`  [+] Résultat pour ${tenantName} : ${insertedCount} créés, ${updatedCount} mis à jour.`);
+  }
+
+  return { insertedCount, updatedCount };
+}
+
 async function seedSenegalMedications() {
   console.log('================================================================');
   console.log('   SOFTMED - SEEDING MÉDICAMENTS DU MARCHÉ SÉNÉGALAIS           ');
@@ -957,88 +1045,7 @@ async function seedSenegalMedications() {
 
     for (const tenant of tenantsRes.rows) {
       console.log(`\n==> Remplissage du stock pour : "${tenant.name}" (${tenant.slug})`);
-
-      let insertedCount = 0;
-      let updatedCount = 0;
-
-      for (const med of SENEGAL_MEDICATIONS) {
-        // Check if item already exists by SKU in this tenant
-        const existing = await client.query(
-          `SELECT id, current_stock_quantity FROM stock_items WHERE tenant_id = $1 AND sku = $2`,
-          [tenant.id, med.sku]
-        );
-
-        let stockItemId;
-
-        if (existing.rowCount === 0) {
-          // Insert new stock item with initial quantity
-          const insertRes = await client.query(
-            `INSERT INTO stock_items (
-              tenant_id, sku, name, category, target_specialty, default_dosage,
-              unit, minimum_threshold_alert, unit_cost_price, selling_price,
-              current_stock_quantity, is_active
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
-            RETURNING id`,
-            [
-              tenant.id,
-              med.sku,
-              med.name,
-              med.category,
-              med.target_specialty,
-              med.default_dosage,
-              med.unit,
-              med.minimum_threshold_alert,
-              med.unit_cost_price,
-              med.selling_price,
-              med.quantity
-            ]
-          );
-          stockItemId = insertRes.rows[0].id;
-          insertedCount++;
-
-          // Create an active lot for this stock item
-          const lotNumber = `LOT-SN-${new Date().getFullYear()}-${med.sku.substring(0, 5)}`;
-          const expiryDate = new Date();
-          expiryDate.setFullYear(expiryDate.getFullYear() + 2); // Expiration in 2 years
-
-          await client.query(
-            `INSERT INTO stock_lots (tenant_id, stock_item_id, lot_number, expiration_date, quantity_remaining)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [tenant.id, stockItemId, lotNumber, expiryDate.toISOString().split('T')[0], med.quantity]
-          );
-        } else {
-          // Update existing item details (price, target_specialty, default_dosage)
-          stockItemId = existing.rows[0].id;
-          await client.query(
-            `UPDATE stock_items 
-             SET name = $1,
-                 category = $2,
-                 target_specialty = $3,
-                 default_dosage = $4,
-                 unit = $5,
-                 minimum_threshold_alert = $6,
-                 unit_cost_price = $7,
-                 selling_price = $8,
-                 is_active = true
-             WHERE id = $9 AND tenant_id = $10`,
-            [
-              med.name,
-              med.category,
-              med.target_specialty,
-              med.default_dosage,
-              med.unit,
-              med.minimum_threshold_alert,
-              med.unit_cost_price,
-              med.selling_price,
-              stockItemId,
-              tenant.id
-            ]
-          );
-          updatedCount++;
-        }
-      }
-
-      console.log(`  [+] Résultat pour ${tenant.name} : ${insertedCount} créés, ${updatedCount} mis à jour.`);
+      await seedTenantMedications(client, tenant.id, tenant.name);
     }
 
     console.log('\n================================================================');
@@ -1056,4 +1063,5 @@ if (require.main === module) {
   seedSenegalMedications();
 }
 
-module.exports = { seedSenegalMedications, SENEGAL_MEDICATIONS };
+module.exports = { seedSenegalMedications, seedTenantMedications, SENEGAL_MEDICATIONS };
+
