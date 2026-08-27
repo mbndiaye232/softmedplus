@@ -774,24 +774,28 @@ const deleteConsultation = async (req, res) => {
   }
 };
 
-// 7. Get Full Prescription Details for Print / Inspection
+// 7. Get Complete Prescription Details for Printing / View
 const getPrescriptionDetails = async (req, res) => {
   const { id } = req.params;
+  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+
   try {
     const prescrRes = await req.dbClient.query(
       `SELECT rx.*, 
               p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code, p.date_of_birth, p.gender, p.blood_group, p.phone_number AS patient_phone,
               pr.first_name AS doc_first, pr.last_name AS doc_last, pr.title AS doc_title, pr.grade AS doc_grade, pr.license_number, pr.specialty_name AS doc_specialty,
               cn.reason_for_visit, cn.diagnosis_text, cn.icd10_diagnosis_codes,
-              t.name AS clinic_name, t.address AS clinic_address, t.phone_number AS clinic_phone, t.email AS clinic_email, t.ninea_rc, t.logo_url AS clinic_logo, t.stamp_url AS clinic_stamp,
+              COALESCE(t.name, 'Clinique Médicale') AS clinic_name, 
+              t.address AS clinic_address, t.phone_number AS clinic_phone, t.email AS clinic_email, t.ninea_rc, t.logo_url AS clinic_logo, t.stamp_url AS clinic_stamp,
               COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json) AS items
        FROM prescriptions rx
-       JOIN patients p ON rx.patient_id = p.id
+       LEFT JOIN patients p ON rx.patient_id = p.id
        LEFT JOIN practitioners pr ON rx.practitioner_id = pr.id
        LEFT JOIN consultation_notes cn ON rx.consultation_id = cn.id
-       JOIN tenants t ON rx.tenant_id = t.id
-       WHERE rx.id = $1`,
-      [id]
+       LEFT JOIN tenants t ON COALESCE(rx.tenant_id, $2) = t.id
+       WHERE rx.id = $1 OR rx.prescription_code = $1 OR rx.consultation_id = $1
+       ORDER BY rx.issued_at DESC LIMIT 1`,
+      [id, tenantId]
     );
 
     if (prescrRes.rowCount === 0) {
