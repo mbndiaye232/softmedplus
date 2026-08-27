@@ -299,6 +299,7 @@ async function runAutoMigrations() {
       ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS default_dosage VARCHAR(255);
       ALTER TABLE stock_items ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
       ALTER TABLE prescriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE medical_specialties ADD COLUMN IF NOT EXISTS default_duration_minutes INT NOT NULL DEFAULT 15;
     `);
     console.log('Database schema verified / auto-migrated.');
   } catch (err) {

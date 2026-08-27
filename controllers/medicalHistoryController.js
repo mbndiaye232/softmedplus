@@ -94,8 +94,8 @@ const getPatientDossier = async (req, res) => {
        LEFT JOIN practitioners doc ON p.attending_practitioner_id = doc.id
        LEFT JOIN patient_insurance_policies pip ON p.id = pip.patient_id AND pip.is_primary = true
        LEFT JOIN insurance_companies ic ON pip.insurance_company_id = ic.id
-       WHERE p.id = $1`,
-      [patientId]
+       WHERE p.id = $1 AND p.tenant_id = $2`,
+      [patientId, tenantId]
     );
 
     if (patientRes.rowCount === 0) {

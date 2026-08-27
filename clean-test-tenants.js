@@ -33,6 +33,9 @@ async function cleanTestTenants() {
       await client.query('DELETE FROM medical_services WHERE tenant_id = $1', [t.id]);
       await client.query('DELETE FROM practitioners WHERE tenant_id = $1', [t.id]);
       await client.query('DELETE FROM tenant_payment_methods WHERE tenant_id = $1', [t.id]);
+      // Les sessions de caisse référencent le caissier : à purger avant les utilisateurs
+      await client.query('DELETE FROM cash_sessions WHERE tenant_id = $1', [t.id]);
+      await client.query('DELETE FROM cash_registers WHERE tenant_id = $1', [t.id]);
       await client.query('DELETE FROM users WHERE tenant_id = $1', [t.id]);
       await client.query('DELETE FROM tenants WHERE id = $1', [t.id]);
     }

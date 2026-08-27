@@ -2,6 +2,24 @@ const { logAudit } = require('../middleware/audit');
 const crypto = require('crypto');
 const pool = require('../config/db');
 
+// Coordonnées de paiement affichées au patient : ce sont les seules données de
+// `credentials` autorisées à sortir du serveur. Tout le reste (clés et secrets API)
+// ne doit jamais être renvoyé par l'API, même à un utilisateur authentifié du tenant.
+const PUBLIC_CREDENTIAL_FIELDS = ['phone_number', 'account_number'];
+
+const maskPaymentMethod = (method) => {
+  if (!method) return method;
+  const creds = method.credentials || {};
+  const publicCreds = {};
+  for (const field of PUBLIC_CREDENTIAL_FIELDS) {
+    if (creds[field]) publicCreds[field] = creds[field];
+  }
+  const hasSecretCredentials = Object.keys(creds).some(
+    (k) => !PUBLIC_CREDENTIAL_FIELDS.includes(k) && creds[k]
+  );
+  return { ...method, credentials: publicCreds, has_secret_credentials: hasSecretCredentials };
+};
+
 // Helper to record a payment and update the invoice balances/status
 const processPaymentReconciliation = async (dbClient, req, paymentData) => {
   const {
@@ -139,10 +157,12 @@ const configurePaymentMethod = async (req, res) => {
 
   try {
     if (id) {
-      // Update existing method by ID
+      // Update existing method by ID.
+      // Les credentials sont fusionnés (et non remplacés) : l'API ne renvoyant plus les
+      // secrets, une modification depuis l'interface ne doit pas effacer une clé existante.
       const result = await req.dbClient.query(
-        `UPDATE tenant_payment_methods 
-         SET name = $1, credentials = $2, is_active = $3, qr_code_template = $4
+        `UPDATE tenant_payment_methods
+         SET name = $1, credentials = COALESCE(credentials, '{}'::jsonb) || $2::jsonb, is_active = $3, qr_code_template = $4
          WHERE id = $5 AND tenant_id = $6
          RETURNING *`,
         [
@@ -155,14 +175,14 @@ const configurePaymentMethod = async (req, res) => {
         ]
       );
       if (result.rowCount > 0) {
-        return res.status(200).json(result.rows[0]);
+        return res.status(200).json(maskPaymentMethod(result.rows[0]));
       }
     }
 
     // Try to update by provider for backward compatibility/presets
     const resultByProvider = await req.dbClient.query(
-      `UPDATE tenant_payment_methods 
-       SET name = $1, credentials = $2, is_active = $3, qr_code_template = $4
+      `UPDATE tenant_payment_methods
+       SET name = $1, credentials = COALESCE(credentials, '{}'::jsonb) || $2::jsonb, is_active = $3, qr_code_template = $4
        WHERE tenant_id = $5 AND provider = $6
        RETURNING *`,
       [
@@ -176,7 +196,7 @@ const configurePaymentMethod = async (req, res) => {
     );
 
     if (resultByProvider.rowCount > 0) {
-      return res.status(200).json(resultByProvider.rows[0]);
+      return res.status(200).json(maskPaymentMethod(resultByProvider.rows[0]));
     }
 
     // If it doesn't exist under this tenant at all, create it dynamically
@@ -193,7 +213,7 @@ const configurePaymentMethod = async (req, res) => {
         qr_code_template || null
       ]
     );
-    return res.status(201).json(newMethod.rows[0]);
+    return res.status(201).json(maskPaymentMethod(newMethod.rows[0]));
   } catch (err) {
     console.error('Configure payment method error:', err.message);
     return res.status(500).json({ error: 'Failed to configure payment method' });
@@ -208,7 +228,7 @@ const getPaymentMethods = async (req, res) => {
       `SELECT id, provider, name, credentials, is_active, qr_code_template FROM tenant_payment_methods WHERE tenant_id = $1`,
       [tenantId]
     );
-    return res.status(200).json(result.rows);
+    return res.status(200).json(result.rows.map(maskPaymentMethod));
   } catch (err) {
     console.error('Get payment methods error:', err.message);
     return res.status(500).json({ error: 'Failed to retrieve payment gateways' });

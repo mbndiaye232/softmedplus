@@ -118,6 +118,7 @@ CREATE TABLE medical_specialties (
     name VARCHAR(100) NOT NULL,
     description TEXT,
     color_code VARCHAR(7) DEFAULT '#4a90e2',
+    default_duration_minutes INT NOT NULL DEFAULT 15,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_tenant_specialty_code UNIQUE (tenant_id, code)

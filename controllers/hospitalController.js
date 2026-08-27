@@ -151,6 +151,9 @@ const deleteBuilding = async (req, res) => {
     return res.status(200).json({ message: 'Bâtiment supprimé avec succès' });
   } catch (err) {
     console.error('Delete building error:', err.message);
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Impossible de supprimer ce bâtiment : des séjours d\'hospitalisation passés y sont rattachés et doivent être conservés dans l\'historique des patients.' });
+    }
     return res.status(500).json({ error: 'Échec de suppression du bâtiment' });
   }
 };
@@ -294,6 +297,9 @@ const deleteRoom = async (req, res) => {
     return res.status(200).json({ message: 'Chambre supprimée avec succès' });
   } catch (err) {
     console.error('Delete room error:', err.message);
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Impossible de supprimer cette chambre : des séjours d\'hospitalisation passés y sont rattachés et doivent être conservés dans l\'historique des patients.' });
+    }
     return res.status(500).json({ error: 'Échec de suppression de la chambre' });
   }
 };
@@ -472,6 +478,9 @@ const deleteBed = async (req, res) => {
     return res.status(200).json({ message: 'Lit supprimé avec succès' });
   } catch (err) {
     console.error('Delete bed error:', err.message);
+    if (err.code === '23503') {
+      return res.status(400).json({ error: 'Impossible de supprimer ce lit : des séjours d\'hospitalisation passés y sont rattachés et doivent être conservés dans l\'historique des patients. Désactivez-le plutôt.' });
+    }
     return res.status(500).json({ error: 'Échec de suppression du lit' });
   }
 };
