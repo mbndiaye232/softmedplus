@@ -488,6 +488,13 @@ const createConsultation = async (req, res) => {
   }
 
   let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+
+  // Always use the patient's real tenant_id to guarantee consistency across multi-tenant clinics
+  const patCheck = await req.dbClient.query('SELECT tenant_id, patient_code FROM patients WHERE id = $1', [patient_id]);
+  if (patCheck.rowCount > 0 && patCheck.rows[0].tenant_id) {
+    tenantId = patCheck.rows[0].tenant_id;
+  }
+
   if (!tenantId) {
     const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
     if (t.rows.length > 0) tenantId = t.rows[0].id;
@@ -532,10 +539,9 @@ const createConsultation = async (req, res) => {
       const prescriptionCode = `RX-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
       // Retrieve patient code and practitioner license for HMAC validation
-      const patientRes = await req.dbClient.query(`SELECT patient_code FROM patients WHERE id = $1`, [patient_id]);
       const practitionerRes = await req.dbClient.query(`SELECT license_number FROM practitioners WHERE id = $1`, [activePracId]);
 
-      const patientCode = patientRes.rows[0]?.patient_code || 'SM-0000';
+      const patientCode = patCheck.rows[0]?.patient_code || 'SM-0000';
       const licenseNumber = practitionerRes.rows[0]?.license_number || 'NOLICENSE';
       const validUntil = prescription.valid_until || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
@@ -691,6 +697,11 @@ const updateConsultation = async (req, res) => {
     const existing = await req.dbClient.query(`SELECT * FROM consultation_notes WHERE id = $1`, [id]);
     if (existing.rowCount === 0) {
       return res.status(404).json({ error: 'Consultation note not found' });
+    }
+
+    const patCheck = await req.dbClient.query('SELECT tenant_id FROM patients WHERE id = $1', [existing.rows[0].patient_id]);
+    if (patCheck.rowCount > 0 && patCheck.rows[0].tenant_id) {
+      tenantId = patCheck.rows[0].tenant_id;
     }
 
     let activePracId = practitioner_id || existing.rows[0].practitioner_id;
