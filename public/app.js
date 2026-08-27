@@ -436,14 +436,7 @@ const api = {
   },
   
   async request(path, options = {}) {
-    let baseUrl = window.API_BASE_URL;
-    if (!baseUrl) {
-      if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        baseUrl = 'https://softmed-backend.onrender.com/api';
-      } else {
-        baseUrl = '/api';
-      }
-    }
+    const baseUrl = window.API_BASE_URL || '/api';
     const cleanBase = baseUrl.replace(/\/$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const url = path.startsWith('http') ? path : `${cleanBase}${cleanPath}`;
@@ -546,14 +539,7 @@ async function uploadImage(inputEl, targetInputId) {
   const formData = new FormData();
   formData.append('file', file);
 
-  let baseUrl = window.API_BASE_URL;
-  if (!baseUrl) {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      baseUrl = 'https://softmed-backend.onrender.com/api';
-    } else {
-      baseUrl = '/api';
-    }
-  }
+  const baseUrl = window.API_BASE_URL || '/api';
   const cleanBase = baseUrl.replace(/\/$/, '');
   const uploadUrl = `${cleanBase}/upload`;
 
@@ -616,13 +602,7 @@ async function uploadMedicalDocument(inputEl, targetInputId, previewContainerId)
   try {
     showToast(`Enregistrement du document ${file.name}...`, 'info');
 
-    // Resolve backend URL the same way as api.request() to avoid hitting the static frontend (405)
-    let uploadBaseUrl = window.API_BASE_URL;
-    if (!uploadBaseUrl) {
-      uploadBaseUrl = (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
-        ? 'https://softmed-backend.onrender.com/api'
-        : '/api';
-    }
+    const uploadBaseUrl = window.API_BASE_URL || '/api';
     const uploadUrl = uploadBaseUrl.replace(/\/$/, '') + '/upload';
 
     const response = await fetch(uploadUrl, {
@@ -7514,14 +7494,7 @@ async function handleInvoiceCustomAttachmentUpload(inputEl) {
   const formData = new FormData();
   formData.append('file', file);
 
-  let baseUrl = window.API_BASE_URL;
-  if (!baseUrl) {
-    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      baseUrl = 'https://softmed-backend.onrender.com/api';
-    } else {
-      baseUrl = '/api';
-    }
-  }
+  const baseUrl = window.API_BASE_URL || '/api';
   const uploadUrl = `${baseUrl.replace(/\/$/, '')}/upload`;
 
   try {
