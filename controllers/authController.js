@@ -373,7 +373,11 @@ const forgotPassword = async (req, res) => {
     });
 
     return res.status(200).json({
-      message: 'Un email contenant votre lien de réinitialisation sécurisé vient de vous être envoyé.',
+      // Ne pas annoncer un envoi qui n'a pas eu lieu : sans transport SMTP utilisable,
+      // le mailer se contente de journaliser le message.
+      message: emailResult.simulated
+        ? "Aucun serveur de messagerie utilisable n'est configuré pour cette clinique : l'email n'a pas pu être envoyé. Utilisez le lien de réinitialisation ci-dessous, ou configurez un compte SMTP dans Paramètres → Comptes de messagerie."
+        : 'Un email contenant votre lien de réinitialisation sécurisé vient de vous être envoyé.',
       simulated: emailResult.simulated || false,
       resetUrl: emailResult.simulated ? resetUrl : undefined
     });

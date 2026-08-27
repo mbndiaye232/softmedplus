@@ -834,6 +834,15 @@ const sendInvoiceEmailController = async (req, res) => {
       });
     }
 
+    // 6c. Guard : compte présent mais identifiants incomplets. Sans ce contrôle, le mailer
+    // bascule en simulation et l'API annonce un envoi réussi alors que rien n'est parti.
+    if (!smtpAccount.smtp_host || !smtpAccount.smtp_user || !smtpAccount.smtp_password) {
+      return res.status(422).json({
+        error: `Le compte de messagerie « ${smtpAccount.account_name} » est incomplet (hôte, utilisateur ou mot de passe manquant). Aucun email n'a été envoyé. Complétez-le dans Paramètres → Comptes de messagerie.`,
+        code: 'SMTP_INCOMPLETE'
+      });
+    }
+
     // 7. Dispatch Email via mailer service
     const mailResult = await sendInvoiceEmail({
       tenant,
@@ -861,11 +870,14 @@ const sendInvoiceEmailController = async (req, res) => {
       smtpAccount
     });
 
-    // 8. Record dispatch in invoice_email_logs
+    // 8. Record dispatch in invoice_email_logs — le statut reflète le verdict réel du serveur SMTP
+    const wasRejected = Array.isArray(mailResult.rejected) && mailResult.rejected.length > 0;
+    const logStatus = mailResult.simulated ? 'SIMULATED' : (wasRejected ? 'REJECTED' : 'SENT');
+
     const logRes = await req.dbClient.query(
       `INSERT INTO invoice_email_logs (
         tenant_id, invoice_id, recipient_type, recipient_email, subject, custom_message, attachments_json, sent_by, message_id, is_simulated, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'SENT')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *`,
       [
         tenantId,
@@ -877,15 +889,28 @@ const sendInvoiceEmailController = async (req, res) => {
         JSON.stringify(attachedDocuments),
         userId,
         mailResult.messageId || null,
-        !!mailResult.simulated
+        !!mailResult.simulated,
+        logStatus
       ]
     );
+
+    // 8b. Le serveur SMTP n'a pas accepté le destinataire, ou rien n'a été envoyé :
+    // ne jamais annoncer un succès dans ces cas.
+    if (mailResult.simulated || wasRejected) {
+      return res.status(502).json({
+        error: mailResult.simulated
+          ? `Aucun email n'a été envoyé : les paramètres SMTP du compte « ${smtpAccount.account_name} » sont inutilisables.`
+          : `Le serveur SMTP a refusé le destinataire ${mailResult.rejected.join(', ')}. ${mailResult.response || ''}`.trim(),
+        code: mailResult.simulated ? 'SMTP_NOT_SENT' : 'RECIPIENT_REJECTED',
+        log: logRes.rows[0]
+      });
+    }
 
     await logAudit(req, 'SEND_INVOICE_EMAIL', 'invoices', id);
 
     return res.status(200).json({
       success: true,
-      message: `Facture et ${attachedDocuments.length} pièce(s) jointe(s) envoyées avec succès à ${recipient_email}`,
+      message: `Facture et ${attachedDocuments.length} pièce(s) jointe(s) acceptées par le serveur ${smtpAccount.smtp_host} pour ${recipient_email}${mailResult.response ? ` (réponse : ${mailResult.response})` : ''}`,
       mailResult,
       log: logRes.rows[0]
     });

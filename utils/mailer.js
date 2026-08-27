@@ -398,24 +398,32 @@ async function sendInvoiceEmail({
       attachments: mailAttachments
     });
 
-    console.log(`[MAIL] Sent successfully. MessageId: ${info.messageId}`);
+    // accepted / rejected / response = verdict réel du serveur SMTP, indispensable pour
+    // distinguer « le serveur a accepté le message » de « rien n'est parti ».
+    console.log(`[MAIL] Sent. MessageId: ${info.messageId} | accepted: ${JSON.stringify(info.accepted)} | rejected: ${JSON.stringify(info.rejected)} | response: ${info.response}`);
     return {
       success: true,
       messageId: info.messageId,
       simulated: false,
       sender: fromAddress,
-      recipient: recipientEmail
+      recipient: recipientEmail,
+      accepted: info.accepted || [],
+      rejected: info.rejected || [],
+      response: info.response || null
     };
   } else {
-    // Simulated delivery when external SMTP credentials are not yet configured
-    console.log(`[MAIL-SIMULATOR] (SMTP not configured) Email dispatched from ${fromAddress} to ${recipientEmail} with subject "${subject}" and ${attachedDocuments.length} attachment(s).`);
+    // Aucun transport utilisable (hôte, utilisateur ou mot de passe manquant) : RIEN n'est envoyé.
+    // L'appelant doit traiter ce cas comme un échec, jamais comme un succès.
+    console.warn(`[MAIL-SIMULATOR] Aucun transport SMTP utilisable — email NON envoyé (destinataire: ${recipientEmail}, sujet: "${subject}").`);
     return {
-      success: true,
+      success: false,
       messageId: `sim-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       simulated: true,
       sender: fromAddress,
       recipient: recipientEmail,
-      note: 'Envoyé via le service de messagerie SoftMed (Simulation/Logs actifs). Pour envoyer depuis vos adresses emails réelles (ex: OVH), configurez votre compte dans Paramètres > Comptes SMTP.'
+      accepted: [],
+      rejected: [recipientEmail],
+      note: "Aucun email n'a réellement été envoyé : les paramètres SMTP (hôte, utilisateur, mot de passe) sont incomplets. Configurez le compte dans Paramètres → Comptes de messagerie."
     };
   }
 }
