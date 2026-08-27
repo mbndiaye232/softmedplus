@@ -169,7 +169,7 @@ const getPatientDossier = async (req, res) => {
                  'valid_until', rx.valid_until,
                  'is_dispensed', rx.is_dispensed,
                  'items', COALESCE((SELECT json_agg(pi.*) FROM prescription_items pi WHERE pi.prescription_id = rx.id), '[]'::json)
-              ) FROM prescriptions rx WHERE rx.consultation_id = cn.id OR (rx.patient_id = cn.patient_id AND rx.created_at::date = cn.created_at::date) ORDER BY rx.created_at DESC LIMIT 1) AS prescription
+              ) FROM prescriptions rx WHERE rx.consultation_id = cn.id OR (rx.patient_id = cn.patient_id AND rx.issued_at::date = cn.created_at::date) ORDER BY rx.issued_at DESC LIMIT 1) AS prescription
        FROM consultation_notes cn
        LEFT JOIN practitioners prac ON cn.practitioner_id = prac.id
        WHERE cn.patient_id = $1
