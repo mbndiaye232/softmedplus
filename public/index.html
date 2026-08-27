@@ -11,8 +11,11 @@
   
   <!-- Global Backend API Config -->
   <script>
-    // En local et en production (softmed.com.co), l'API est servie sur /api
-    window.API_BASE_URL = '/api';
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      window.API_BASE_URL = 'https://softmed-backend.onrender.com/api';
+    } else {
+      window.API_BASE_URL = '/api';
+    }
   </script>
 
   <!-- Favicon -->
@@ -23,7 +26,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- App Stylesheet -->
-  <link rel="stylesheet" href="app.css?v=8.5">
+  <link rel="stylesheet" href="app.css?v=8.6">
 </head>
 <body>
   <!-- Primary React-like viewport mounting point -->
@@ -33,6 +36,6 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- App engine script -->
-  <script src="app.js?v=8.5"></script>
+  <script src="app.js?v=8.6"></script>
 </body>
 </html>
