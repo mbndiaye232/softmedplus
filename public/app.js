@@ -1246,13 +1246,13 @@ async function renderDashboard(container) {
             ${agingData.length === 0 ? '<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Toutes les factures sont à jour ! Aucune créance en retard.</td></tr>' : ''}
             ${agingData.map(inv => `
               <tr>
-                <td><strong>${inv.invoice_number}</strong></td>
-                <td><strong>${inv.patient_name}</strong> <span style="font-size:0.8rem; color:var(--text-muted);">(${inv.patient_code})</span></td>
-                <td>${inv.insurance_name || '<span class="badge" style="background:#f1f5f9; color:#475569;">Privé</span>'}</td>
-                <td><strong style="color:#dc2626;">${parseFloat(inv.total_balance_due).toLocaleString('fr-FR')} XOF</strong></td>
-                <td><span class="badge" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a;">${inv.days_overdue} jours</span></td>
+                <td><strong>${inv?.invoice_number || '-'}</strong></td>
+                <td><strong>${inv?.patient_name || '-'}</strong> <span style="font-size:0.8rem; color:var(--text-muted);">(${inv?.patient_code || ''})</span></td>
+                <td>${inv?.insurance_name || '<span class="badge" style="background:#f1f5f9; color:#475569;">Privé</span>'}</td>
+                <td><strong style="color:#dc2626;">${parseFloat(inv?.total_balance_due || 0).toLocaleString('fr-FR')} XOF</strong></td>
+                <td><span class="badge" style="background:#fffbeb; color:#b45309; border:1px solid #fde68a;">${inv?.days_overdue || 0} jours</span></td>
                 <td>
-                  <button class="btn btn-primary btn-sm" onclick="simulateRecovery('${inv.invoice_id}', '${inv.patient_phone}')" style="display:inline-flex; align-items:center; gap:6px;">
+                  <button class="btn btn-primary btn-sm" onclick="simulateRecovery('${inv?.invoice_id || ''}', '${inv?.patient_phone || ''}')" style="display:inline-flex; align-items:center; gap:6px;">
                     <i class="fab fa-whatsapp"></i> Relancer
                   </button>
                 </td>
