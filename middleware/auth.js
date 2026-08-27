@@ -17,8 +17,9 @@ const verifyToken = (req, res, next) => {
     req.user = decoded; // Contains id, tenant_id, role, preset_name, permissions, email
 
     // Allow SaaS Super Administrator to switch tenant context via X-Tenant-ID header
-    if ((req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com') && req.headers['x-tenant-id']) {
-      req.user.tenant_id = req.headers['x-tenant-id'];
+    const headerTenant = req.headers['x-tenant-id'];
+    if ((req.user.role === 'SUPER_ADMIN_SAAS' || req.user.email === 'mbndiaye@gmail.com') && headerTenant && headerTenant !== 'undefined' && headerTenant !== 'null') {
+      req.user.tenant_id = headerTenant;
     }
     next();
   } catch (err) {

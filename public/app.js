@@ -390,6 +390,11 @@ let state = {
   toastQueue: []
 };
 
+if (state.tenant && (!state.tenant.id || state.tenant.id === 'undefined' || state.tenant.id === 'null')) {
+  state.tenant = null;
+  try { localStorage.removeItem('tenant'); } catch (e) {}
+}
+
 if (state.user && state.user.email === 'mbndiaye@gmail.com') {
   state.user.role = 'SUPER_ADMIN_SAAS';
   try {
@@ -429,7 +434,7 @@ const api = {
     if (state.token) {
       headers['Authorization'] = `Bearer ${state.token}`;
     }
-    if (state.tenant) {
+    if (state.tenant && state.tenant.id && state.tenant.id !== 'undefined' && state.tenant.id !== 'null') {
       headers['X-Tenant-ID'] = state.tenant.id;
     }
     return headers;
@@ -1465,12 +1470,19 @@ async function renderAgenda(container) {
     api.request('/appointments').catch(() => [])
   ]);
 
-  currentAgendaSpecialties = dbSpecialties || [];
-  currentAgendaPractitioners = dbPractitioners || [];
-  currentAgendaDepartments = dbDepartments || [];
+  const pracs = Array.isArray(dbPractitioners) ? dbPractitioners : [];
+  const specs = Array.isArray(dbSpecialties) ? dbSpecialties : [];
+  const depts = Array.isArray(dbDepartments) ? dbDepartments : [];
+  const appts = Array.isArray(rawAppointments) ? rawAppointments : [];
+  const pats = Array.isArray(patients) ? patients : [];
+  const servs = Array.isArray(services) ? services : [];
 
-  if (!activePractitionerId && dbPractitioners.length > 0) {
-    activePractitionerId = dbPractitioners[0].id;
+  currentAgendaSpecialties = specs;
+  currentAgendaPractitioners = pracs;
+  currentAgendaDepartments = depts;
+
+  if (!activePractitionerId && pracs.length > 0) {
+    activePractitionerId = pracs[0].id;
   }
 
   container.innerHTML = `
@@ -1491,7 +1503,7 @@ async function renderAgenda(container) {
     </div>
 
     <div id="agenda-calendar-container">
-      ${renderAgendaCalendarContent(patients, services, dbPractitioners, rawAppointments, fr)}
+      ${renderAgendaCalendarContent(pats, servs, pracs, appts, fr)}
     </div>
   `;
 }
@@ -1508,9 +1520,13 @@ async function renderMedicalStructure(container) {
     api.request('/departments').catch(() => [])
   ]);
 
-  currentAgendaSpecialties = dbSpecialties || [];
-  currentAgendaPractitioners = dbPractitioners || [];
-  currentAgendaDepartments = dbDepartments || [];
+  const pracs = Array.isArray(dbPractitioners) ? dbPractitioners : [];
+  const specs = Array.isArray(dbSpecialties) ? dbSpecialties : [];
+  const depts = Array.isArray(dbDepartments) ? dbDepartments : [];
+
+  currentAgendaSpecialties = specs;
+  currentAgendaPractitioners = pracs;
+  currentAgendaDepartments = depts;
 
   container.innerHTML = `
     <!-- Top Action Bar & Subtabs -->
@@ -1518,13 +1534,13 @@ async function renderMedicalStructure(container) {
       <!-- Sub-tabs pills -->
       <div style="background:var(--bg-surface); padding:5px; border-radius:10px; border:1px solid var(--border-color); display:inline-flex; gap:6px; flex-wrap:wrap;">
         <button class="btn ${activeStructureSubTab === 'practitioners' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchStructureSubTab('practitioners')" style="font-size:0.88rem; padding:7px 16px; border-radius:7px; font-weight:600;">
-          <i class="fas fa-user-md"></i> ${fr ? `Praticiens & Médecins (${dbPractitioners.length})` : `الأطباء (${dbPractitioners.length})`}
+          <i class="fas fa-user-md"></i> ${fr ? `Praticiens & Médecins (${pracs.length})` : `الأطباء (${pracs.length})`}
         </button>
         <button class="btn ${activeStructureSubTab === 'departments' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchStructureSubTab('departments')" style="font-size:0.88rem; padding:7px 16px; border-radius:7px; font-weight:600;">
-          <i class="fas fa-hospital-alt"></i> ${fr ? `Services Hospitaliers (${dbDepartments.length})` : `الأقسام (${dbDepartments.length})`}
+          <i class="fas fa-hospital-alt"></i> ${fr ? `Services Hospitaliers (${depts.length})` : `الأقسام (${depts.length})`}
         </button>
         <button class="btn ${activeStructureSubTab === 'specialties' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="switchStructureSubTab('specialties')" style="font-size:0.88rem; padding:7px 16px; border-radius:7px; font-weight:600;">
-          <i class="fas fa-stethoscope"></i> ${fr ? `Spécialités Médicales (${dbSpecialties.length})` : `التخصصات (${dbSpecialties.length})`}
+          <i class="fas fa-stethoscope"></i> ${fr ? `Spécialités Médicales (${specs.length})` : `التخصصات (${specs.length})`}
         </button>
       </div>
 
@@ -1552,10 +1568,10 @@ async function renderMedicalStructure(container) {
 
     <div id="structure-subtab-content">
       ${activeStructureSubTab === 'practitioners'
-        ? renderAgendaPractitionersContent(dbPractitioners, dbSpecialties, dbDepartments, fr)
+        ? renderAgendaPractitionersContent(pracs, specs, depts, fr)
         : activeStructureSubTab === 'departments'
-          ? renderAgendaDepartmentsContent(dbDepartments, dbSpecialties, dbPractitioners, fr)
-          : renderAgendaSpecialtiesContent(dbSpecialties, fr)
+          ? renderAgendaDepartmentsContent(depts, specs, pracs, fr)
+          : renderAgendaSpecialtiesContent(specs, fr)
       }
     </div>
   `;
@@ -1579,11 +1595,13 @@ function switchAgendaSubTab(subtab) {
 // A. Calendar & Appointment Booking Subtab
 // ----------------------------------------------------------------------------
 function renderAgendaCalendarContent(patients, services, practitioners, appointments, fr) {
-  const activeDoc = practitioners.find(p => p.id === activePractitionerId) || practitioners[0];
+  const pracList = Array.isArray(practitioners) ? practitioners : [];
+  const apptList = Array.isArray(appointments) ? appointments : [];
+  const activeDoc = pracList.find(p => p.id === activePractitionerId) || pracList[0] || null;
   const docColor = activeDoc ? (activeDoc.color_code || '#4A90E2') : '#4A90E2';
 
   // Filter by selected date and active practitioner
-  const dayAppointments = appointments.filter(a => getApptDateStr(a.start_time) === activeAgendaDate);
+  const dayAppointments = apptList.filter(a => getApptDateStr(a.start_time) === activeAgendaDate);
   const filteredAppts = activePractitionerId 
     ? dayAppointments.filter(a => a.practitioner_id === activePractitionerId)
     : dayAppointments;
