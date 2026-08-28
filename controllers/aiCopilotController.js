@@ -69,8 +69,11 @@ const handleCopilotQuery = async (req, res) => {
 
   try {
     // A. If no patient_id provided, attempt to detect patient name in prompt
+    // req.dbClient (posé par tenantIsolator) et non pool : `patients` est sous
+    // FORCE ROW LEVEL SECURITY, une connexion pool brute n'a ni app.current_tenant_id
+    // ni app.bypass_rls et ne renvoie donc jamais aucune ligne en production.
     if (!targetPatientId) {
-      const patientMatch = await pool.query(`
+      const patientMatch = await req.dbClient.query(`
         SELECT id, first_name, last_name, patient_code
         FROM patients
         WHERE tenant_id = $1 AND (
@@ -88,7 +91,7 @@ const handleCopilotQuery = async (req, res) => {
 
     // B. If a patient is targeted, fetch their comprehensive dossier securely
     if (targetPatientId) {
-      const pRes = await pool.query(`
+      const pRes = await req.dbClient.query(`
         SELECT p.*, s.name as status_name, s.code as status_code,
                d.first_name as attending_first_name, d.last_name as attending_last_name, d.specialty_name as attending_doctor_specialty
         FROM patients p
@@ -103,7 +106,7 @@ const handleCopilotQuery = async (req, res) => {
         // Fetch recent consultations
         let consultations = [];
         try {
-          const cRes = await pool.query(`
+          const cRes = await req.dbClient.query(`
             SELECT id, reason_for_visit as reason, diagnosis_text as diagnosis,
                    clinical_examination as notes, vital_signs as vitals, created_at as consultation_date
             FROM consultation_notes
@@ -118,7 +121,7 @@ const handleCopilotQuery = async (req, res) => {
         // Fetch active treatments / prescriptions
         let treatments = [];
         try {
-          const tRes = await pool.query(`
+          const tRes = await req.dbClient.query(`
             SELECT treatment_name as medication_name, dosage_instructions as dosage, start_date, end_date, status, results_obtained as notes
             FROM patient_treatments
             WHERE patient_id = $1 AND tenant_id = $2 AND (status = 'EN_COURS' OR status = 'ACTIVE')
@@ -132,7 +135,7 @@ const handleCopilotQuery = async (req, res) => {
         // Fetch lab orders
         let labOrders = [];
         try {
-          const lRes = await pool.query(`
+          const lRes = await req.dbClient.query(`
             SELECT test_name, category, status, results_text as results, created_at as order_date
             FROM patient_lab_orders
             WHERE patient_id = $1 AND tenant_id = $2
@@ -241,7 +244,8 @@ const handleDictationConsultation = async (req, res) => {
   try {
     let patient = null;
     if (patient_id) {
-      const pRes = await pool.query('SELECT * FROM patients WHERE id = $1 AND tenant_id = $2', [patient_id, tenantId]);
+      // req.dbClient, pas pool : mêmes raisons que dans handleCopilotQuery.
+      const pRes = await req.dbClient.query('SELECT * FROM patients WHERE id = $1 AND tenant_id = $2', [patient_id, tenantId]);
       if (pRes.rowCount > 0) patient = pRes.rows[0];
     }
 
