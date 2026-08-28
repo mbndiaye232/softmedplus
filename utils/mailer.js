@@ -1,6 +1,11 @@
 const nodemailer = require('nodemailer');
 const path = require('path');
 const fs = require('fs');
+const { downloadFile } = require('./storage');
+
+// Plafond cumulé des pièces jointes d'un message. Au-delà, les documents restants
+// sont laissés sous forme de liens plutôt que de faire rejeter tout l'email.
+const MAX_TOTAL_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 
 /**
  * Creates and returns a nodemailer transporter based on custom tenant config or environment settings.
@@ -286,10 +291,12 @@ function generateInvoiceEmailHtml({
       ${attachedFiles && attachedFiles.length > 0 ? `
         <div class="attachments-section">
           <div style="font-weight: 700; font-size: 14px; color: #1e40af; margin-bottom: 8px;">
-            📎 Pièces Jointes & Justificatifs Médicaux Inclus (${attachedFiles.length}) :
+            📎 Justificatifs Médicaux (${attachedFiles.length}) :
           </div>
           <div style="font-size: 12px; color: #475569; margin-bottom: 8px;">
-            Les documents suivants ont été joints à ce dossier :
+            ${attachedFiles.some(a => a.attached)
+              ? 'Les documents marqués « Pièce jointe » sont joints à cet email. Les autres restent accessibles par lien sécurisé.'
+              : 'Les documents suivants sont accessibles par lien sécurisé :'}
           </div>
           ${attachedFiles.map(att => `
             <div class="att-item">
@@ -298,7 +305,9 @@ function generateInvoiceEmailHtml({
                 <strong>${att.name || 'Document Médical'}</strong>
                 ${att.type ? `<span style="font-size:11px; color:#64748b; margin-left:6px;">(${att.type})</span>` : ''}
               </div>
-              ${att.url ? `<a href="${att.url}" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600; font-size:12px;">Consulter / Télécharger</a>` : ''}
+              ${att.attached
+                ? `<span style="color:#15803d; font-weight:600; font-size:12px;">Pièce jointe</span>`
+                : (att.url ? `<a href="${att.url}" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600; font-size:12px;">Consulter / Télécharger</a>` : '')}
             </div>
           `).join('')}
         </div>
@@ -345,6 +354,55 @@ async function sendInvoiceEmail({
 
   const subject = customSubject.trim() || defaultSubject;
 
+  const transporter = getTransporter(smtpAccount);
+
+  // Constitution des pièces jointes réelles : les documents médicaux sont téléchargés
+  // depuis leur lieu de stockage (R2 ou disque local) et attachés au message.
+  // Les entrées marquées `link_only` (ex. lien de vérification d'ordonnance) ne
+  // correspondent à aucun fichier et restent de simples liens dans le corps du mail.
+  const mailAttachments = [];
+  let totalBytes = 0;
+
+  for (const doc of attachedDocuments) {
+    doc.attached = false;
+
+    if (doc.link_only) continue;
+
+    if (doc.path && fs.existsSync(doc.path)) {
+      const stat = fs.statSync(doc.path);
+      if (totalBytes + stat.size > MAX_TOTAL_ATTACHMENT_BYTES) {
+        console.warn(`[MAIL] ${doc.name} non joint : plafond de ${MAX_TOTAL_ATTACHMENT_BYTES} octets atteint.`);
+        continue;
+      }
+      totalBytes += stat.size;
+      mailAttachments.push({ filename: doc.name || path.basename(doc.path), path: doc.path });
+      doc.attached = true;
+      continue;
+    }
+
+    if (!doc.url) continue;
+
+    const file = await downloadFile(doc.url);
+    if (!file) {
+      console.warn(`[MAIL] ${doc.name || doc.url} introuvable : envoyé sous forme de lien.`);
+      continue;
+    }
+    if (totalBytes + file.buffer.length > MAX_TOTAL_ATTACHMENT_BYTES) {
+      console.warn(`[MAIL] ${doc.name} non joint : plafond de ${MAX_TOTAL_ATTACHMENT_BYTES} octets atteint.`);
+      continue;
+    }
+
+    totalBytes += file.buffer.length;
+    mailAttachments.push({
+      filename: doc.name || path.basename(new URL(doc.url).pathname) || 'document',
+      content: file.buffer,
+      ...(file.contentType ? { contentType: file.contentType } : {})
+    });
+    doc.attached = true;
+  }
+
+  // Le corps du message est généré APRÈS la constitution des pièces jointes, afin
+  // d'annoncer exactement ce qui est réellement joint et ce qui reste un lien.
   const html = generateInvoiceEmailHtml({
     tenant,
     invoice,
@@ -357,26 +415,8 @@ async function sendInvoiceEmail({
     attachedFiles: attachedDocuments
   });
 
-  const transporter = getTransporter(smtpAccount);
-
-  // Prepare nodemailer attachments array if local or buffer attachments exist
-  const mailAttachments = [];
-  for (const doc of attachedDocuments) {
-    if (doc.path && fs.existsSync(doc.path)) {
-      mailAttachments.push({
-        filename: doc.name || path.basename(doc.path),
-        path: doc.path
-      });
-    } else if (doc.url && doc.url.startsWith('/uploads/')) {
-      const localFilePath = path.join(__dirname, '..', 'public', doc.url);
-      if (fs.existsSync(localFilePath)) {
-        mailAttachments.push({
-          filename: doc.name || path.basename(localFilePath),
-          path: localFilePath
-        });
-      }
-    }
-  }
+  const attachedCount = mailAttachments.length;
+  const linkedCount = attachedDocuments.length - attachedCount;
 
   // Determine sender display and address
   let fromAddress;
@@ -388,7 +428,7 @@ async function sendInvoiceEmail({
   }
 
   if (transporter) {
-    console.log(`[MAIL] Sending invoice ${invoiceNum} via SMTP (${smtpAccount?.from_email || 'Default'}) to ${recipientEmail}...`);
+    console.log(`[MAIL] Sending invoice ${invoiceNum} via SMTP (${smtpAccount?.from_email || 'Default'}) to ${recipientEmail} — ${attachedCount} pièce(s) jointe(s) réelle(s) (${Math.round(totalBytes / 1024)} Ko), ${linkedCount} lien(s)...`);
     const info = await transporter.sendMail({
       from: fromAddress,
       to: recipientEmail,
@@ -409,7 +449,10 @@ async function sendInvoiceEmail({
       recipient: recipientEmail,
       accepted: info.accepted || [],
       rejected: info.rejected || [],
-      response: info.response || null
+      response: info.response || null,
+      attachedCount,
+      linkedCount,
+      attachmentsBytes: totalBytes
     };
   } else {
     // Aucun transport utilisable (hôte, utilisateur ou mot de passe manquant) : RIEN n'est envoyé.
@@ -423,6 +466,8 @@ async function sendInvoiceEmail({
       recipient: recipientEmail,
       accepted: [],
       rejected: [recipientEmail],
+      attachedCount,
+      linkedCount,
       note: "Aucun email n'a réellement été envoyé : les paramètres SMTP (hôte, utilisateur, mot de passe) sont incomplets. Configurez le compte dans Paramètres → Comptes de messagerie."
     };
   }

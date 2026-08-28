@@ -3,11 +3,12 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Lazy-load S3 Client to handle cases where dependencies are still installing or not loaded
-let S3Client, PutObjectCommand;
+let S3Client, PutObjectCommand, GetObjectCommand;
 try {
   const s3Sdk = require('@aws-sdk/client-s3');
   S3Client = s3Sdk.S3Client;
   PutObjectCommand = s3Sdk.PutObjectCommand;
+  GetObjectCommand = s3Sdk.GetObjectCommand;
 } catch (e) {
   console.warn('AWS SDK Client S3 not loaded yet. Local storage will be used.');
 }
@@ -29,6 +30,7 @@ const getS3Client = () => {
       const s3Sdk = require('@aws-sdk/client-s3');
       S3Client = s3Sdk.S3Client;
       PutObjectCommand = s3Sdk.PutObjectCommand;
+      GetObjectCommand = s3Sdk.GetObjectCommand;
     } catch (e) {
       return null;
     }
@@ -91,7 +93,59 @@ const uploadFile = async (fileBuffer, originalName, mimeType) => {
   return `/uploads/${randomName}`;
 };
 
+/**
+ * Récupère le contenu binaire d'un fichier stocké, quel que soit son emplacement :
+ * disque local (`/uploads/...`), URL publique R2/HTTP, ou objet R2 privé (repli via l'API S3).
+ * Sert notamment à joindre réellement les documents médicaux aux emails.
+ * @param {string} fileUrl URL publique ou chemin `/uploads/...`
+ * @returns {Promise<{buffer: Buffer, contentType: string|null}|null>} null si le fichier est introuvable
+ */
+const downloadFile = async (fileUrl) => {
+  if (!fileUrl || typeof fileUrl !== 'string') return null;
+
+  // 1. Fichier servi depuis le disque local
+  if (fileUrl.startsWith('/uploads/')) {
+    const localPath = path.join(__dirname, '..', 'public', fileUrl);
+    if (fs.existsSync(localPath)) {
+      return { buffer: fs.readFileSync(localPath), contentType: null };
+    }
+    return null;
+  }
+
+  if (!/^https?:\/\//i.test(fileUrl)) return null;
+
+  // 2. Téléchargement HTTP (bucket R2 public ou domaine personnalisé)
+  try {
+    const res = await fetch(fileUrl);
+    if (res.ok) {
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return { buffer, contentType: res.headers.get('content-type') };
+    }
+    console.warn(`Téléchargement de ${fileUrl} : réponse HTTP ${res.status}`);
+  } catch (err) {
+    console.warn(`Téléchargement HTTP de ${fileUrl} impossible : ${err.message}`);
+  }
+
+  // 3. Repli : lecture directe dans R2 si le bucket n'est pas public
+  const client = getS3Client();
+  if (client && GetObjectCommand) {
+    try {
+      const key = decodeURIComponent(new URL(fileUrl).pathname.split('/').filter(Boolean).pop() || '');
+      if (!key) return null;
+      const obj = await client.send(new GetObjectCommand({ Bucket: R2_BUCKET_NAME, Key: key }));
+      const chunks = [];
+      for await (const chunk of obj.Body) chunks.push(chunk);
+      return { buffer: Buffer.concat(chunks), contentType: obj.ContentType || null };
+    } catch (err) {
+      console.warn(`Lecture R2 de ${fileUrl} impossible : ${err.message}`);
+    }
+  }
+
+  return null;
+};
+
 module.exports = {
   uploadFile,
+  downloadFile,
   isR2Configured
 };
