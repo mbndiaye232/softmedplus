@@ -742,12 +742,9 @@ const sendInvoiceEmailController = async (req, res) => {
     // 5. Gather attachments to include
     const attachedDocuments = [];
 
-    // Always include Invoice reference / official link
-    attachedDocuments.push({
-      name: `Facture_${invoice.invoice_number || 'FAC'}.pdf`,
-      type: 'Facture Médicale Officielle',
-      url: `${req.protocol}://${req.get('host')}/api/billing/invoices/${id}/details`
-    });
+    // La facture elle-même est intégralement rendue dans le corps de l'email (détail des
+    // lignes, ventilation IPM, règlements). Aucun PDF n'est généré côté serveur : on
+    // n'annonce donc pas de pièce jointe « Facture_….pdf » qui n'existerait pas.
 
     // Attached Prescriptions
     if (include_prescriptions) {
@@ -763,8 +760,10 @@ const sendInvoiceEmailController = async (req, res) => {
       const rxRes = await req.dbClient.query(rxQuery, rxParams);
       for (const rx of rxRes.rows) {
         attachedDocuments.push({
-          name: `Ordonnance_${rx.prescription_code}.pdf`,
+          name: `Ordonnance ${rx.prescription_code}`,
           type: 'Ordonnance Sécurisée Anti-Fraude',
+          // Lien de vérification, pas un fichier : il ne peut pas être joint au message.
+          link_only: true,
           url: `${req.protocol}://${req.get('host')}/api/rx/verify/${rx.prescription_code}?h=${rx.qr_cryptographic_hash}`
         });
       }
@@ -910,7 +909,7 @@ const sendInvoiceEmailController = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Facture et ${attachedDocuments.length} pièce(s) jointe(s) acceptées par le serveur ${smtpAccount.smtp_host} pour ${recipient_email}${mailResult.response ? ` (réponse : ${mailResult.response})` : ''}`,
+      message: `Facture${mailResult.attachedCount ? ` et ${mailResult.attachedCount} pièce(s) jointe(s)` : ''}${mailResult.linkedCount ? ` (+ ${mailResult.linkedCount} document(s) par lien)` : ''} acceptée(s) par le serveur ${smtpAccount.smtp_host} pour ${recipient_email}${mailResult.response ? ` (réponse : ${mailResult.response})` : ''}`,
       mailResult,
       log: logRes.rows[0]
     });
