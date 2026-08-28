@@ -24,6 +24,7 @@ const practitionerCtrl = require('./controllers/practitionerController');
 const publicBookingCtrl = require('./controllers/publicBookingController');
 const userCtrl = require('./controllers/userController');
 const aiCopilotCtrl = require('./controllers/aiCopilotController');
+const aiAgentCtrl = require('./controllers/aiAgentController');
 const smtpCtrl = require('./controllers/smtpController');
 
 const upload = multer({
@@ -267,6 +268,7 @@ app.post('/api/ai/config', aiCopilotCtrl.saveAIConfig);
 app.post('/api/ai/test', aiCopilotCtrl.testAIConnection);
 app.post('/api/ai/toggle', aiCopilotCtrl.toggleAI);
 app.post('/api/ai/copilot/query', aiCopilotCtrl.handleCopilotQuery);
+app.post('/api/ai/agent/turn', aiAgentCtrl.handleAgentTurn);
 app.post('/api/ai/copilot/dictate', aiCopilotCtrl.handleDictationConsultation);
 
 // ============================================================================
