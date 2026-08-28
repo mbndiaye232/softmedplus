@@ -196,13 +196,18 @@ const handleCopilotQuery = async (req, res) => {
               age: calculateAge(patientDossier.patient.date_of_birth),
               gender: patientDossier.patient.gender
             } : null,
-            answer: llmResult.content,
-            speech_text: llmResult.content.replace(/[#*`_\[\]]/g, '').slice(0, 300),
+            // Mêmes noms de champs que la réponse du moteur de règles local
+            // (response_markdown / response_speech / quick_suggestions) : le
+            // frontend ne lit que ces noms-là. Avant ce correctif, la bulle de
+            // l'assistant restait vide dès qu'un LLM répondait réellement, alors
+            // que le fallback local (rare) s'affichait correctement.
+            response_markdown: llmResult.content,
+            response_speech: llmResult.content.replace(/[#*`_\[\]]/g, '').slice(0, 300),
             category: 'LLM_INTELLIGENCE',
             llm_provider: activeLLM.provider_name,
             llm_model: activeLLM.model_name,
             alerts: [],
-            suggestions: []
+            quick_suggestions: []
           });
         }
       } catch (llmErr) {
@@ -290,7 +295,10 @@ Retourne UNIQUEMENT un objet JSON avec cette structure exacte, sans markdown aut
           return res.status(200).json({
             success: true,
             raw_text: dictation_text,
-            structured: parsed,
+            // Le frontend lit `structured_data`, pas `structured` : sans ce nom,
+            // la dictée est correctement analysée côté serveur mais rien n'est
+            // jamais rempli dans le formulaire de consultation.
+            structured_data: parsed,
             llm_powered: true,
             provider: activeLLM.provider_name,
             model: activeLLM.model_name
@@ -306,7 +314,7 @@ Retourne UNIQUEMENT un objet JSON avec cette structure exacte, sans markdown aut
     return res.status(200).json({
       success: true,
       raw_text: dictation_text,
-      structured: structuredConsultation,
+      structured_data: structuredConsultation,
       llm_powered: false
     });
 
