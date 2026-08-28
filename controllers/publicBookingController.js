@@ -367,11 +367,6 @@ const publicBookAppointment = async (req, res) => {
     const endISO = endDate.toISOString();
     const initialStatus = depositRequired > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
-    // Add consultation_reason column if not exists
-    await client.query(`
-      ALTER TABLE appointments ADD COLUMN IF NOT EXISTS consultation_reason TEXT;
-    `);
-
     const finalReason = (req.body.consultation_reason || '').trim() || serviceName;
 
     const apptRes = await client.query(

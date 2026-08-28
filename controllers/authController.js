@@ -116,6 +116,14 @@ const registerTenant = async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Provisionnement initial d'un tenant : aucun contexte tenant n'existe encore
+    // pour set_config('app.current_tenant_id', ...). Sans ce bypass, chaque INSERT
+    // dans une table sous FORCE ROW LEVEL SECURITY (users, practitioners,
+    // medical_services, tenant_payment_methods, cash_registers...) est rejeté par
+    // Postgres avec "new row violates row-level security policy" — invisible en
+    // développement local où le rôle DB est superuser (RLS toujours contournée par
+    // un superuser), mais systématique en production où le rôle applicatif ne l'est pas.
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
 
     // A. Check if tenant slug is already taken
     const slugCheck = await client.query(`SELECT 1 FROM tenants WHERE slug = $1`, [tenant_slug.toLowerCase().trim()]);
@@ -303,7 +311,16 @@ const forgotPassword = async (req, res) => {
   const cleanEmail = email.toLowerCase().trim();
   const cleanSlug = tenant_slug ? tenant_slug.toLowerCase().trim() : null;
 
+  // `users` et `tenant_smtp_accounts` sont sous FORCE ROW LEVEL SECURITY. Ce endpoint
+  // est appelé avant toute authentification : aucun app.current_tenant_id n'existe.
+  // Sans bypass, chaque lecture y renvoie silencieusement 0 ligne (RLS filtre sans
+  // erreur) — le flux paraît fonctionner (message générique "si ce compte existe...")
+  // alors qu'aucun email n'est jamais réellement préparé ni envoyé.
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
     let query = `
       SELECT u.id, u.email, u.first_name, u.last_name, u.tenant_id,
              t.name as tenant_name, t.slug as tenant_slug
@@ -318,10 +335,11 @@ const forgotPassword = async (req, res) => {
       params.push(cleanSlug);
     }
 
-    const userRes = await pool.query(query, params);
+    const userRes = await client.query(query, params);
 
     // Generic response for security if user not found
     if (userRes.rowCount === 0) {
+      await client.query('COMMIT');
       return res.status(200).json({
         message: 'Si cette adresse email correspond à un compte actif, un lien de réinitialisation vous a été envoyé.'
       });
@@ -332,13 +350,13 @@ const forgotPassword = async (req, res) => {
     const expiresAt = new Date(Date.now() + 3600000); // 1 hour validity
 
     // Invalidate any existing unused reset tokens for this user
-    await pool.query(
+    await client.query(
       `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`,
       [user.id]
     );
 
     // Insert new reset token
-    await pool.query(
+    await client.query(
       `INSERT INTO password_reset_tokens (user_id, tenant_id, token, expires_at)
        VALUES ($1, $2, $3, $4)`,
       [user.id, user.tenant_id, resetToken, expiresAt]
@@ -347,7 +365,7 @@ const forgotPassword = async (req, res) => {
     // Find active SMTP account for this tenant if available
     let smtpConfig = null;
     try {
-      const smtpRes = await pool.query(
+      const smtpRes = await client.query(
         `SELECT * FROM tenant_smtp_accounts WHERE tenant_id = $1 AND is_active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`,
         [user.tenant_id]
       );
@@ -357,6 +375,8 @@ const forgotPassword = async (req, res) => {
     } catch (e) {
       // Table might not be present in old setup, fallback to environment
     }
+
+    await client.query('COMMIT');
 
     // Build reset URL
     const protocol = req.protocol || 'http';
@@ -382,8 +402,11 @@ const forgotPassword = async (req, res) => {
       resetUrl: emailResult.simulated ? resetUrl : undefined
     });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Forgot password error:', err);
     return res.status(500).json({ error: 'Échec du traitement de la demande de réinitialisation.' });
+  } finally {
+    client.release();
   }
 };
 
@@ -395,8 +418,15 @@ const verifyResetToken = async (req, res) => {
     return res.status(400).json({ error: 'Jeton de réinitialisation manquant' });
   }
 
+  // Même cause que forgotPassword/resetPassword : sans app.current_tenant_id ni
+  // bypass, la jointure sur `users` (FORCE RLS) renvoie silencieusement 0 ligne —
+  // un jeton pourtant valide serait toujours déclaré "invalide ou expiré".
+  const client = await pool.connect();
   try {
-    const tokenRes = await pool.query(
+    await client.query('BEGIN');
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
+    const tokenRes = await client.query(
       `SELECT prt.*, u.email, u.first_name, u.last_name, t.name as tenant_name
        FROM password_reset_tokens prt
        JOIN users u ON prt.user_id = u.id
@@ -404,6 +434,8 @@ const verifyResetToken = async (req, res) => {
        WHERE prt.token = $1 AND prt.used_at IS NULL AND prt.expires_at > NOW()`,
       [token.trim()]
     );
+
+    await client.query('COMMIT');
 
     if (tokenRes.rowCount === 0) {
       return res.status(400).json({
@@ -420,8 +452,11 @@ const verifyResetToken = async (req, res) => {
       tenant_name: row.tenant_name
     });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Verify reset token error:', err);
     return res.status(500).json({ error: 'Erreur lors de la vérification du lien' });
+  } finally {
+    client.release();
   }
 };
 
@@ -440,6 +475,12 @@ const resetPassword = async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Même cause que register-tenant : à ce stade le mot de passe est réinitialisé
+    // via un jeton, avant toute authentification — aucun app.current_tenant_id n'est
+    // disponible. Sans bypass, la jointure sur `users` (sous FORCE RLS) ne renvoie
+    // silencieusement AUCUNE ligne — pas d'erreur, juste "lien invalide" à tort — et
+    // l'UPDATE users qui suit serait de toute façon rejeté par la politique RLS.
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
 
     const tokenRes = await client.query(
       `SELECT prt.*, u.email, u.tenant_id

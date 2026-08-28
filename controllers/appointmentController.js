@@ -211,9 +211,6 @@ const getAppointments = async (req, res) => {
   const tenantId = req.user.tenant_id;
 
   try {
-    // Ensure column exists
-    await req.dbClient.query(`ALTER TABLE appointments ADD COLUMN IF NOT EXISTS consultation_reason TEXT;`);
-
     let queryStr = `
       SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
              a.consultation_reason,
