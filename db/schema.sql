@@ -420,6 +420,7 @@ CREATE TABLE appointments (
     time_slot TSTZRANGE NOT NULL,
     status appointment_status NOT NULL DEFAULT 'PENDING_PAYMENT',
     booking_channel booking_channel NOT NULL DEFAULT 'VOICE_AGENT',
+    consultation_reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
     CONSTRAINT no_overlapping_appointments EXCLUDE USING gist (
