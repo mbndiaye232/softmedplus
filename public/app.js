@@ -498,7 +498,13 @@ const api = {
           handleSessionExpired();
           throw new Error('Session expirée');
         }
-        throw new Error(errMsg);
+        const httpError = new Error(errMsg);
+        // Certaines routes (ex: test SMTP) renvoient des informations utiles au
+        // diagnostic même en cas d'échec (ex: `diagnostics`) : on les attache à
+        // l'erreur plutôt que de les perdre, sans changer le comportement des
+        // appelants existants qui ne lisent que `.message`.
+        httpError.data = data;
+        throw httpError;
       }
 
       return data || {};
@@ -9104,6 +9110,7 @@ function createSmtpTestModalContainer() {
             <label class="form-label">Envoyer un email de test à l'adresse :</label>
             <input type="email" class="form-control" id="test-smtp-recipient" value="${state.user?.email || ''}" required placeholder="votre.email@gmail.com" />
           </div>
+          <div id="test-smtp-diagnostics-box" style="display:none; margin-bottom:12px;"></div>
           <div id="test-smtp-status-box" style="display:none; padding:10px; border-radius:6px; font-size:0.82rem; margin-bottom:15px;"></div>
           <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:15px;">
             <button type="button" class="btn btn-secondary" onclick="closeTestSmtpModal()">Fermer</button>
@@ -9267,7 +9274,51 @@ function openTestSmtpModal(id, name, fromEmail) {
   document.getElementById('test-smtp-acc-name').innerText = `${name} (${fromEmail})`;
   const statusBox = document.getElementById('test-smtp-status-box');
   if (statusBox) statusBox.style.display = 'none';
+  const diagBox = document.getElementById('test-smtp-diagnostics-box');
+  if (diagBox) { diagBox.style.display = 'none'; diagBox.innerHTML = ''; }
   document.getElementById('smtp-test-modal').style.display = 'flex';
+}
+
+// Diagnostic DNS best-effort avant l'envoi réel (domaine résolvable, adresse grand
+// public, SPF, DKIM) — voir utils/smtpDiagnostics.js côté serveur. Un client
+// installant SoftMed avec son propre domaine voit ici, en quelques secondes, ce
+// qui bloquerait la délivrabilité plutôt que de le découvrir sur un email jamais reçu.
+function renderSmtpDiagnostics(diagnostics) {
+  const box = document.getElementById('test-smtp-diagnostics-box');
+  if (!box) return;
+  if (!diagnostics || !Array.isArray(diagnostics.checks) || diagnostics.checks.length === 0) {
+    box.style.display = 'none';
+    box.innerHTML = '';
+    return;
+  }
+
+  const styleByStatus = {
+    ok: { icon: 'fa-circle-check', color: '#059669' },
+    warning: { icon: 'fa-triangle-exclamation', color: '#d97706' },
+    blocker: { icon: 'fa-circle-xmark', color: '#dc2626' },
+    info: { icon: 'fa-circle-info', color: '#64748b' }
+  };
+
+  const rows = diagnostics.checks.map(c => {
+    const st = styleByStatus[c.status] || styleByStatus.info;
+    return `
+      <div style="display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-bottom:1px solid var(--border-color);">
+        <i class="fas ${st.icon}" style="color:${st.color}; margin-top:2px; flex-shrink:0;"></i>
+        <div style="font-size:0.8rem;">
+          <strong style="color:var(--text-primary);">${c.label}</strong>
+          <div style="color:var(--text-muted); margin-top:1px;">${c.message}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; background:var(--bg-surface);">
+      <div style="font-size:0.78rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.03em; margin-bottom:4px;">
+        Diagnostic de délivrabilité
+      </div>
+      ${rows}
+    </div>`;
 }
 
 function closeTestSmtpModal() {
@@ -9293,6 +9344,8 @@ async function submitTestSmtp(e) {
       body: JSON.stringify({ test_recipient_email: testRecipient })
     });
 
+    renderSmtpDiagnostics(result.diagnostics);
+
     if (statusBox) {
       statusBox.style.display = 'block';
       statusBox.style.background = '#ecfdf5';
@@ -9302,6 +9355,8 @@ async function submitTestSmtp(e) {
     }
     showToast('Connexion SMTP validée avec succès !', 'success');
   } catch (err) {
+    renderSmtpDiagnostics(err.data?.diagnostics);
+
     if (statusBox) {
       statusBox.style.display = 'block';
       statusBox.style.background = '#fef2f2';

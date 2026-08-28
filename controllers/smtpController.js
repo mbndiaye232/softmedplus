@@ -1,5 +1,6 @@
 const { logAudit } = require('../middleware/audit');
 const { testSmtpConnection } = require('../utils/mailer');
+const { runSmtpDiagnostics } = require('../utils/smtpDiagnostics');
 
 /**
  * 1. Get all SMTP Accounts for current tenant
@@ -216,9 +217,9 @@ const testSmtpAccount = async (req, res) => {
   const tenantId = req.user.tenant_id;
   const { id } = req.params;
   const { test_recipient_email } = req.body;
+  let config;
 
   try {
-    let config;
     if (id && id !== 'new') {
       const accRes = await req.dbClient.query(
         `SELECT * FROM tenant_smtp_accounts WHERE id = $1 AND tenant_id = $2`,
@@ -233,6 +234,16 @@ const testSmtpAccount = async (req, res) => {
       config = req.body;
     }
 
+    // Diagnostic DNS best-effort (domaine résolvable, adresse grand public, SPF, DKIM).
+    // Isolé dans son propre try : une panne DNS ne doit jamais empêcher le test SMTP
+    // proprement dit de s'exécuter et de répondre.
+    let diagnostics = null;
+    try {
+      diagnostics = await runSmtpDiagnostics({ fromEmail: config.from_email, smtpHost: config.smtp_host });
+    } catch (diagErr) {
+      console.warn('SMTP diagnostics failed (non bloquant):', diagErr.message);
+    }
+
     const testResult = await testSmtpConnection(config, test_recipient_email || req.user.email);
 
     if (id && id !== 'new') {
@@ -242,7 +253,7 @@ const testSmtpAccount = async (req, res) => {
       );
     }
 
-    return res.status(200).json(testResult);
+    return res.status(200).json({ ...testResult, diagnostics });
   } catch (err) {
     console.error('Test SMTP account error:', err.message);
     if (id && id !== 'new') {
@@ -251,7 +262,18 @@ const testSmtpAccount = async (req, res) => {
         [id]
       ).catch(() => {});
     }
-    return res.status(400).json({ error: 'Échec du test SMTP : ' + err.message });
+
+    // Le diagnostic DNS est particulièrement utile quand la connexion SMTP échoue :
+    // on tente de le fournir même en cas d'erreur, sans jamais faire échouer la
+    // réponse d'erreur elle-même à cause de lui.
+    let diagnostics = null;
+    if (config && config.from_email) {
+      try {
+        diagnostics = await runSmtpDiagnostics({ fromEmail: config.from_email, smtpHost: config.smtp_host });
+      } catch (diagErr) {}
+    }
+
+    return res.status(400).json({ error: 'Échec du test SMTP : ' + err.message, diagnostics });
   }
 };
 
