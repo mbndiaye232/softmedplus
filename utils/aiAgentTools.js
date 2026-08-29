@@ -230,5 +230,8 @@ async function executeTool(name, args, { dbClient, tenantId }) {
 
 module.exports = {
   AGENT_TOOLS,
-  executeTool
+  executeTool,
+  // Réutilisé tel quel par l'agent du portail public : la recherche de créneaux
+  // est en lecture seule et ne révèle que des disponibilités, déjà publiques.
+  searchAvailableSlots
 };
