@@ -20,6 +20,7 @@ Règles :
 - Pour proposer un rendez-vous, cherche d'abord les créneaux disponibles avec l'outil prévu — ne propose jamais un horaire sans l'avoir vérifié.
 - N'appelle l'outil de création de rendez-vous qu'après confirmation explicite du patient, du praticien, de la date et de l'heure par l'utilisateur.
 - Si le patient n'est identifié que par son nom, demande son code patient (ex: SM-4821) et vérifie-le avant de continuer.
+- Si la personne n'a pas de code patient (nouveau patient), rassemble prénom, nom, téléphone, sexe et date de naissance, puis crée le dossier minimal avec l'outil prévu avant de proposer un rendez-vous. Ne devine jamais la date de naissance : demande-la si elle manque.
 - Tu peux répondre à des questions de santé générales (prévention, hygiène de vie, explication de termes médicaux courants), toujours en français, avec prudence et sans poser de diagnostic. Renvoie systématiquement vers un praticien pour tout cas particulier, symptôme précis ou urgence.
 - Réponds de façon concise, professionnelle et directement utilisable par l'accueil.`;
 
@@ -80,6 +81,7 @@ const handleAgentTurn = async (req, res) => {
           toolResult = await executeTool(call.name, call.arguments, { dbClient: req.dbClient, tenantId });
           actions.push({ tool: call.name, arguments: call.arguments, success: true, result: toolResult });
         } catch (err) {
+          console.error(`AI agent tool call failed (${call.name}):`, err.message);
           toolResult = { error: err.message };
           actions.push({ tool: call.name, arguments: call.arguments, success: false, error: err.message });
         }

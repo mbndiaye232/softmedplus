@@ -9,8 +9,24 @@
  */
 
 const crypto = require('crypto');
+const { generatePatientCode } = require('../controllers/patientController');
 
 const AGENT_TOOLS = [
+  {
+    name: 'enregistrer_nouveau_patient',
+    description: "Crée un dossier patient minimal (code SM-XXXX généré automatiquement) pour une personne qui n'a pas encore de code patient. À utiliser avant de proposer un rendez-vous à quelqu'un qui n'est pas déjà client. Si le numéro de téléphone est déjà enregistré, retourne le dossier existant au lieu d'en créer un doublon.",
+    parameters: {
+      type: 'object',
+      properties: {
+        first_name: { type: 'string', description: 'Prénom du patient' },
+        last_name: { type: 'string', description: 'Nom du patient' },
+        phone_number: { type: 'string', description: 'Numéro de téléphone, ex: 776473506' },
+        gender: { type: 'string', description: "'M' (homme) ou 'F' (femme)" },
+        date_of_birth: { type: 'string', description: "Date de naissance au format AAAA-MM-JJ. Demande-la explicitement si elle n'a pas été donnée — ne l'invente jamais." }
+      },
+      required: ['first_name', 'last_name', 'phone_number', 'gender', 'date_of_birth']
+    }
+  },
   {
     name: 'chercher_creneaux_disponibles',
     description: "Cherche les créneaux de rendez-vous disponibles pour un praticien à une date donnée (horaires de la clinique : 08h00-18h00). À utiliser avant de proposer un rendez-vous à l'utilisateur.",
@@ -112,6 +128,47 @@ async function lookupPatientByCode(dbClient, tenantId, { patient_code }) {
   return { found: true, patient: r.rows[0] };
 }
 
+async function registerNewPatient(dbClient, tenantId, { first_name, last_name, phone_number, gender, date_of_birth }) {
+  if (!first_name || !last_name || !phone_number || !gender || !date_of_birth) {
+    throw new Error('first_name, last_name, phone_number, gender et date_of_birth sont tous requis.');
+  }
+  const cleanPhone = String(phone_number).trim();
+  const normalizedGender = String(gender).trim().toUpperCase().startsWith('F') ? 'F' : 'M';
+
+  // Savepoint autour de la tentative d'insertion : en cas de conflit sur le
+  // téléphone, Postgres met la transaction en état "aborted" et refuse toute
+  // nouvelle requête (y compris la recherche du patient existant ci-dessous)
+  // tant qu'on n'est pas revenu à ce point de reprise.
+  await dbClient.query('SAVEPOINT register_new_patient');
+  try {
+    // Même génération de code (SM-XXXX) que l'inscription depuis l'interface —
+    // pas de logique dupliquée ou divergente entre les deux chemins de création.
+    const patientCode = await generatePatientCode(dbClient, tenantId);
+    const result = await dbClient.query(
+      `INSERT INTO patients (tenant_id, patient_code, phone_number, first_name, last_name, gender, date_of_birth, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Externe')
+       RETURNING id, patient_code, first_name, last_name, phone_number, gender, date_of_birth`,
+      [tenantId, patientCode, cleanPhone, first_name.trim(), last_name.trim(), normalizedGender, date_of_birth]
+    );
+    const patient = result.rows[0];
+    await dbClient.query(`INSERT INTO medical_records (tenant_id, patient_id, summary_notes) VALUES ($1, $2, '')`, [tenantId, patient.id]);
+    await dbClient.query('RELEASE SAVEPOINT register_new_patient');
+    return { created: true, patient };
+  } catch (err) {
+    await dbClient.query('ROLLBACK TO SAVEPOINT register_new_patient');
+    if (err.message && err.message.includes('unique_tenant_phone')) {
+      const existing = await dbClient.query(
+        `SELECT id, patient_code, first_name, last_name, phone_number, gender, date_of_birth FROM patients WHERE tenant_id = $1 AND phone_number = $2 LIMIT 1`,
+        [tenantId, cleanPhone]
+      );
+      if (existing.rowCount > 0) {
+        return { created: false, already_existed: true, patient: existing.rows[0], message: 'Un patient avec ce numéro de téléphone existe déjà : utilise ce dossier, ne crée pas de doublon.' };
+      }
+    }
+    throw err;
+  }
+}
+
 async function bookAppointment(dbClient, tenantId, { patient_id, practitioner_id, medical_service_id, start_time, motif }) {
   if (!patient_id || !practitioner_id || !medical_service_id || !start_time) {
     throw new Error('patient_id, practitioner_id, medical_service_id et start_time sont tous requis.');
@@ -143,12 +200,32 @@ async function bookAppointment(dbClient, tenantId, { patient_id, practitioner_id
   }
 }
 
+const TOOL_IMPLS = {
+  chercher_creneaux_disponibles: searchAvailableSlots,
+  verifier_patient_par_code: lookupPatientByCode,
+  enregistrer_nouveau_patient: registerNewPatient,
+  prendre_rendez_vous: bookAppointment
+};
+
 async function executeTool(name, args, { dbClient, tenantId }) {
+  const impl = TOOL_IMPLS[name];
+  if (!impl) throw new Error(`Outil inconnu : ${name}`);
   const safeArgs = args && typeof args === 'object' ? args : {};
-  if (name === 'chercher_creneaux_disponibles') return await searchAvailableSlots(dbClient, tenantId, safeArgs);
-  if (name === 'verifier_patient_par_code') return await lookupPatientByCode(dbClient, tenantId, safeArgs);
-  if (name === 'prendre_rendez_vous') return await bookAppointment(dbClient, tenantId, safeArgs);
-  throw new Error(`Outil inconnu : ${name}`);
+
+  // Filet de sécurité général : le LLM peut fournir un argument mal formé (UUID
+  // invalide, etc.) à n'importe quel outil. Sans ce savepoint, une telle erreur
+  // avorterait la transaction PostgreSQL pour le reste de la conversation, alors
+  // que l'agent doit pouvoir continuer après un échec d'outil (relancer le LLM
+  // avec le message d'erreur, essayer autre chose).
+  await dbClient.query('SAVEPOINT agent_tool_call');
+  try {
+    const result = await impl(dbClient, tenantId, safeArgs);
+    await dbClient.query('RELEASE SAVEPOINT agent_tool_call');
+    return result;
+  } catch (err) {
+    await dbClient.query('ROLLBACK TO SAVEPOINT agent_tool_call');
+    throw err;
+  }
 }
 
 module.exports = {
