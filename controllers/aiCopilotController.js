@@ -202,7 +202,7 @@ const handleCopilotQuery = async (req, res) => {
             // l'assistant restait vide dès qu'un LLM répondait réellement, alors
             // que le fallback local (rare) s'affichait correctement.
             response_markdown: llmResult.content,
-            response_speech: llmResult.content.replace(/[#*`_\[\]]/g, '').slice(0, 300),
+            response_speech: sanitizeForSpeech(llmResult.content).slice(0, 300),
             category: 'LLM_INTELLIGENCE',
             llm_provider: activeLLM.provider_name,
             llm_model: activeLLM.model_name,
@@ -327,6 +327,27 @@ Retourne UNIQUEMENT un objet JSON avec cette structure exacte, sans markdown aut
 // ============================================================================
 // Clinical NLP & Reasoning Functions
 // ============================================================================
+
+/**
+ * Nettoie une réponse markdown avant de la donner à la synthèse vocale. Un LLM
+ * configuré avec une consigne système répond souvent en listes à puces (« - »),
+ * que la synthèse vocale française lit littéralement comme "moins" à chaque
+ * ligne. Sans ce nettoyage, un tiret isolé ou un titre markdown est prononcé
+ * tel quel plutôt que d'être silencieusement ignoré.
+ */
+function sanitizeForSpeech(text) {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')          // blocs de code
+    .replace(/^#{1,6}\s+/gm, '')              // titres markdown
+    .replace(/^\s*[-*+]\s+/gm, '')            // puces de liste (-, *, +)
+    .replace(/^\s*\d+[.)]\s+/gm, '')          // listes numérotées (1. / 1))
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // liens markdown -> texte du lien
+    .replace(/[*_`#]/g, '')                   // emphase / code inline restants
+    .replace(/\s[-–—]\s/g, ', ')              // tiret isolé entre espaces -> virgule (pause naturelle)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function calculateAge(dob) {
   if (!dob) return null;

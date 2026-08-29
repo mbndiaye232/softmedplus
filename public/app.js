@@ -15509,11 +15509,27 @@ function updateCopilotVoiceUI() {
   }
 }
 
+// Nettoie le markdown avant la synthèse vocale : un tiret de liste ou isolé
+// entre espaces est lu littéralement "moins" par la voix française sans ce nettoyage.
+function sanitizeForSpeechClient(text) {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+[.)]\s+/gm, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[*_`#]/g, '')
+    .replace(/\s[-–—]\s/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function speakCopilotAI(text) {
   if (!('speechSynthesis' in window) || !text) return;
   window.speechSynthesis.cancel();
 
-  const u = new SpeechSynthesisUtterance(text);
+  const u = new SpeechSynthesisUtterance(sanitizeForSpeechClient(text));
   u.lang = 'fr-FR';
   u.rate = 1.05;
   u.pitch = 1.0;
