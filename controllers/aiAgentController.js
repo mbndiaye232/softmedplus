@@ -99,6 +99,121 @@ const handleAgentTurn = async (req, res) => {
   }
 };
 
+// ============================================================================
+// Agent du PORTAIL PUBLIC (patients non authentifiés)
+// ============================================================================
+
+const pool = require('../config/db');
+const { PUBLIC_AGENT_TOOLS, executePublicTool } = require('../utils/publicAgentTools');
+
+const PUBLIC_AGENT_SYSTEM_PROMPT = `Tu es l'assistant de prise de rendez-vous en ligne de la clinique {CLINIC_NAME}. Tu parles directement au patient, en français, avec courtoisie et concision.
+
+Règles impératives :
+- Vérifie toujours les créneaux libres avec l'outil prévu avant de proposer un horaire. N'invente jamais une disponibilité.
+- Si le patient dit avoir déjà un dossier, demande son code patient (ex: SM-4821) PUIS son prénom et son nom, et vérifie les deux ensemble. Ne révèle jamais d'information sur un dossier tant que l'identité n'est pas confirmée.
+- Si le patient n'a pas de code, traite-le comme un nouveau patient : il te faut son prénom, son nom et son téléphone. Préviens qu'un acompte de 2 000 FCFA est demandé pour une première consultation.
+- Quand tout est réuni et confirmé, appelle l'outil de préparation, puis annonce clairement le récapitulatif (date, heure, praticien, acompte éventuel) et invite le patient à confirmer d'un clic. Tu ne réserves pas toi-même : c'est le patient qui valide.
+- Tu peux répondre à des questions générales sur la clinique et à des questions de santé courantes (prévention, hygiène de vie), sans jamais poser de diagnostic ni proposer de traitement. Pour tout symptôme précis ou toute urgence, invite à consulter un praticien ou à appeler les secours.
+- Ne demande jamais de données médicales sensibles : tu prends des rendez-vous, tu ne fais pas de consultation.`;
+
+const handlePublicAgentTurn = async (req, res) => {
+  const { slug, message, history } = req.body;
+
+  if (!slug || !message || !message.trim()) {
+    return res.status(400).json({ error: 'Clinique et message requis.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Portail public : pas de JWT, donc pas de contexte RLS posé par tenantIsolator.
+    // On bascule en bypass puis on borne TOUTES les requêtes au tenant résolu depuis
+    // le slug de l'URL — jamais depuis un paramètre choisi par le modèle.
+    await client.query("SET LOCAL app.bypass_rls = 'true'");
+
+    const tRes = await client.query(`SELECT id, name FROM tenants WHERE LOWER(slug) = LOWER($1) AND is_active = true LIMIT 1`, [slug.trim()]);
+    if (tRes.rowCount === 0) {
+      await client.query('COMMIT');
+      return res.status(404).json({ error: 'Clinique introuvable.' });
+    }
+    const tenantId = tRes.rows[0].id;
+    const clinicName = tRes.rows[0].name;
+
+    const cfg = await client.query(
+      `SELECT * FROM ai_llm_configs WHERE tenant_id = $1 AND is_active = true ORDER BY updated_at DESC LIMIT 1`,
+      [tenantId]
+    );
+    if (cfg.rowCount === 0 || !cfg.rows[0].api_key) {
+      await client.query('COMMIT');
+      return res.status(422).json({
+        error: "L'assistant conversationnel n'est pas disponible pour cette clinique.",
+        code: 'NO_LLM_CONFIGURED'
+      });
+    }
+    const activeLLM = cfg.rows[0];
+
+    let convo = Array.isArray(history) ? history.slice(-20) : [];
+    convo.push({ role: 'user', content: message.trim() });
+
+    const actions = [];
+    let bookingParams = null;
+
+    for (let turn = 0; turn < MAX_AGENT_TURNS; turn++) {
+      const result = await callLLM({
+        provider: activeLLM.provider_name,
+        apiKey: activeLLM.api_key,
+        model: activeLLM.model_name,
+        baseUrl: activeLLM.base_url,
+        temperature: activeLLM.temperature,
+        maxTokens: activeLLM.max_tokens,
+        systemPrompt: PUBLIC_AGENT_SYSTEM_PROMPT.replace('{CLINIC_NAME}', clinicName),
+        messages: convo,
+        tools: PUBLIC_AGENT_TOOLS
+      });
+
+      if (!result.toolCalls || result.toolCalls.length === 0) {
+        convo.push({ role: 'assistant', content: result.content });
+        await client.query('COMMIT');
+        return res.status(200).json({ success: true, answer: result.content, history: convo, actions, booking_params: bookingParams });
+      }
+
+      convo.push({ role: 'assistant', content: result.content || '', tool_calls: result.toolCalls });
+
+      for (const call of result.toolCalls) {
+        let toolResult;
+        try {
+          toolResult = await executePublicTool(call.name, call.arguments, { dbClient: client, tenantId });
+          if (call.name === 'preparer_reservation' && toolResult.ready) {
+            bookingParams = toolResult.booking_params;
+          }
+          actions.push({ tool: call.name, success: true, result: toolResult });
+        } catch (err) {
+          console.error(`Public AI agent tool failed (${call.name}):`, err.message);
+          toolResult = { error: err.message };
+          actions.push({ tool: call.name, success: false, error: err.message });
+        }
+        convo.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: JSON.stringify(toolResult) });
+      }
+    }
+
+    await client.query('COMMIT');
+    return res.status(200).json({
+      success: true,
+      answer: "Je n'ai pas réussi à aboutir. Pouvez-vous reformuler votre demande ?",
+      history: convo,
+      actions,
+      booking_params: bookingParams
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (e) {}
+    console.error('Public AI agent turn error:', err.message);
+    return res.status(502).json({ error: "L'assistant est momentanément indisponible." });
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
-  handleAgentTurn
+  handleAgentTurn,
+  handlePublicAgentTurn
 };

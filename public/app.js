@@ -12478,6 +12478,13 @@ let voiceIsListening = false;
 let voiceIsSpeaking = false;
 let voiceStep = 0; // 0: Welcome, 1: Code/New, 2: Name confirm, 3: Doctor, 4: Date/Time, 5: Booked
 let voiceTranscriptLog = [];
+
+// Agent conversationnel LLM du portail public. `null` = on n'a pas encore essayé ;
+// passe à `false` définitivement si la clinique n'a pas de LLM configuré, ce qui
+// fait retomber le canal vocal sur l'automate à scénarios (voiceStep) sans IA.
+let voiceAgentLLMEnabled = null;
+let voiceAgentHistory = [];
+let voicePendingBooking = null;
 let voicePatientData = {
   is_existing: true,
   code: '',
@@ -13232,11 +13239,99 @@ function updateVoiceUI() {
   }
 }
 
+/**
+ * Dialogue avec l'agent LLM du portail public.
+ * Retourne true si l'agent a traité le message, false s'il faut retomber sur
+ * l'automate à scénarios (aucun LLM configuré pour cette clinique).
+ */
+async function handleVoiceTranscriptWithLLM(userInput) {
+  const slug = publicPortalData?.clinic?.slug;
+  if (!slug) return false;
+
+  voiceTranscriptLog.push({ sender: 'ai', text: '<i class="fas fa-spinner fa-spin"></i> ...', pending: true });
+  renderVoiceMessages();
+
+  try {
+    const res = await api.request('/public/agent/turn', {
+      method: 'POST',
+      body: JSON.stringify({ slug, message: userInput, history: voiceAgentHistory })
+    });
+
+    voiceAgentLLMEnabled = true;
+    voiceAgentHistory = res.history || voiceAgentHistory;
+    voiceTranscriptLog = voiceTranscriptLog.filter(m => !m.pending);
+
+    // L'agent a réuni tous les éléments : on propose une confirmation explicite.
+    // C'est le patient qui déclenche l'enregistrement, via l'endpoint public
+    // existant — l'agent ne réserve jamais de lui-même.
+    const hadPending = !!voicePendingBooking;
+    voicePendingBooking = res.booking_params || null;
+
+    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(res.answer || '') });
+
+    // Le bouton de confirmation vit dans renderVoiceChannel, pas dans le fil de
+    // discussion : il faut re-rendre la vue entière pour le faire apparaître ou disparaître.
+    if (!!voicePendingBooking !== hadPending) {
+      renderPublicPortalView();
+    } else {
+      renderVoiceMessages();
+    }
+
+    speakAI(res.answer || '');
+    return true;
+  } catch (err) {
+    voiceTranscriptLog = voiceTranscriptLog.filter(m => !m.pending);
+
+    // Pas de LLM pour cette clinique : bascule définitive sur l'automate,
+    // sans afficher d'erreur au patient qui n'y peut rien.
+    if (err.data && err.data.code === 'NO_LLM_CONFIGURED') {
+      voiceAgentLLMEnabled = false;
+      renderVoiceMessages();
+      return false;
+    }
+
+    voiceTranscriptLog.push({
+      sender: 'ai',
+      text: escapeHTML(err.message || "Je n'ai pas pu traiter votre demande. Pouvez-vous réessayer ?")
+    });
+    renderVoiceMessages();
+    return true;
+  }
+}
+
+/** Enregistre réellement le rendez-vous préparé par l'agent, après clic du patient. */
+async function confirmVoiceAgentBooking() {
+  if (!voicePendingBooking) return;
+  const params = voicePendingBooking;
+  voicePendingBooking = null;
+  renderVoiceMessages();
+
+  try {
+    const result = await api.request('/public/book', {
+      method: 'POST',
+      body: JSON.stringify({ ...params, tenant_slug: publicPortalData.clinic.slug })
+    });
+    // Réutilise l'écran de confirmation existant (pass de rendez-vous imprimable)
+    renderPublicPortalView(result);
+  } catch (err) {
+    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(err.message || 'La réservation a échoué.') });
+    renderVoiceMessages();
+  }
+}
+window.confirmVoiceAgentBooking = confirmVoiceAgentBooking;
+
 async function handleVoiceTranscript(userInput) {
   if (!userInput.trim()) return;
-  
+
   voiceTranscriptLog.push({ sender: 'user', text: userInput });
   renderVoiceMessages();
+
+  // Si la clinique a configuré un LLM, l'agent conversationnel prend la main.
+  // Sinon on garde l'automate à scénarios ci-dessous, qui fonctionne sans IA.
+  if (voiceAgentLLMEnabled !== false) {
+    const handled = await handleVoiceTranscriptWithLLM(userInput);
+    if (handled) return;
+  }
 
   const text = userInput.toLowerCase();
   const clinic = publicPortalData.clinic;
@@ -13688,6 +13783,17 @@ function renderVoiceChannel(clinic, docs, services) {
         </div>
       `).join('')}
     </div>
+
+    ${voicePendingBooking ? `
+      <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:14px 16px; margin-bottom:15px; text-align:center;">
+        <div style="font-size:0.88rem; color:#065f46; font-weight:600; margin-bottom:10px;">
+          <i class="fas fa-clipboard-check"></i> Récapitulatif prêt — confirmez pour réserver
+        </div>
+        <button class="btn btn-primary" onclick="confirmVoiceAgentBooking()" style="background:#059669; border-color:#059669; font-weight:700; padding:10px 22px;">
+          <i class="fas fa-check-circle"></i> Confirmer mon rendez-vous
+        </button>
+      </div>
+    ` : ''}
 
     <!-- Manual Text fallback for voice -->
     <form onsubmit="event.preventDefault(); const inp=document.getElementById('voice-manual-input'); handleVoiceTranscript(inp.value); inp.value='';" style="display:flex; gap:8px;">

@@ -26,6 +26,7 @@ const userCtrl = require('./controllers/userController');
 const aiCopilotCtrl = require('./controllers/aiCopilotController');
 const aiAgentCtrl = require('./controllers/aiAgentController');
 const smtpCtrl = require('./controllers/smtpController');
+const { rateLimit } = require('./middleware/rateLimit');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -72,6 +73,15 @@ app.get('/api/public/clinics/:slug', publicBookingCtrl.getPublicClinic);
 app.get('/api/public/clinics/:slug/available-slots', publicBookingCtrl.getPublicAvailableSlots);
 app.post('/api/public/verify-patient', publicBookingCtrl.publicVerifyPatient);
 app.post('/api/public/book', publicBookingCtrl.publicBookAppointment);
+
+// Agent conversationnel du portail public. Débit limité : chaque message consomme
+// la clé API LLM de la clinique, dont elle supporte le coût — un endpoint non
+// authentifié sans limite exposerait sa facture à n'importe quel visiteur.
+app.post(
+  '/api/public/agent/turn',
+  rateLimit({ windowMs: 60000, max: 12, message: "Vous envoyez trop de messages. Merci de patienter quelques instants avant de réessayer." }),
+  aiAgentCtrl.handlePublicAgentTurn
+);
 
 // C. Public Cryptographic Prescription Verification (QR scanning endpoint)
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
