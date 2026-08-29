@@ -12308,6 +12308,16 @@ function renderAppLayout() {
           <button class="modal-close" onclick="closeAICopilotModal()">&times;</button>
         </div>
 
+        <!-- Sélecteur de mode : consultation du dossier vs actions réelles (RDV) -->
+        <div style="display:flex; gap:8px; margin-bottom:14px; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:10px; padding:5px;">
+          <button type="button" id="copilot-mode-btn-copilot" onclick="setCopilotMode('copilot')" style="flex:1; border:none; border-radius:7px; padding:9px 12px; font-size:0.84rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px;">
+            <i class="fas fa-stethoscope"></i> Copilote clinique
+          </button>
+          <button type="button" id="copilot-mode-btn-agent" onclick="setCopilotMode('agent')" style="flex:1; border:none; border-radius:7px; padding:9px 12px; font-size:0.84rem; font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px;">
+            <i class="fas fa-calendar-check"></i> Agent rendez-vous
+          </button>
+        </div>
+
         <!-- Voice Interaction Hub (Mic + Status + Wave) -->
         <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:12px; padding:16px 20px; margin-bottom:14px; text-align:center;">
           <div id="copilot-mic-btn" class="copilot-pulse-circle" onclick="toggleCopilotVoiceListen()" title="Cliquez pour parler">
@@ -15334,6 +15344,15 @@ let copilotIsListening = false;
 let copilotIsSpeaking = false;
 let copilotLatestResult = null;
 
+// Deux modes partagent la même fenêtre de discussion :
+//  - 'copilot' : questions cliniques sur le dossier (/ai/copilot/query), lecture seule
+//  - 'agent'   : agent outillé qui agit réellement (/ai/agent/turn) — crée un patient,
+//                cherche un créneau, réserve un rendez-vous
+// L'agent a besoin de tout l'historique de la conversation à chaque tour (il le
+// renvoie enrichi des appels d'outils), là où le copilote traite chaque question isolément.
+let copilotMode = 'copilot';
+let agentConversationHistory = [];
+
 // Consultation Dictation State
 let consultDictationRecognition = null;
 let consultDictationIsListening = false;
@@ -15410,6 +15429,15 @@ function openAICopilotModal(patientId, patientName) {
       ];
 
   renderCopilotChips(defaultChips);
+
+  // Reflète visuellement le mode courant (le sélecteur est reconstruit avec le shell)
+  const activeStyle = 'background:var(--primary); color:#fff;';
+  const idleStyle = 'background:transparent; color:var(--text-muted);';
+  const btnCopilot = document.getElementById('copilot-mode-btn-copilot');
+  const btnAgent = document.getElementById('copilot-mode-btn-agent');
+  if (btnCopilot) btnCopilot.style.cssText += ';' + (copilotMode === 'copilot' ? activeStyle : idleStyle);
+  if (btnAgent) btnAgent.style.cssText += ';' + (copilotMode === 'agent' ? activeStyle : idleStyle);
+
   modal.style.display = 'flex';
 }
 
@@ -15552,6 +15580,57 @@ function speakCopilotAI(text) {
   window.speechSynthesis.speak(u);
 }
 
+function setCopilotMode(mode) {
+  copilotMode = mode === 'agent' ? 'agent' : 'copilot';
+
+  const activeStyle = 'background:var(--primary); color:#fff;';
+  const idleStyle = 'background:transparent; color:var(--text-muted);';
+  const btnCopilot = document.getElementById('copilot-mode-btn-copilot');
+  const btnAgent = document.getElementById('copilot-mode-btn-agent');
+  if (btnCopilot) btnCopilot.style.cssText += ';' + (copilotMode === 'copilot' ? activeStyle : idleStyle);
+  if (btnAgent) btnAgent.style.cssText += ';' + (copilotMode === 'agent' ? activeStyle : idleStyle);
+
+  const input = document.getElementById('copilot-text-input');
+  if (input) {
+    input.placeholder = copilotMode === 'agent'
+      ? 'Ex : « Awa Diagne, nouvelle patiente, voudrait un rendez-vous jeudi »'
+      : 'Posez une question sur le dossier, un traitement ou un protocole...';
+  }
+
+  const status = document.getElementById('copilot-status-text');
+  if (status) {
+    status.innerText = copilotMode === 'agent'
+      ? "Mode agent : je peux enregistrer un patient, chercher un créneau et réserver un rendez-vous."
+      : 'Cliquez sur le micro pour parler ou posez votre question ci-dessous';
+  }
+
+  // Chaque mode a sa propre conversation : on repart d'un fil vierge pour ne pas
+  // mélanger un historique clinique avec un historique d'actions.
+  copilotTranscriptLog = [];
+  agentConversationHistory = [];
+
+  if (copilotMode === 'agent') {
+    copilotTranscriptLog.push({
+      sender: 'ai',
+      text: "Mode agent rendez-vous activé. Dites-moi qui souhaite un rendez-vous et quand.",
+      markdown: "**Mode agent rendez-vous.** Je peux enregistrer un nouveau patient, vérifier un code patient existant, chercher les créneaux libres et confirmer un rendez-vous. Dites-moi qui souhaite un rendez-vous et quand."
+    });
+    renderCopilotChips([
+      'Awa Diagne, nouvelle patiente, voudrait un rendez-vous demain matin',
+      'Quels créneaux sont libres après-demain ?',
+      'Le patient SM-4821 veut un rendez-vous jeudi',
+      'Quelles sont les heures d\'ouverture ?'
+    ]);
+  } else {
+    // Réutilise l'accueil et les suggestions déjà calculés selon le contexte patient
+    openAICopilotModal(copilotActivePatient?.id, copilotActivePatient?.name);
+    return;
+  }
+
+  renderCopilotChat();
+}
+window.setCopilotMode = setCopilotMode;
+
 async function submitCopilotQuery(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('copilot-text-input');
@@ -15570,9 +15649,17 @@ async function sendCopilotPrompt(promptText) {
   if (timeline) {
     const loadingDiv = document.createElement('div');
     loadingDiv.id = 'copilot-loading-indicator';
-    loadingDiv.innerHTML = `<div style="display:flex; align-items:center; gap:8px; color:var(--primary); font-weight:600; font-size:0.85rem; padding:10px;"><i class="fas fa-spinner fa-spin"></i> L'IA analyse les données cliniques...</div>`;
+    const loadingLabel = copilotMode === 'agent'
+      ? "L'agent consulte l'agenda..."
+      : "L'IA analyse les données cliniques...";
+    loadingDiv.innerHTML = `<div style="display:flex; align-items:center; gap:8px; color:var(--primary); font-weight:600; font-size:0.85rem; padding:10px;"><i class="fas fa-spinner fa-spin"></i> ${loadingLabel}</div>`;
     timeline.appendChild(loadingDiv);
     timeline.scrollTop = timeline.scrollHeight;
+  }
+
+  if (copilotMode === 'agent') {
+    await sendAgentPrompt(promptText);
+    return;
   }
 
   try {
@@ -15620,6 +15707,72 @@ async function sendCopilotPrompt(promptText) {
   }
 }
 
+// Résume en une ligne lisible ce que l'agent a réellement fait, pour que l'accueil
+// voie les actions exécutées et pas seulement la phrase de l'assistant.
+function describeAgentAction(action) {
+  if (!action.success) {
+    return { icon: 'fa-circle-xmark', color: '#dc2626', label: `Échec : ${action.error || 'action impossible'}` };
+  }
+  const r = action.result || {};
+  switch (action.tool) {
+    case 'enregistrer_nouveau_patient':
+      return r.already_existed
+        ? { icon: 'fa-user-check', color: '#d97706', label: `Patient déjà connu : ${r.patient?.first_name} ${r.patient?.last_name} (${r.patient?.patient_code})` }
+        : { icon: 'fa-user-plus', color: '#059669', label: `Dossier créé : ${r.patient?.first_name} ${r.patient?.last_name} (${r.patient?.patient_code})` };
+    case 'verifier_patient_par_code':
+      return r.found
+        ? { icon: 'fa-id-card', color: '#059669', label: `Patient identifié : ${r.patient?.first_name} ${r.patient?.last_name}` }
+        : { icon: 'fa-triangle-exclamation', color: '#d97706', label: 'Code patient introuvable' };
+    case 'chercher_creneaux_disponibles':
+      return { icon: 'fa-calendar-days', color: '#2563eb', label: `${(r.slots || []).length} créneau(x) libre(s) trouvé(s)` };
+    case 'prendre_rendez_vous':
+      if (!r.booked) return { icon: 'fa-triangle-exclamation', color: '#d97706', label: r.message || 'Créneau indisponible' };
+      const when = r.appointment?.start_time ? new Date(r.appointment.start_time).toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' }) : '';
+      return { icon: 'fa-calendar-check', color: '#059669', label: `Rendez-vous confirmé — ${when}` };
+    default:
+      return { icon: 'fa-circle-check', color: '#059669', label: action.tool };
+  }
+}
+
+async function sendAgentPrompt(promptText) {
+  try {
+    const res = await api.request('/ai/agent/turn', {
+      method: 'POST',
+      body: JSON.stringify({ message: promptText, history: agentConversationHistory })
+    });
+
+    // L'agent renvoie l'historique enrichi des appels d'outils : on le conserve
+    // tel quel pour le tour suivant, sinon il perd le fil de la réservation en cours.
+    agentConversationHistory = res.history || agentConversationHistory;
+
+    const loading = document.getElementById('copilot-loading-indicator');
+    if (loading) loading.remove();
+
+    copilotTranscriptLog.push({
+      sender: 'ai',
+      text: res.answer,
+      markdown: res.answer,
+      agentActions: (res.actions || []).map(describeAgentAction)
+    });
+    renderCopilotChat();
+
+    // Une action a modifié l'agenda : rafraîchir la vue si l'utilisateur y est.
+    const bookedSomething = (res.actions || []).some(a => a.success && a.tool === 'prendre_rendez_vous' && a.result?.booked);
+    if (bookedSomething && state.currentTab === 'agenda') navigate('agenda');
+
+    if (res.answer) speakCopilotAI(res.answer);
+  } catch (err) {
+    const loading = document.getElementById('copilot-loading-indicator');
+    if (loading) loading.remove();
+    copilotTranscriptLog.push({
+      sender: 'ai',
+      text: 'Erreur : ' + err.message,
+      markdown: `❌ **Erreur :** ${err.message}`
+    });
+    renderCopilotChat();
+  }
+}
+
 function renderCopilotChat() {
   const timeline = document.getElementById('copilot-chat-timeline');
   if (!timeline) return;
@@ -15641,6 +15794,22 @@ function renderCopilotChat() {
         `).join('');
       }
 
+      // Actions réellement exécutées par l'agent (création patient, réservation...).
+      // escapeHTML sur chaque libellé : ils contiennent des noms de patients issus du LLM.
+      let agentActionsHtml = '';
+      if (msg.agentActions && msg.agentActions.length > 0) {
+        agentActionsHtml = `
+          <div style="background:var(--bg-surface); border:1px solid var(--border-color); border-radius:8px; padding:8px 10px; margin-bottom:8px; display:flex; flex-direction:column; gap:5px;">
+            ${msg.agentActions.map(a => `
+              <div style="display:flex; align-items:center; gap:7px; font-size:0.79rem; color:var(--text-primary);">
+                <i class="fas ${escapeHTML(a.icon)}" style="color:${escapeHTML(a.color)}; width:14px;"></i>
+                <span>${escapeHTML(a.label)}</span>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
       const formattedMarkdown = formatMarkdownBasic(msg.markdown || msg.text);
 
       return `
@@ -15659,6 +15828,7 @@ function renderCopilotChat() {
             </div>
           </div>
           ${alertsHtml}
+          ${agentActionsHtml}
           <div style="font-size:0.9rem; line-height:1.55;">${formattedMarkdown}</div>
         </div>
       `;
