@@ -26,13 +26,19 @@ const { searchAvailableSlots } = require('./aiAgentTools');
 
 const PUBLIC_AGENT_TOOLS = [
   {
+    name: 'lister_praticiens_et_prestations',
+    description: "Liste les praticiens de la clinique avec leur spécialité, et les prestations proposées avec leur tarif et leur durée. À utiliser AVANT de chercher des créneaux, pour orienter le patient vers le bon spécialiste selon le motif de sa consultation. Ne devine jamais quel praticien correspond à un motif : appelle cet outil.",
+    parameters: { type: 'object', properties: {} }
+  },
+  {
     name: 'chercher_creneaux_disponibles',
     description: "Cherche les créneaux de rendez-vous libres à une date donnée (la clinique consulte de 08h00 à 18h00). À utiliser avant de proposer un horaire — ne propose jamais un horaire sans l'avoir vérifié.",
     parameters: {
       type: 'object',
       properties: {
         date: { type: 'string', description: 'Date souhaitée au format AAAA-MM-JJ' },
-        practitioner_id: { type: 'string', description: "Identifiant du praticien si le patient en a demandé un précis. Sinon laisser vide." }
+        practitioner_id: { type: 'string', description: "Identifiant du praticien retenu pour le motif de consultation, obtenu via lister_praticiens_et_prestations. Sans cet identifiant, le premier praticien de la clinique est utilisé par défaut, quelle que soit sa spécialité." },
+        medical_service_id: { type: 'string', description: 'Identifiant de la prestation retenue — détermine la durée du créneau.' }
       },
       required: ['date']
     }
@@ -57,15 +63,16 @@ const PUBLIC_AGENT_TOOLS = [
       type: 'object',
       properties: {
         start_time: { type: 'string', description: 'Date et heure de début au format ISO 8601, ex: 2026-09-02T10:00:00.000Z' },
-        practitioner_id: { type: 'string', description: 'Identifiant du praticien retenu' },
+        practitioner_id: { type: 'string', description: "Identifiant du praticien retenu, cohérent avec le motif de consultation" },
+        medical_service_id: { type: 'string', description: 'Identifiant de la prestation retenue — détermine le tarif et la durée facturés' },
         patient_code: { type: 'string', description: "Code du patient existant, s'il a été vérifié avec succès" },
         first_name: { type: 'string', description: 'Prénom du patient' },
         last_name: { type: 'string', description: 'Nom du patient' },
         phone_number: { type: 'string', description: 'Téléphone — obligatoire pour un nouveau patient' },
         is_new_patient: { type: 'boolean', description: "true si le patient n'a pas de code patient dans cette clinique" },
-        consultation_reason: { type: 'string', description: 'Motif de consultation, si le patient en a donné un' }
+        consultation_reason: { type: 'string', description: 'Motif de consultation — obligatoire, il détermine le spécialiste' }
       },
-      required: ['start_time']
+      required: ['start_time', 'consultation_reason']
     }
   }
 ];
@@ -73,6 +80,49 @@ const PUBLIC_AGENT_TOOLS = [
 // Retire les accents pour comparer les noms (Aïssatou == aissatou), comme le fait
 // déjà publicVerifyPatient — plage des diacritiques combinants Unicode.
 const cleanStr = (s) => (s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/**
+ * Donne à l'agent la carte des praticiens et des prestations, pour qu'il oriente
+ * selon le motif. Sans cet outil, il n'avait aucun moyen de savoir qui fait quoi :
+ * la recherche de créneaux retombait sur le premier praticien par ordre
+ * alphabétique, ce qui envoyait un motif « Cardiologie » chez une ophtalmologue.
+ */
+async function listPractitionersAndServices(dbClient, tenantId) {
+  const pracs = await dbClient.query(
+    `SELECT p.id, p.title, p.first_name, p.last_name, p.specialty_name, p.is_general_practitioner,
+            COALESCE(
+              json_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '[]'
+            ) AS specialites
+     FROM practitioners p
+     LEFT JOIN practitioner_specialties ps ON p.id = ps.practitioner_id
+     LEFT JOIN medical_specialties s ON ps.specialty_id = s.id
+     WHERE p.tenant_id = $1 AND p.is_active = true
+     GROUP BY p.id
+     ORDER BY p.first_name ASC`,
+    [tenantId]
+  );
+
+  const services = await dbClient.query(
+    `SELECT id, name, category, duration_minutes, price
+     FROM medical_services WHERE tenant_id = $1 AND is_active = true ORDER BY name ASC`,
+    [tenantId]
+  );
+
+  return {
+    praticiens: pracs.rows.map((p) => ({
+      id: p.id,
+      nom: `${p.title || 'Dr'} ${p.first_name} ${p.last_name}`.trim(),
+      specialite: p.specialty_name || null,
+      specialites: p.specialites,
+      medecin_generaliste: p.is_general_practitioner === true
+    })),
+    prestations: services.rows.map((s) => ({
+      id: s.id, nom: s.name, categorie: s.category,
+      duree_minutes: s.duration_minutes, tarif_fcfa: s.price
+    })),
+    consigne: "Choisis le praticien dont la spécialité correspond au motif du patient. Si aucune spécialité ne correspond, propose un médecin généraliste, ou dis franchement que la clinique ne propose pas cette spécialité — n'oriente jamais vers un spécialiste sans rapport avec le motif."
+  };
+}
 
 /**
  * Vérification d'identité reprenant exactement les règles de publicVerifyPatient :
@@ -124,9 +174,12 @@ async function verifyPatientCodePublic(dbClient, tenantId, { patient_code, first
  * l'interface soumettra à POST /api/public/book après confirmation du patient.
  */
 async function prepareBooking(dbClient, tenantId, args) {
-  const { start_time, practitioner_id, patient_code, first_name, last_name, phone_number, is_new_patient, consultation_reason } = args;
+  const { start_time, practitioner_id, medical_service_id, patient_code, first_name, last_name, phone_number, is_new_patient, consultation_reason } = args;
 
   if (!start_time) throw new Error('La date et l\'heure du rendez-vous sont requises.');
+  if (!consultation_reason || !String(consultation_reason).trim()) {
+    return { ready: false, message: "Le motif de consultation est obligatoire : il détermine vers quel spécialiste orienter le patient. Demande-le avant de préparer la réservation." };
+  }
   const start = new Date(start_time);
   if (Number.isNaN(start.getTime())) throw new Error('Date et heure invalides, attendu un horodatage ISO 8601.');
   if (start.getTime() < Date.now()) throw new Error('Ce créneau est déjà passé. Propose une date future.');
@@ -156,6 +209,9 @@ async function prepareBooking(dbClient, tenantId, args) {
     booking_params: {
       start_time: start.toISOString(),
       practitioner_id: practitioner_id || null,
+      // Sans prestation explicite, /public/book en choisissait une par heuristique :
+      // le tarif annoncé pouvait ne correspondre ni au praticien ni au motif.
+      medical_service_id: medical_service_id || null,
       patient_code: isNew ? null : patient_code,
       first_name: first_name || null,
       last_name: last_name || null,
@@ -172,6 +228,7 @@ async function prepareBooking(dbClient, tenantId, args) {
 }
 
 const PUBLIC_TOOL_IMPLS = {
+  lister_praticiens_et_prestations: listPractitionersAndServices,
   chercher_creneaux_disponibles: searchAvailableSlots,
   verifier_code_patient: verifyPatientCodePublic,
   preparer_reservation: prepareBooking
