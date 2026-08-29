@@ -75,6 +75,10 @@ const getPublicClinic = async (req, res) => {
     console.error('Public clinic info error:', err.message);
     return res.status(500).json({ error: 'Erreur lors de la récupération des informations' });
   } finally {
+    // Filet : referme toute transaction restee ouverte (chemins d'erreur qui
+    // sortaient sans COMMIT ni ROLLBACK) avant de rendre la connexion au pool,
+    // sinon la requete suivante herite d'une transaction etrangere.
+    try { await client.query('ROLLBACK'); } catch (e) {}
     client.release();
   }
 };
@@ -96,6 +100,10 @@ const getPublicClinics = async (req, res) => {
     console.error('Public clinics list error:', err.message);
     return res.status(500).json({ error: 'Échec de chargement des cliniques' });
   } finally {
+    // Filet : referme toute transaction restee ouverte (chemins d'erreur qui
+    // sortaient sans COMMIT ni ROLLBACK) avant de rendre la connexion au pool,
+    // sinon la requete suivante herite d'une transaction etrangere.
+    try { await client.query('ROLLBACK'); } catch (e) {}
     client.release();
   }
 };
@@ -182,6 +190,10 @@ const publicVerifyPatient = async (req, res) => {
     console.error('Public verify patient error:', err.message);
     return res.status(500).json({ error: 'Erreur de vérification: ' + err.message });
   } finally {
+    // Filet : referme toute transaction restee ouverte (chemins d'erreur qui
+    // sortaient sans COMMIT ni ROLLBACK) avant de rendre la connexion au pool,
+    // sinon la requete suivante herite d'une transaction etrangere.
+    try { await client.query('ROLLBACK'); } catch (e) {}
     client.release();
   }
 };
@@ -395,6 +407,12 @@ const publicBookAppointment = async (req, res) => {
     const practitionerName = `${practitioner.title || 'Dr'} ${practitioner.first_name || ''} ${practitioner.last_name || ''}`.trim();
     const finalPrice = (parseFloat(price) > 0) ? price : (practitioner.consultation_fee || 15000);
 
+    // Sans ce COMMIT, la transaction ouverte au début restait ouverte : le patient
+    // recevait sa confirmation et son code, puis client.release() rendait la
+    // connexion au pool sans jamais valider — le patient ET le rendez-vous étaient
+    // perdus. Toute réservation par le portail public disparaissait silencieusement.
+    await client.query('COMMIT');
+
     return res.status(201).json({
       success: true,
       appointment: apptRes.rows[0],
@@ -433,6 +451,10 @@ const publicBookAppointment = async (req, res) => {
     }
     return res.status(500).json({ error: 'Échec de la réservation: ' + err.message });
   } finally {
+    // Filet : referme toute transaction restee ouverte (chemins d'erreur qui
+    // sortaient sans COMMIT ni ROLLBACK) avant de rendre la connexion au pool,
+    // sinon la requete suivante herite d'une transaction etrangere.
+    try { await client.query('ROLLBACK'); } catch (e) {}
     client.release();
   }
 };
@@ -591,6 +613,10 @@ const getPublicAvailableSlots = async (req, res) => {
     console.error('Error calculating available slots:', err.message);
     return res.status(500).json({ error: 'Erreur lors du calcul des disponibilités' });
   } finally {
+    // Filet : referme toute transaction restee ouverte (chemins d'erreur qui
+    // sortaient sans COMMIT ni ROLLBACK) avant de rendre la connexion au pool,
+    // sinon la requete suivante herite d'une transaction etrangere.
+    try { await client.query('ROLLBACK'); } catch (e) {}
     client.release();
   }
 };
