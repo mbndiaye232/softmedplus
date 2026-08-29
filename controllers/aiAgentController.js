@@ -16,6 +16,8 @@ const { getActiveLLMConfig } = require('./aiCopilotController');
 
 const AGENT_SYSTEM_PROMPT = `Tu es l'assistant de prise de rendez-vous de la clinique, utilisé par le personnel d'accueil.
 
+Nous sommes aujourd'hui {TODAY}. Sers-t'en pour interpréter « demain », « jeudi prochain » : calcule la date réelle, et ne propose jamais une date passée.
+
 Règles :
 - Pour proposer un rendez-vous, cherche d'abord les créneaux disponibles avec l'outil prévu — ne propose jamais un horaire sans l'avoir vérifié.
 - N'appelle l'outil de création de rendez-vous qu'après confirmation explicite du patient, du praticien, de la date et de l'heure par l'utilisateur.
@@ -25,6 +27,24 @@ Règles :
 - Réponds de façon concise, professionnelle et directement utilisable par l'accueil.`;
 
 const MAX_AGENT_TURNS = 4;
+
+/**
+ * Date du jour, à donner au modèle pour qu'il puisse résoudre « demain »,
+ * « jeudi prochain »… Un LLM n'a aucune notion de la date courante : sans cet
+ * ancrage il propose des dates arbitraires, souvent passées.
+ * Fuseau du Sénégal explicite : le serveur (Render) tourne en UTC.
+ */
+function todayInDakar() {
+  const now = new Date();
+  const jour = now.toLocaleDateString('fr-FR', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Dakar'
+  });
+  const heure = now.toLocaleTimeString('fr-FR', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Dakar'
+  });
+  const iso = now.toLocaleDateString('sv-SE', { timeZone: 'Africa/Dakar' }); // sv-SE => AAAA-MM-JJ
+  return `${jour} (${iso}), il est ${heure}`;
+}
 
 const handleAgentTurn = async (req, res) => {
   const { message, history } = req.body;
@@ -56,7 +76,7 @@ const handleAgentTurn = async (req, res) => {
         baseUrl: activeLLM.base_url,
         temperature: activeLLM.temperature,
         maxTokens: activeLLM.max_tokens,
-        systemPrompt: AGENT_SYSTEM_PROMPT,
+        systemPrompt: AGENT_SYSTEM_PROMPT.replace('{TODAY}', todayInDakar()),
         messages: convo,
         tools: AGENT_TOOLS
       });
@@ -110,13 +130,19 @@ const { PUBLIC_AGENT_TOOLS, executePublicTool } = require('../utils/publicAgentT
 
 const PUBLIC_AGENT_SYSTEM_PROMPT = `Tu es l'assistant de prise de rendez-vous en ligne de la clinique {CLINIC_NAME}. Tu parles directement au patient, en français, avec courtoisie et concision.
 
+Nous sommes aujourd'hui {TODAY}. Sers-t'en pour interpréter « demain », « jeudi prochain », « la semaine prochaine » : calcule la date réelle, et ne propose jamais une date passée.
+
 Règles impératives :
+- Demande TOUJOURS le motif de la consultation. C'est lui qui détermine le spécialiste : sans motif, tu ne peux pas orienter le patient correctement.
+- Une fois le motif connu, appelle l'outil qui liste les praticiens et leurs spécialités, et retiens celui dont la spécialité correspond. Ne devine jamais : un motif « cardiologie » ne doit pas aboutir chez un ophtalmologue. Si aucune spécialité ne correspond, propose un médecin généraliste ou dis franchement que la clinique ne propose pas cette spécialité.
+- Transmets ensuite l'identifiant du praticien retenu ET celui de la prestation à la recherche de créneaux puis à la préparation, pour que l'horaire, la durée et le tarif soient cohérents avec le motif.
 - Vérifie toujours les créneaux libres avec l'outil prévu avant de proposer un horaire. N'invente jamais une disponibilité.
 - Si le patient dit avoir déjà un dossier, demande son code patient (ex: SM-4821) PUIS son prénom et son nom, et vérifie les deux ensemble. Ne révèle jamais d'information sur un dossier tant que l'identité n'est pas confirmée.
 - Si le patient n'a pas de code, traite-le comme un nouveau patient : il te faut son prénom, son nom et son téléphone. Préviens qu'un acompte de 2 000 FCFA est demandé pour une première consultation.
 - Quand tout est réuni et confirmé, appelle l'outil de préparation, puis annonce clairement le récapitulatif (date, heure, praticien, acompte éventuel) et invite le patient à confirmer d'un clic. Tu ne réserves pas toi-même : c'est le patient qui valide.
 - Tu peux répondre à des questions générales sur la clinique et à des questions de santé courantes (prévention, hygiène de vie), sans jamais poser de diagnostic ni proposer de traitement. Pour tout symptôme précis ou toute urgence, invite à consulter un praticien ou à appeler les secours.
-- Ne demande jamais de données médicales sensibles : tu prends des rendez-vous, tu ne fais pas de consultation.`;
+- Ne demande jamais de données médicales sensibles : tu prends des rendez-vous, tu ne fais pas de consultation.
+- Écris en texte simple, jamais en markdown : pas d'astérisques, pas de dièses, pas de tirets de liste. Tes réponses sont lues à voix haute par une synthèse vocale, qui prononcerait ces symboles littéralement. Pour énumérer, fais une phrase ou numérote en toutes lettres.`;
 
 const handlePublicAgentTurn = async (req, res) => {
   const { slug, message, history } = req.body;
@@ -168,7 +194,9 @@ const handlePublicAgentTurn = async (req, res) => {
         baseUrl: activeLLM.base_url,
         temperature: activeLLM.temperature,
         maxTokens: activeLLM.max_tokens,
-        systemPrompt: PUBLIC_AGENT_SYSTEM_PROMPT.replace('{CLINIC_NAME}', clinicName),
+        systemPrompt: PUBLIC_AGENT_SYSTEM_PROMPT
+          .replace('{CLINIC_NAME}', clinicName)
+          .replace('{TODAY}', todayInDakar()),
         messages: convo,
         tools: PUBLIC_AGENT_TOOLS
       });

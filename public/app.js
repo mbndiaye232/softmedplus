@@ -13207,7 +13207,11 @@ function toggleVoiceListen() {
 function speakAI(text) {
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    // Même nettoyage que speakCopilotAI : sans lui, la voix française prononce
+    // « astérisques » sur le **gras** et « moins » sur les tirets de liste que
+    // produit le LLM. Ce chemin (portail public) avait été oublié lors du
+    // correctif initial, qui ne couvrait que le copilote côté clinique.
+    const u = new SpeechSynthesisUtterance(sanitizeForSpeechClient(text));
     u.lang = 'fr-FR';
     u.rate = 1.0;
     u.pitch = 1.0;
@@ -13277,7 +13281,9 @@ async function handleVoiceTranscriptWithLLM(userInput) {
     const hadPending = !!voicePendingBooking;
     voicePendingBooking = res.booking_params || null;
 
-    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(res.answer || '') });
+    // Le markdown du LLM est retiré aussi à l'affichage : le patient lit une bulle
+    // de conversation, pas un document — « **prénom** » doit se lire « prénom ».
+    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(sanitizeForSpeechClient(res.answer || '')) });
 
     // Le bouton de confirmation vit dans renderVoiceChannel, pas dans le fil de
     // discussion : il faut re-rendre la vue entière pour le faire apparaître ou disparaître.
