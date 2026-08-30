@@ -482,6 +482,147 @@ const getPractitioners = async (req, res) => {
   }
 };
 
+
+// ============================================================================
+// 3c. Modification & Annulation de rendez-vous
+// ============================================================================
+
+/**
+ * Reporte un rendez-vous (nouvel horaire, éventuellement autre praticien ou
+ * prestation) et/ou change son statut.
+ *
+ * La nouvelle plage est recalculée à partir de la durée de la prestation, comme
+ * à la création : sans cela un report vers une prestation de durée différente
+ * laisserait une plage incohérente et fausserait la détection de chevauchement.
+ */
+const updateAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { start_time, practitioner_id, medical_service_id, status, consultation_reason } = req.body;
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const existingRes = await req.dbClient.query(
+      `SELECT id, practitioner_id, medical_service_id, status,
+              lower(time_slot) AS start_time, upper(time_slot) AS end_time
+       FROM appointments WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    if (existingRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Rendez-vous introuvable.' });
+    }
+    const existing = existingRes.rows[0];
+
+    // Un rendez-vous déjà honoré ne se replanifie pas : le modifier réécrirait
+    // un acte médical qui a réellement eu lieu.
+    if (existing.status === 'COMPLETED') {
+      return res.status(409).json({
+        error: "Ce rendez-vous est déjà terminé et ne peut plus être modifié.",
+        appointment_completed: true
+      });
+    }
+
+    const finalPractitionerId = practitioner_id || existing.practitioner_id;
+    const finalServiceId = medical_service_id || existing.medical_service_id;
+
+    let startISO = existing.start_time;
+    let endISO = existing.end_time;
+
+    if (start_time) {
+      const startDate = new Date(start_time);
+      if (Number.isNaN(startDate.getTime())) {
+        return res.status(400).json({ error: 'Date et heure invalides (format ISO 8601 attendu).' });
+      }
+
+      const svcRes = await req.dbClient.query(
+        `SELECT duration_minutes FROM medical_services WHERE id = $1 AND tenant_id = $2`,
+        [finalServiceId, tenantId]
+      );
+      if (svcRes.rowCount === 0) {
+        return res.status(404).json({ error: 'Prestation médicale introuvable.' });
+      }
+      const duration = svcRes.rows[0].duration_minutes || 30;
+      startISO = startDate.toISOString();
+      endISO = new Date(startDate.getTime() + duration * 60 * 1000).toISOString();
+    }
+
+    const result = await req.dbClient.query(
+      `UPDATE appointments
+       SET practitioner_id = $1,
+           medical_service_id = $2,
+           time_slot = tstzrange($3, $4, '[)'),
+           status = COALESCE($5::appointment_status, status),
+           consultation_reason = COALESCE($6, consultation_reason)
+       WHERE id = $7 AND tenant_id = $8
+       RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
+      [finalPractitionerId, finalServiceId, startISO, endISO, status || null, consultation_reason || null, id, tenantId]
+    );
+
+    await logAudit(req, 'UPDATE_APPOINTMENT', 'appointments', id);
+    return res.status(200).json(result.rows[0]);
+
+  } catch (err) {
+    console.error('Update appointment error:', err.message);
+    if (err.code === '23P01') {
+      return res.status(409).json({
+        error: "Ce créneau est déjà occupé par un autre rendez-vous de ce praticien. Choisissez un autre horaire.",
+        slot_taken: true
+      });
+    }
+    if (err.code === '22P02') {
+      return res.status(400).json({ error: 'Statut de rendez-vous invalide.' });
+    }
+    return res.status(500).json({ error: 'Échec de la modification du rendez-vous : ' + err.message });
+  }
+};
+
+/**
+ * Annule un rendez-vous. L'annulation passe le statut à CANCELED plutôt que de
+ * supprimer la ligne : une facture peut y être rattachée (invoices.appointment_id),
+ * et l'historique des annulations et absences est une donnée de suivi médical.
+ * La contrainte no_overlapping_appointments excluant déjà CANCELED, le créneau
+ * redevient immédiatement réservable.
+ */
+const cancelAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body || {};
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const existingRes = await req.dbClient.query(
+      `SELECT id, status FROM appointments WHERE id = $1 AND tenant_id = $2`,
+      [id, tenantId]
+    );
+    if (existingRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Rendez-vous introuvable.' });
+    }
+    if (existingRes.rows[0].status === 'COMPLETED') {
+      return res.status(409).json({
+        error: "Ce rendez-vous est déjà terminé et ne peut plus être annulé.",
+        appointment_completed: true
+      });
+    }
+    if (existingRes.rows[0].status === 'CANCELED') {
+      return res.status(200).json({ success: true, already_canceled: true, message: 'Ce rendez-vous était déjà annulé.' });
+    }
+
+    const result = await req.dbClient.query(
+      `UPDATE appointments
+       SET status = 'CANCELED',
+           consultation_reason = COALESCE($1, consultation_reason)
+       WHERE id = $2 AND tenant_id = $3
+       RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
+      [reason ? `Annulé : ${reason}` : null, id, tenantId]
+    );
+
+    await logAudit(req, 'CANCEL_APPOINTMENT', 'appointments', id);
+    return res.status(200).json({ success: true, appointment: result.rows[0], message: 'Rendez-vous annulé. Le créneau est de nouveau disponible.' });
+
+  } catch (err) {
+    console.error('Cancel appointment error:', err.message);
+    return res.status(500).json({ error: "Échec de l'annulation du rendez-vous : " + err.message });
+  }
+};
+
 module.exports = {
   createMedicalService,
   getMedicalServices,
@@ -490,5 +631,7 @@ module.exports = {
   createAppointment,
   requestAppointmentBooking,
   getAppointments,
+  updateAppointment,
+  cancelAppointment,
   getPractitioners
 };
