@@ -80,7 +80,15 @@ function historyToOpenAI(messages) {
       };
     }
     if (m.role === 'tool') {
-      return { role: 'tool', tool_call_id: m.tool_call_id, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) };
+      // `name` est conservé en plus de tool_call_id : la corrélation par identifiant
+      // suffit au protocole, mais rappeler l'outil appelé aide le modèle à ne pas
+      // redemander une information qu'il vient d'obtenir.
+      return {
+        role: 'tool',
+        tool_call_id: m.tool_call_id,
+        ...(m.name ? { name: m.name } : {}),
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+      };
     }
     return { role: m.role, content: m.content };
   });
