@@ -63,6 +63,40 @@ const AGENT_TOOLS = [
       },
       required: ['patient_id', 'practitioner_id', 'medical_service_id', 'start_time']
     }
+  },
+  {
+    name: 'lister_rendez_vous_patient',
+    description: "Liste les rendez-vous à venir d'un patient. À utiliser avant toute annulation ou report, pour identifier précisément lequel modifier.",
+    parameters: {
+      type: 'object',
+      properties: { patient_id: { type: 'string', description: 'Identifiant du patient' } },
+      required: ['patient_id']
+    }
+  },
+  {
+    name: 'annuler_rendez_vous',
+    description: "Annule un rendez-vous ; le créneau redevient disponible. N'utilise cet outil qu'après avoir identifié le bon rendez-vous ET obtenu une confirmation explicite de l'utilisateur.",
+    parameters: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string' },
+        motif: { type: 'string', description: "Motif de l'annulation, si indiqué" }
+      },
+      required: ['appointment_id']
+    }
+  },
+  {
+    name: 'reporter_rendez_vous',
+    description: "Reporte un rendez-vous à un nouvel horaire. Vérifie d'abord que le créneau visé est libre. N'utilise cet outil qu'après confirmation explicite du nouvel horaire par l'utilisateur.",
+    parameters: {
+      type: 'object',
+      properties: {
+        appointment_id: { type: 'string' },
+        nouveau_debut: { type: 'string', description: 'Nouvelle date et heure de début, ISO 8601, ex: 2026-09-05T10:00:00' },
+        practitioner_id: { type: 'string', description: 'Nouveau praticien, si le patient souhaite en changer' }
+      },
+      required: ['appointment_id', 'nouveau_debut']
+    }
   }
 ];
 
@@ -200,11 +234,119 @@ async function bookAppointment(dbClient, tenantId, { patient_id, practitioner_id
   }
 }
 
+async function listPatientAppointments(dbClient, tenantId, { patient_id }) {
+  if (!patient_id) throw new Error('Le paramètre "patient_id" est requis.');
+  const r = await dbClient.query(
+    `SELECT a.id, a.status, a.consultation_reason,
+            lower(a.time_slot) AS debut, upper(a.time_slot) AS fin,
+            pr.first_name AS doc_prenom, pr.last_name AS doc_nom, pr.specialty_name AS doc_specialite,
+            ms.name AS prestation
+     FROM appointments a
+     LEFT JOIN practitioners pr ON a.practitioner_id = pr.id
+     LEFT JOIN medical_services ms ON a.medical_service_id = ms.id
+     WHERE a.tenant_id = $1 AND a.patient_id = $2
+       AND a.status NOT IN ('CANCELED', 'COMPLETED', 'NO_SHOW')
+       AND upper(a.time_slot) > NOW()
+     ORDER BY lower(a.time_slot) ASC
+     LIMIT 10`,
+    [tenantId, patient_id]
+  );
+  if (r.rowCount === 0) return { rendez_vous: [], message: "Ce patient n'a aucun rendez-vous à venir." };
+  return {
+    rendez_vous: r.rows.map((a) => ({
+      appointment_id: a.id,
+      debut: a.debut,
+      fin: a.fin,
+      statut: a.status,
+      motif: a.consultation_reason,
+      praticien: `${a.doc_prenom || ''} ${a.doc_nom || ''}`.trim(),
+      specialite: a.doc_specialite,
+      prestation: a.prestation
+    }))
+  };
+}
+
+/**
+ * Annulation par changement de statut, jamais par suppression : une facture peut
+ * être rattachée au rendez-vous (invoices.appointment_id, en ON DELETE SET NULL),
+ * et l'historique des annulations est une donnée de suivi. La contrainte
+ * no_overlapping_appointments excluant déjà CANCELED, le créneau redevient
+ * immédiatement réservable.
+ */
+async function cancelAppointmentTool(dbClient, tenantId, { appointment_id, motif }) {
+  if (!appointment_id) throw new Error('Le paramètre "appointment_id" est requis.');
+
+  const cur = await dbClient.query(
+    `SELECT status FROM appointments WHERE id = $1 AND tenant_id = $2`,
+    [appointment_id, tenantId]
+  );
+  if (cur.rowCount === 0) return { annule: false, message: 'Rendez-vous introuvable dans cette clinique.' };
+  if (cur.rows[0].status === 'COMPLETED') {
+    return { annule: false, message: "Ce rendez-vous est déjà terminé : il ne peut plus être annulé." };
+  }
+  if (cur.rows[0].status === 'CANCELED') {
+    return { annule: true, deja_annule: true, message: 'Ce rendez-vous était déjà annulé.' };
+  }
+
+  const r = await dbClient.query(
+    `UPDATE appointments
+     SET status = 'CANCELED', consultation_reason = COALESCE($1, consultation_reason)
+     WHERE id = $2 AND tenant_id = $3
+     RETURNING id`,
+    [motif ? `Annulé : ${motif}` : null, appointment_id, tenantId]
+  );
+  return { annule: true, appointment_id: r.rows[0].id, message: 'Rendez-vous annulé. Le créneau est de nouveau disponible.' };
+}
+
+async function rescheduleAppointmentTool(dbClient, tenantId, { appointment_id, nouveau_debut, practitioner_id }) {
+  if (!appointment_id || !nouveau_debut) throw new Error('appointment_id et nouveau_debut sont requis.');
+
+  const start = new Date(nouveau_debut);
+  if (Number.isNaN(start.getTime())) throw new Error('nouveau_debut invalide, attendu un horodatage ISO 8601.');
+  if (start.getTime() < Date.now()) return { reporte: false, message: 'Ce créneau est déjà passé. Propose une date future.' };
+
+  const cur = await dbClient.query(
+    `SELECT practitioner_id, medical_service_id, status FROM appointments WHERE id = $1 AND tenant_id = $2`,
+    [appointment_id, tenantId]
+  );
+  if (cur.rowCount === 0) return { reporte: false, message: 'Rendez-vous introuvable dans cette clinique.' };
+  if (cur.rows[0].status === 'COMPLETED') {
+    return { reporte: false, message: "Ce rendez-vous est déjà terminé : il ne peut plus être reporté." };
+  }
+
+  const finalDoc = practitioner_id || cur.rows[0].practitioner_id;
+  const svc = await dbClient.query(
+    `SELECT duration_minutes FROM medical_services WHERE id = $1 AND tenant_id = $2`,
+    [cur.rows[0].medical_service_id, tenantId]
+  );
+  const duration = (svc.rowCount > 0 && svc.rows[0].duration_minutes) || 30;
+  const end = new Date(start.getTime() + duration * 60 * 1000);
+
+  try {
+    const r = await dbClient.query(
+      `UPDATE appointments
+       SET time_slot = tstzrange($1, $2, '[)'), practitioner_id = $3
+       WHERE id = $4 AND tenant_id = $5
+       RETURNING id, lower(time_slot) AS debut, upper(time_slot) AS fin`,
+      [start.toISOString(), end.toISOString(), finalDoc, appointment_id, tenantId]
+    );
+    return { reporte: true, appointment_id: r.rows[0].id, debut: r.rows[0].debut, fin: r.rows[0].fin, message: 'Rendez-vous reporté.' };
+  } catch (err) {
+    if (err.code === '23P01') {
+      return { reporte: false, creneau_occupe: true, message: "Ce créneau est déjà pris pour ce praticien. Propose un autre horaire." };
+    }
+    throw err;
+  }
+}
+
 const TOOL_IMPLS = {
   chercher_creneaux_disponibles: searchAvailableSlots,
   verifier_patient_par_code: lookupPatientByCode,
   enregistrer_nouveau_patient: registerNewPatient,
-  prendre_rendez_vous: bookAppointment
+  prendre_rendez_vous: bookAppointment,
+  lister_rendez_vous_patient: listPatientAppointments,
+  annuler_rendez_vous: cancelAppointmentTool,
+  reporter_rendez_vous: rescheduleAppointmentTool
 };
 
 async function executeTool(name, args, { dbClient, tenantId }) {

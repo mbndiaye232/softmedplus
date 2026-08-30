@@ -195,6 +195,8 @@ app.delete('/api/practitioners-unavailabilities/:id', practitionerCtrl.deletePra
 app.post('/api/appointments', apptCtrl.createAppointment);
 app.post('/api/appointments/request-booking', apptCtrl.requestAppointmentBooking);
 app.get('/api/appointments', apptCtrl.getAppointments);
+app.put('/api/appointments/:id', apptCtrl.updateAppointment);
+app.delete('/api/appointments/:id', apptCtrl.cancelAppointment);
 
 // 4. Cash Drawer Sessions & Billing
 app.get('/api/billing/cash-registers', billingCtrl.getCashRegisters);

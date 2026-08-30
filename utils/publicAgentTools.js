@@ -74,6 +74,49 @@ const PUBLIC_AGENT_TOOLS = [
       },
       required: ['start_time', 'consultation_reason']
     }
+  },
+  {
+    name: 'lister_mes_rendez_vous',
+    description: "Liste les rendez-vous à venir du patient. Exige son code patient ET son prénom et nom, qui sont revérifiés. À utiliser avant toute annulation ou report.",
+    parameters: {
+      type: 'object',
+      properties: {
+        patient_code: { type: 'string', description: 'Code patient, ex: SM-4821' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' }
+      },
+      required: ['patient_code', 'first_name', 'last_name']
+    }
+  },
+  {
+    name: 'annuler_mon_rendez_vous',
+    description: "Annule un rendez-vous du patient. Exige son code patient et son nom, revérifiés, et le rendez-vous doit lui appartenir. N'appelle cet outil qu'après avoir listé ses rendez-vous et obtenu sa confirmation explicite du rendez-vous à annuler.",
+    parameters: {
+      type: 'object',
+      properties: {
+        patient_code: { type: 'string' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        appointment_id: { type: 'string', description: 'Identifiant du rendez-vous, issu de lister_mes_rendez_vous' },
+        motif: { type: 'string', description: "Motif de l'annulation, si le patient l'indique" }
+      },
+      required: ['patient_code', 'first_name', 'last_name', 'appointment_id']
+    }
+  },
+  {
+    name: 'reporter_mon_rendez_vous',
+    description: "Reporte un rendez-vous du patient à un nouvel horaire. Exige son code patient et son nom, revérifiés, et le rendez-vous doit lui appartenir. Vérifie d'abord que le créneau visé est libre, puis obtiens sa confirmation explicite.",
+    parameters: {
+      type: 'object',
+      properties: {
+        patient_code: { type: 'string' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        appointment_id: { type: 'string', description: 'Identifiant du rendez-vous, issu de lister_mes_rendez_vous' },
+        nouveau_debut: { type: 'string', description: 'Nouvelle date et heure, ISO 8601' }
+      },
+      required: ['patient_code', 'first_name', 'last_name', 'appointment_id', 'nouveau_debut']
+    }
   }
 ];
 
@@ -227,11 +270,144 @@ async function prepareBooking(dbClient, tenantId, args) {
   };
 }
 
+/**
+ * Revérifie l'identité côté serveur et renvoie le patient, ou null.
+ *
+ * Chaque outil agissant sur un rendez-vous repasse par ici : le modèle ne doit
+ * jamais pouvoir court-circuiter la vérification en affirmant simplement dans la
+ * conversation que l'identité a été confirmée. Sur un portail public non
+ * authentifié, c'est la seule barrière entre un patient et le rendez-vous d'un
+ * autre.
+ */
+async function requireVerifiedPatient(dbClient, tenantId, { patient_code, first_name, last_name }) {
+  if (!patient_code || !first_name || !last_name) return null;
+  const check = await verifyPatientCodePublic(dbClient, tenantId, { patient_code, first_name, last_name });
+  if (!check.verified) return null;
+  const r = await dbClient.query(
+    `SELECT id, first_name, last_name FROM patients
+     WHERE tenant_id = $1 AND UPPER(TRIM(patient_code)) = UPPER(TRIM($2)) LIMIT 1`,
+    [tenantId, patient_code]
+  );
+  return r.rowCount > 0 ? r.rows[0] : null;
+}
+
+async function listMyAppointments(dbClient, tenantId, args) {
+  const patient = await requireVerifiedPatient(dbClient, tenantId, args);
+  if (!patient) {
+    return { verified: false, message: "Identité non confirmée. Demande le code patient ET le prénom et nom, puis réessaie." };
+  }
+
+  const r = await dbClient.query(
+    `SELECT a.id, a.status, a.consultation_reason,
+            lower(a.time_slot) AS debut, upper(a.time_slot) AS fin,
+            pr.first_name AS doc_prenom, pr.last_name AS doc_nom, pr.specialty_name AS doc_specialite
+     FROM appointments a
+     LEFT JOIN practitioners pr ON a.practitioner_id = pr.id
+     WHERE a.tenant_id = $1 AND a.patient_id = $2
+       AND a.status NOT IN ('CANCELED', 'COMPLETED', 'NO_SHOW')
+       AND upper(a.time_slot) > NOW()
+     ORDER BY lower(a.time_slot) ASC
+     LIMIT 10`,
+    [tenantId, patient.id]
+  );
+
+  if (r.rowCount === 0) return { verified: true, rendez_vous: [], message: "Vous n'avez aucun rendez-vous à venir." };
+  return {
+    verified: true,
+    rendez_vous: r.rows.map((a) => ({
+      appointment_id: a.id,
+      debut: a.debut,
+      fin: a.fin,
+      motif: a.consultation_reason,
+      praticien: `${a.doc_prenom || ''} ${a.doc_nom || ''}`.trim(),
+      specialite: a.doc_specialite
+    }))
+  };
+}
+
+/**
+ * Vérifie que le rendez-vous visé appartient bien au patient identifié.
+ * Sans ce contrôle, un identifiant de rendez-vous deviné ou repris d'une autre
+ * conversation permettrait d'agir sur le rendez-vous d'autrui.
+ */
+async function ownedAppointment(dbClient, tenantId, patientId, appointmentId) {
+  const r = await dbClient.query(
+    `SELECT id, status, practitioner_id, medical_service_id
+     FROM appointments WHERE id = $1 AND tenant_id = $2 AND patient_id = $3`,
+    [appointmentId, tenantId, patientId]
+  );
+  return r.rowCount > 0 ? r.rows[0] : null;
+}
+
+async function cancelMyAppointment(dbClient, tenantId, args) {
+  const patient = await requireVerifiedPatient(dbClient, tenantId, args);
+  if (!patient) {
+    return { annule: false, message: "Identité non confirmée. Demande le code patient ET le prénom et nom, puis réessaie." };
+  }
+  if (!args.appointment_id) return { annule: false, message: 'Précise quel rendez-vous annuler.' };
+
+  const appt = await ownedAppointment(dbClient, tenantId, patient.id, args.appointment_id);
+  if (!appt) return { annule: false, message: "Ce rendez-vous n'existe pas ou ne vous appartient pas." };
+  if (appt.status === 'COMPLETED') return { annule: false, message: 'Ce rendez-vous est déjà passé et ne peut plus être annulé.' };
+  if (appt.status === 'CANCELED') return { annule: true, deja_annule: true, message: 'Ce rendez-vous était déjà annulé.' };
+
+  await dbClient.query(
+    `UPDATE appointments
+     SET status = 'CANCELED', consultation_reason = COALESCE($1, consultation_reason)
+     WHERE id = $2 AND tenant_id = $3`,
+    [args.motif ? `Annulé : ${args.motif}` : null, args.appointment_id, tenantId]
+  );
+  return { annule: true, message: 'Votre rendez-vous a bien été annulé.' };
+}
+
+async function rescheduleMyAppointment(dbClient, tenantId, args) {
+  const patient = await requireVerifiedPatient(dbClient, tenantId, args);
+  if (!patient) {
+    return { reporte: false, message: "Identité non confirmée. Demande le code patient ET le prénom et nom, puis réessaie." };
+  }
+  if (!args.appointment_id || !args.nouveau_debut) {
+    return { reporte: false, message: 'Précise le rendez-vous à reporter et le nouvel horaire.' };
+  }
+
+  const start = new Date(args.nouveau_debut);
+  if (Number.isNaN(start.getTime())) return { reporte: false, message: 'Nouvel horaire invalide.' };
+  if (start.getTime() < Date.now()) return { reporte: false, message: 'Ce créneau est déjà passé. Propose une date future.' };
+
+  const appt = await ownedAppointment(dbClient, tenantId, patient.id, args.appointment_id);
+  if (!appt) return { reporte: false, message: "Ce rendez-vous n'existe pas ou ne vous appartient pas." };
+  if (appt.status === 'COMPLETED') return { reporte: false, message: 'Ce rendez-vous est déjà passé et ne peut plus être reporté.' };
+
+  const svc = await dbClient.query(
+    `SELECT duration_minutes FROM medical_services WHERE id = $1 AND tenant_id = $2`,
+    [appt.medical_service_id, tenantId]
+  );
+  const duration = (svc.rowCount > 0 && svc.rows[0].duration_minutes) || 30;
+  const end = new Date(start.getTime() + duration * 60 * 1000);
+
+  try {
+    const r = await dbClient.query(
+      `UPDATE appointments SET time_slot = tstzrange($1, $2, '[)')
+       WHERE id = $3 AND tenant_id = $4
+       RETURNING lower(time_slot) AS debut, upper(time_slot) AS fin`,
+      [start.toISOString(), end.toISOString(), args.appointment_id, tenantId]
+    );
+    return { reporte: true, debut: r.rows[0].debut, fin: r.rows[0].fin, message: 'Votre rendez-vous a bien été reporté.' };
+  } catch (err) {
+    if (err.code === '23P01') {
+      return { reporte: false, creneau_occupe: true, message: 'Ce créneau vient d\'être pris. Propose un autre horaire.' };
+    }
+    throw err;
+  }
+}
+
 const PUBLIC_TOOL_IMPLS = {
   lister_praticiens_et_prestations: listPractitionersAndServices,
   chercher_creneaux_disponibles: searchAvailableSlots,
   verifier_code_patient: verifyPatientCodePublic,
-  preparer_reservation: prepareBooking
+  preparer_reservation: prepareBooking,
+  lister_mes_rendez_vous: listMyAppointments,
+  annuler_mon_rendez_vous: cancelMyAppointment,
+  reporter_mon_rendez_vous: rescheduleMyAppointment
 };
 
 async function executePublicTool(name, args, { dbClient, tenantId }) {
