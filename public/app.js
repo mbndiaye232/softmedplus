@@ -1453,6 +1453,108 @@ function resetAgendaToday() {
   navigate('agenda');
 }
 
+// ----------------------------------------------------------------------------
+// Annulation & report d'un rendez-vous depuis l'agenda
+// ----------------------------------------------------------------------------
+
+async function cancelAppointmentUI(appointmentId, patientLabel, timeStr) {
+  const reason = window.prompt(
+    `Annuler le rendez-vous de ${patientLabel} à ${timeStr} ?\n\nLe créneau redeviendra disponible. Motif (facultatif) :`,
+    ''
+  );
+  // prompt renvoie null si l'utilisateur annule la boîte de dialogue elle-même :
+  // une chaîne vide reste une confirmation valide sans motif.
+  if (reason === null) return;
+
+  try {
+    const res = await api.request(`/appointments/${appointmentId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason: reason.trim() || undefined })
+    });
+    showToast(res.message || 'Rendez-vous annulé.', 'success');
+    navigate('agenda');
+  } catch (err) {
+    showToast(`Échec de l'annulation : ${err.message}`, 'error');
+  }
+}
+
+function openRescheduleModal(appointmentId, patientLabel, currentStartISO) {
+  let modal = document.getElementById('reschedule-modal');
+  if (!modal) {
+    const div = document.createElement('div');
+    div.className = 'modal-overlay';
+    div.id = 'reschedule-modal';
+    div.style.cssText = 'display:none; justify-content:center; align-items:center; z-index:3200;';
+    div.innerHTML = `
+      <div class="modal-container" style="width:460px; max-width:96%; padding:22px;">
+        <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+          <h4 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">
+            <i class="fas fa-clock text-primary"></i> Reporter le rendez-vous
+          </h4>
+          <button class="modal-close" onclick="closeRescheduleModal()">&times;</button>
+        </div>
+        <form onsubmit="submitReschedule(event)">
+          <input type="hidden" id="reschedule-appt-id" />
+          <div style="font-size:0.86rem; color:var(--text-primary); margin-bottom:12px;">
+            Patient : <strong id="reschedule-patient"></strong>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nouvelle date et heure *</label>
+            <input type="datetime-local" class="form-control" id="reschedule-start" required />
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:4px;">
+              La durée est reprise de la prestation. Si le créneau est déjà pris, le report sera refusé.
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:15px; margin-top:6px;">
+            <button type="button" class="btn btn-secondary" onclick="closeRescheduleModal()">Annuler</button>
+            <button type="submit" class="btn btn-primary" style="font-weight:700;">
+              <i class="fas fa-check"></i> Confirmer le report
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(div);
+    modal = div;
+  }
+
+  document.getElementById('reschedule-appt-id').value = appointmentId;
+  document.getElementById('reschedule-patient').innerText = patientLabel;
+
+  // Pré-remplit avec l'horaire actuel, en heure locale : un datetime-local
+  // n'accepte pas un horodatage UTC avec suffixe Z.
+  const d = new Date(currentStartISO);
+  const pad = (n) => String(n).padStart(2, '0');
+  document.getElementById('reschedule-start').value =
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  modal.style.display = 'flex';
+}
+
+function closeRescheduleModal() {
+  const modal = document.getElementById('reschedule-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitReschedule(e) {
+  e.preventDefault();
+  const appointmentId = document.getElementById('reschedule-appt-id').value;
+  const newStart = document.getElementById('reschedule-start').value;
+  if (!newStart) return;
+
+  try {
+    await api.request(`/appointments/${appointmentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ start_time: new Date(newStart).toISOString() })
+    });
+    showToast('Rendez-vous reporté.', 'success');
+    closeRescheduleModal();
+    navigate('agenda');
+  } catch (err) {
+    showToast(`Échec du report : ${err.message}`, 'error');
+  }
+}
+
 function quickSelectSlot(timeStr) {
   const timeInput = document.getElementById('book-start-time');
   if (timeInput) {
@@ -1961,8 +2063,14 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                     </div>
                     <div class="slot-content" style="background:#fff5f5; border-bottom:1px solid #fee2e2; padding:6px 10px;">
                       ${slotAppts.map(appt => {
-                        const startTimeStr = new Date(appt.start_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                        const apptStart = new Date(appt.start_time);
+                        const startTimeStr = apptStart.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
                         const endTimeStr = appt.end_time ? new Date(appt.end_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                        // Un rendez-vous de 30 min occupe deux lignes de 15 min : les actions
+                        // ne s'affichent que sur sa ligne de début, pour ne pas les dupliquer.
+                        const isStartRow = (apptStart.getHours() * 60 + apptStart.getMinutes()) === slotMinutes;
+                        const canAct = isStartRow && appt.status !== 'COMPLETED';
+                        const patientLabel = `${appt.patient_first || ''} ${appt.patient_last || ''}`.trim().replace(/'/g, "\\'");
                         return `
                           <div style="background:#ffffff; border:1px solid #fca5a5; border-left:4px solid #ef4444; border-radius:6px; padding:6px 10px; box-shadow:0 1px 3px rgba(239,68,68,0.08);">
                             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -1985,6 +2093,18 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                                 ${appt.booking_channel === 'VOICE_AGENT' ? 'Vocal IA' : (appt.booking_channel === 'WHATSAPP' ? 'WhatsApp' : (appt.booking_channel === 'WEB_PWA' ? 'En ligne' : 'Guichet'))}
                               </span>
                             </div>
+                            ${canAct ? `
+                              <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca;">
+                                <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
+                                        onclick="openRescheduleModal('${appt.id}', '${patientLabel}', '${appt.start_time}')">
+                                  <i class="fas fa-clock"></i> Reporter
+                                </button>
+                                <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px; color:#b91c1c; border-color:#fca5a5;"
+                                        onclick="cancelAppointmentUI('${appt.id}', '${patientLabel}', '${startTimeStr}')">
+                                  <i class="fas fa-times-circle"></i> Annuler
+                                </button>
+                              </div>
+                            ` : ''}
                           </div>
                         `;
                       }).join('')}
