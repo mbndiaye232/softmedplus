@@ -202,7 +202,11 @@ const handleCopilotQuery = async (req, res) => {
             // l'assistant restait vide dès qu'un LLM répondait réellement, alors
             // que le fallback local (rare) s'affichait correctement.
             response_markdown: llmResult.content,
-            response_speech: sanitizeForSpeech(llmResult.content).slice(0, 300),
+            // Texte lu intégralement : il était coupé à 300 caractères, ce qui
+            // interrompait la voix en pleine phrase sur toute synthèse un peu
+            // développée. Le découpage nécessaire à la synthèse vocale se fait
+            // côté client, phrase par phrase.
+            response_speech: sanitizeForSpeech(llmResult.content),
             category: 'LLM_INTELLIGENCE',
             llm_provider: activeLLM.provider_name,
             llm_model: activeLLM.model_name,

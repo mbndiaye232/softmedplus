@@ -13354,23 +13354,40 @@ function speakAI(text) {
     // « astérisques » sur le **gras** et « moins » sur les tirets de liste que
     // produit le LLM. Ce chemin (portail public) avait été oublié lors du
     // correctif initial, qui ne couvrait que le copilote côté clinique.
-    const u = new SpeechSynthesisUtterance(sanitizeForSpeechClient(text));
-    u.lang = 'fr-FR';
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    u.onstart = () => {
-      voiceIsSpeaking = true;
-      updateVoiceUI();
-    };
-    u.onend = () => {
-      voiceIsSpeaking = false;
-      updateVoiceUI();
-      // Auto listen after speaking if not completed
-      if (voiceStep < 7 && voiceRecognition && !voiceIsListening) {
-        try { voiceRecognition.start(); } catch(e) {}
+    // Découpage en fragments courts : Chrome interrompt une énonciation unique au
+    // bout d'une quinzaine de secondes, ce qui coupait la voix en pleine phrase.
+    const fragments = splitForSpeech(sanitizeForSpeechClient(text));
+    if (fragments.length === 0) return;
+
+    voiceIsSpeaking = true;
+    updateVoiceUI();
+
+    fragments.forEach((fragment, index) => {
+      const u = new SpeechSynthesisUtterance(fragment);
+      u.lang = 'fr-FR';
+      u.rate = 1.0;
+      u.pitch = 1.0;
+
+      // On ne réécoute qu'après le DERNIER fragment : reprendre le micro entre
+      // deux phrases couperait la parole de l'agent.
+      if (index === fragments.length - 1) {
+        u.onend = () => {
+          voiceIsSpeaking = false;
+          updateVoiceUI();
+          // Auto listen after speaking if not completed
+          if (voiceStep < 7 && voiceRecognition && !voiceIsListening) {
+            try { voiceRecognition.start(); } catch(e) {}
+          }
+        };
       }
-    };
-    window.speechSynthesis.speak(u);
+
+      u.onerror = () => {
+        voiceIsSpeaking = false;
+        updateVoiceUI();
+      };
+
+      window.speechSynthesis.speak(u);
+    });
   }
 }
 
@@ -15872,31 +15889,74 @@ function sanitizeForSpeechClient(text) {
     .trim();
 }
 
+// Découpe un texte en fragments prononçables d'environ 180 caractères, sans couper
+// un mot. Chrome interrompt une énonciation unique au bout d'une quinzaine de
+// secondes : c'est ce qui arrêtait la voix en pleine phrase sur les synthèses
+// cliniques un peu développées. Enchaîner de courts fragments contourne la limite.
+function splitForSpeech(text, maxLen = 180) {
+  const phrases = text.split(/(?<=[.!?…:;])\s+/);
+  const fragments = [];
+  let courant = '';
+
+  for (const phrase of phrases) {
+    // Une phrase déjà plus longue que la limite est recoupée sur les espaces.
+    if (phrase.length > maxLen) {
+      if (courant) { fragments.push(courant); courant = ''; }
+      let reste = phrase;
+      while (reste.length > maxLen) {
+        let coupe = reste.lastIndexOf(' ', maxLen);
+        if (coupe <= 0) coupe = maxLen;
+        fragments.push(reste.slice(0, coupe).trim());
+        reste = reste.slice(coupe).trim();
+      }
+      if (reste) courant = reste;
+      continue;
+    }
+
+    if ((courant + ' ' + phrase).trim().length > maxLen) {
+      fragments.push(courant);
+      courant = phrase;
+    } else {
+      courant = (courant ? courant + ' ' : '') + phrase;
+    }
+  }
+
+  if (courant.trim()) fragments.push(courant.trim());
+  return fragments.filter(Boolean);
+}
+
 function speakCopilotAI(text) {
   if (!('speechSynthesis' in window) || !text) return;
   window.speechSynthesis.cancel();
 
-  const u = new SpeechSynthesisUtterance(sanitizeForSpeechClient(text));
-  u.lang = 'fr-FR';
-  u.rate = 1.05;
-  u.pitch = 1.0;
+  const fragments = splitForSpeech(sanitizeForSpeechClient(text));
+  if (fragments.length === 0) return;
 
-  u.onstart = () => {
-    copilotIsSpeaking = true;
-    updateCopilotVoiceUI();
-  };
+  copilotIsSpeaking = true;
+  updateCopilotVoiceUI();
 
-  u.onend = () => {
-    copilotIsSpeaking = false;
-    updateCopilotVoiceUI();
-  };
+  fragments.forEach((fragment, index) => {
+    const u = new SpeechSynthesisUtterance(fragment);
+    u.lang = 'fr-FR';
+    u.rate = 1.05;
+    u.pitch = 1.0;
 
-  u.onerror = () => {
-    copilotIsSpeaking = false;
-    updateCopilotVoiceUI();
-  };
+    // L'indicateur ne retombe qu'à la fin du dernier fragment, sinon il
+    // clignoterait entre chaque phrase.
+    if (index === fragments.length - 1) {
+      u.onend = () => {
+        copilotIsSpeaking = false;
+        updateCopilotVoiceUI();
+      };
+    }
 
-  window.speechSynthesis.speak(u);
+    u.onerror = () => {
+      copilotIsSpeaking = false;
+      updateCopilotVoiceUI();
+    };
+
+    window.speechSynthesis.speak(u);
+  });
 }
 
 function setCopilotMode(mode) {
