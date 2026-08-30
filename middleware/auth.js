@@ -44,7 +44,11 @@ const requireSaasAdmin = (req, res, next) => {
 };
 
 // 4. Granular Permission Checker (module, action: 'view' | 'create' | 'update' | 'delete')
-const checkPermission = (moduleName, action = 'view') => {
+// Action non précisée => déduite de la méthode HTTP (GET=view, POST=create,
+// PUT/PATCH=update, DELETE=delete). Le défaut était 'view', ce qui rendait la
+// déduction inatteignable : une route protégée n'aurait alors exigé que le droit
+// de consultation, y compris pour créer ou supprimer.
+const checkPermission = (moduleName, action = null) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Non authentifié' });

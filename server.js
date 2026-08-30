@@ -4,7 +4,7 @@ const path = require('path');
 const multer = require('multer');
 require('dotenv').config();
 
-const { verifyToken, checkWriteAccess } = require('./middleware/auth');
+const { verifyToken, checkWriteAccess, checkPermission } = require('./middleware/auth');
 const { tenantIsolator } = require('./middleware/tenant');
 const { uploadFile } = require('./utils/storage');
 
@@ -122,151 +122,151 @@ app.use('/api', tenantIsolator);
 app.use('/api', checkWriteAccess); // Simple user write protection (blocks modifications for read-only roles)
 
 // 1. Payment Gateway Settings & Initialization
-app.get('/api/payment-methods', paymentCtrl.getPaymentMethods);
-app.post('/api/payment-methods', paymentCtrl.configurePaymentMethod);
-app.delete('/api/payment-methods/:id', paymentCtrl.deletePaymentMethod);
-app.post('/api/payments/initialize', paymentCtrl.initializeOnlinePayment);
-app.post('/api/payments/record', paymentCtrl.recordPayment);
+app.get('/api/payment-methods', checkPermission('settings'), paymentCtrl.getPaymentMethods);
+app.post('/api/payment-methods', checkPermission('settings'), paymentCtrl.configurePaymentMethod);
+app.delete('/api/payment-methods/:id', checkPermission('settings'), paymentCtrl.deletePaymentMethod);
+app.post('/api/payments/initialize', checkPermission('cash_register'), paymentCtrl.initializeOnlinePayment);
+app.post('/api/payments/record', checkPermission('cash_register'), paymentCtrl.recordPayment);
 
 // 2. Patient Registry & DPI 360
-app.post('/api/patients', patientCtrl.registerPatient);
-app.get('/api/patients', patientCtrl.getPatients);
-app.put('/api/patients/:id', patientCtrl.updatePatient);
-app.post('/api/clinical/consultations', patientCtrl.createConsultation);
-app.put('/api/clinical/consultations/:id', patientCtrl.updateConsultation);
-app.delete('/api/clinical/consultations/:id', patientCtrl.deleteConsultation);
-app.get('/api/clinical/prescriptions/:id', patientCtrl.getPrescriptionDetails);
+app.post('/api/patients', checkPermission('patients'), patientCtrl.registerPatient);
+app.get('/api/patients', checkPermission('patients'), patientCtrl.getPatients);
+app.put('/api/patients/:id', checkPermission('patients'), patientCtrl.updatePatient);
+app.post('/api/clinical/consultations', checkPermission('consultations'), patientCtrl.createConsultation);
+app.put('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.updateConsultation);
+app.delete('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.deleteConsultation);
+app.get('/api/clinical/prescriptions/:id', checkPermission('prescriptions'), patientCtrl.getPrescriptionDetails);
 
 // 2b. Patient Statuses CRUD
-app.get('/api/patient-statuses', patientStatusCtrl.getStatuses);
-app.post('/api/patient-statuses', patientStatusCtrl.createStatus);
-app.put('/api/patient-statuses/:id', patientStatusCtrl.updateStatus);
-app.delete('/api/patient-statuses/:id', patientStatusCtrl.deleteStatus);
+app.get('/api/patient-statuses', checkPermission('settings'), patientStatusCtrl.getStatuses);
+app.post('/api/patient-statuses', checkPermission('settings'), patientStatusCtrl.createStatus);
+app.put('/api/patient-statuses/:id', checkPermission('settings'), patientStatusCtrl.updateStatus);
+app.delete('/api/patient-statuses/:id', checkPermission('settings'), patientStatusCtrl.deleteStatus);
 
 // 2c. Patient Medical 360° Dossier, Confidential Access Grants, Treatments & Lab Orders
-app.get('/api/patients/:patientId/dossier', medicalHistoryCtrl.getPatientDossier);
-app.get('/api/patients/:patientId/access-grants', medicalHistoryCtrl.getPatientAccessGrants);
-app.post('/api/patients/:patientId/access-grants', medicalHistoryCtrl.grantPatientAccess);
-app.delete('/api/patients/:patientId/access-grants/:grantId', medicalHistoryCtrl.revokePatientAccess);
+app.get('/api/patients/:patientId/dossier', checkPermission('patients'), medicalHistoryCtrl.getPatientDossier);
+app.get('/api/patients/:patientId/access-grants', checkPermission('patients'), medicalHistoryCtrl.getPatientAccessGrants);
+app.post('/api/patients/:patientId/access-grants', checkPermission('patients'), medicalHistoryCtrl.grantPatientAccess);
+app.delete('/api/patients/:patientId/access-grants/:grantId', checkPermission('patients'), medicalHistoryCtrl.revokePatientAccess);
 
-app.get('/api/patients/:patientId/treatments', medicalHistoryCtrl.getTreatments);
-app.post('/api/patients/:patientId/treatments', medicalHistoryCtrl.createTreatment);
-app.put('/api/patients/treatments/:id', medicalHistoryCtrl.updateTreatment);
-app.delete('/api/patients/treatments/:id', medicalHistoryCtrl.deleteTreatment);
+app.get('/api/patients/:patientId/treatments', checkPermission('patients'), medicalHistoryCtrl.getTreatments);
+app.post('/api/patients/:patientId/treatments', checkPermission('patients'), medicalHistoryCtrl.createTreatment);
+app.put('/api/patients/treatments/:id', checkPermission('patients'), medicalHistoryCtrl.updateTreatment);
+app.delete('/api/patients/treatments/:id', checkPermission('patients'), medicalHistoryCtrl.deleteTreatment);
 
-app.get('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.getLabOrders);
-app.post('/api/patients/:patientId/lab-orders', medicalHistoryCtrl.createLabOrder);
-app.put('/api/patients/lab-orders/:id', medicalHistoryCtrl.updateLabOrder);
-app.delete('/api/patients/lab-orders/:id', medicalHistoryCtrl.deleteLabOrder);
+app.get('/api/patients/:patientId/lab-orders', checkPermission('patients'), medicalHistoryCtrl.getLabOrders);
+app.post('/api/patients/:patientId/lab-orders', checkPermission('patients'), medicalHistoryCtrl.createLabOrder);
+app.put('/api/patients/lab-orders/:id', checkPermission('patients'), medicalHistoryCtrl.updateLabOrder);
+app.delete('/api/patients/lab-orders/:id', checkPermission('patients'), medicalHistoryCtrl.deleteLabOrder);
 
 // 2d. Patient Verification by Unique Code & Cross-Check Identity
-app.get('/api/patients/verify-code', patientCtrl.verifyPatientCode);
-app.post('/api/patients/verify-code', patientCtrl.verifyPatientCode);
+app.get('/api/patients/verify-code', checkPermission('patients'), patientCtrl.verifyPatientCode);
+app.post('/api/patients/verify-code', checkPermission('patients'), patientCtrl.verifyPatientCode);
 
 // 3. Appointments & Scheduling catalog (Medical Services / Consultations & Treatments CRUD)
-app.post('/api/medical-services', apptCtrl.createMedicalService);
-app.get('/api/medical-services', apptCtrl.getMedicalServices);
-app.put('/api/medical-services/:id', apptCtrl.updateMedicalService);
-app.delete('/api/medical-services/:id', apptCtrl.deleteMedicalService);
+app.post('/api/medical-services', checkPermission('practitioners'), apptCtrl.createMedicalService);
+app.get('/api/medical-services', checkPermission('practitioners'), apptCtrl.getMedicalServices);
+app.put('/api/medical-services/:id', checkPermission('practitioners'), apptCtrl.updateMedicalService);
+app.delete('/api/medical-services/:id', checkPermission('practitioners'), apptCtrl.deleteMedicalService);
 
 // 3b. Medical Specialties CRUD
-app.get('/api/specialties', practitionerCtrl.getSpecialties);
-app.post('/api/specialties', practitionerCtrl.createSpecialty);
-app.put('/api/specialties/:id', practitionerCtrl.updateSpecialty);
-app.delete('/api/specialties/:id', practitionerCtrl.deleteSpecialty);
+app.get('/api/specialties', checkPermission('practitioners'), practitionerCtrl.getSpecialties);
+app.post('/api/specialties', checkPermission('practitioners'), practitionerCtrl.createSpecialty);
+app.put('/api/specialties/:id', checkPermission('practitioners'), practitionerCtrl.updateSpecialty);
+app.delete('/api/specialties/:id', checkPermission('practitioners'), practitionerCtrl.deleteSpecialty);
 
 // 3c. Medical Departments / Services Hospitaliers CRUD
-app.get('/api/departments', practitionerCtrl.getDepartments);
-app.post('/api/departments', practitionerCtrl.createDepartment);
-app.put('/api/departments/:id', practitionerCtrl.updateDepartment);
-app.delete('/api/departments/:id', practitionerCtrl.deleteDepartment);
+app.get('/api/departments', checkPermission('practitioners'), practitionerCtrl.getDepartments);
+app.post('/api/departments', checkPermission('practitioners'), practitionerCtrl.createDepartment);
+app.put('/api/departments/:id', checkPermission('practitioners'), practitionerCtrl.updateDepartment);
+app.delete('/api/departments/:id', checkPermission('practitioners'), practitionerCtrl.deleteDepartment);
 
 // 3d. Practitioners & Doctors CRUD (Grades, Multi-Specialties & Departments)
-app.get('/api/practitioners', practitionerCtrl.getPractitioners);
-app.post('/api/practitioners', practitionerCtrl.createPractitioner);
-app.put('/api/practitioners/:id', practitionerCtrl.updatePractitioner);
-app.delete('/api/practitioners/:id', practitionerCtrl.deletePractitioner);
+app.get('/api/practitioners', checkPermission('practitioners'), practitionerCtrl.getPractitioners);
+app.post('/api/practitioners', checkPermission('practitioners'), practitionerCtrl.createPractitioner);
+app.put('/api/practitioners/:id', checkPermission('practitioners'), practitionerCtrl.updatePractitioner);
+app.delete('/api/practitioners/:id', checkPermission('practitioners'), practitionerCtrl.deletePractitioner);
 
 // 3e. Practitioner Unavailabilities & Absences
-app.get('/api/practitioners/:practitionerId/unavailabilities', practitionerCtrl.getPractitionerUnavailabilities);
-app.post('/api/practitioners-unavailabilities', practitionerCtrl.createPractitionerUnavailability);
-app.delete('/api/practitioners-unavailabilities/:id', practitionerCtrl.deletePractitionerUnavailability);
+app.get('/api/practitioners/:practitionerId/unavailabilities', checkPermission('practitioners'), practitionerCtrl.getPractitionerUnavailabilities);
+app.post('/api/practitioners-unavailabilities', checkPermission('practitioners'), practitionerCtrl.createPractitionerUnavailability);
+app.delete('/api/practitioners-unavailabilities/:id', checkPermission('practitioners'), practitionerCtrl.deletePractitionerUnavailability);
 
-app.post('/api/appointments', apptCtrl.createAppointment);
-app.post('/api/appointments/request-booking', apptCtrl.requestAppointmentBooking);
-app.get('/api/appointments', apptCtrl.getAppointments);
-app.put('/api/appointments/:id', apptCtrl.updateAppointment);
-app.delete('/api/appointments/:id', apptCtrl.cancelAppointment);
+app.post('/api/appointments', checkPermission('agenda'), apptCtrl.createAppointment);
+app.post('/api/appointments/request-booking', checkPermission('agenda'), apptCtrl.requestAppointmentBooking);
+app.get('/api/appointments', checkPermission('agenda'), apptCtrl.getAppointments);
+app.put('/api/appointments/:id', checkPermission('agenda'), apptCtrl.updateAppointment);
+app.delete('/api/appointments/:id', checkPermission('agenda'), apptCtrl.cancelAppointment);
 
 // 4. Cash Drawer Sessions & Billing
-app.get('/api/billing/cash-registers', billingCtrl.getCashRegisters);
-app.get('/api/billing/insurances', billingCtrl.getInsurances);
-app.post('/api/billing/insurances', billingCtrl.createInsurance);
-app.put('/api/billing/insurances/:id', billingCtrl.updateInsurance);
-app.delete('/api/billing/insurances/:id', billingCtrl.deleteInsurance);
-app.post('/api/billing/cash-sessions', billingCtrl.openCashSession);
-app.post('/api/billing/cash-sessions/:id/close', billingCtrl.closeCashSession);
-app.post('/api/billing/invoices', billingCtrl.createInvoice);
-app.get('/api/billing/invoices', billingCtrl.getInvoices);
-app.put('/api/billing/invoices/:id', billingCtrl.updateInvoice);
-app.delete('/api/billing/invoices/:id', billingCtrl.deleteInvoice);
-app.get('/api/billing/invoices/:id/details', billingCtrl.getInvoiceDetails);
-app.get('/api/billing/invoices/:id/available-attachments', billingCtrl.getInvoiceAvailableAttachments);
-app.post('/api/billing/invoices/:id/send-email', billingCtrl.sendInvoiceEmailController);
-app.get('/api/billing/invoices/:id/email-logs', billingCtrl.getInvoiceEmailLogs);
+app.get('/api/billing/cash-registers', checkPermission('cash_register'), billingCtrl.getCashRegisters);
+app.get('/api/billing/insurances', checkPermission('insurances'), billingCtrl.getInsurances);
+app.post('/api/billing/insurances', checkPermission('insurances'), billingCtrl.createInsurance);
+app.put('/api/billing/insurances/:id', checkPermission('insurances'), billingCtrl.updateInsurance);
+app.delete('/api/billing/insurances/:id', checkPermission('insurances'), billingCtrl.deleteInsurance);
+app.post('/api/billing/cash-sessions', checkPermission('cash_register'), billingCtrl.openCashSession);
+app.post('/api/billing/cash-sessions/:id/close', checkPermission('cash_register'), billingCtrl.closeCashSession);
+app.post('/api/billing/invoices', checkPermission('invoices'), billingCtrl.createInvoice);
+app.get('/api/billing/invoices', checkPermission('invoices'), billingCtrl.getInvoices);
+app.put('/api/billing/invoices/:id', checkPermission('invoices'), billingCtrl.updateInvoice);
+app.delete('/api/billing/invoices/:id', checkPermission('invoices'), billingCtrl.deleteInvoice);
+app.get('/api/billing/invoices/:id/details', checkPermission('invoices'), billingCtrl.getInvoiceDetails);
+app.get('/api/billing/invoices/:id/available-attachments', checkPermission('invoices'), billingCtrl.getInvoiceAvailableAttachments);
+app.post('/api/billing/invoices/:id/send-email', checkPermission('messaging'), billingCtrl.sendInvoiceEmailController);
+app.get('/api/billing/invoices/:id/email-logs', checkPermission('messaging'), billingCtrl.getInvoiceEmailLogs);
 
 // 5. Inventory & Pharmacy Lots
-app.post('/api/inventory/items', stockCtrl.createStockItem);
-app.get('/api/inventory/items', stockCtrl.getStockItems);
-app.put('/api/inventory/items/:id', stockCtrl.updateStockItem);
-app.delete('/api/inventory/items/:id', stockCtrl.deleteStockItem);
-app.patch('/api/inventory/items/:id/toggle-status', stockCtrl.toggleStockItemStatus);
-app.post('/api/inventory/lots', stockCtrl.addStockLot);
-app.post('/api/inventory/deplete', stockCtrl.depleteStock);
+app.post('/api/inventory/items', checkPermission('inventory'), stockCtrl.createStockItem);
+app.get('/api/inventory/items', checkPermission('inventory'), stockCtrl.getStockItems);
+app.put('/api/inventory/items/:id', checkPermission('inventory'), stockCtrl.updateStockItem);
+app.delete('/api/inventory/items/:id', checkPermission('inventory'), stockCtrl.deleteStockItem);
+app.patch('/api/inventory/items/:id/toggle-status', checkPermission('inventory'), stockCtrl.toggleStockItemStatus);
+app.post('/api/inventory/lots', checkPermission('inventory'), stockCtrl.addStockLot);
+app.post('/api/inventory/deplete', checkPermission('inventory'), stockCtrl.depleteStock);
 
 // 5b. Hospitalization (Bed & Occupancy Management)
-app.get('/api/hospital/buildings', hospitalCtrl.getBuildings);
-app.post('/api/hospital/buildings', hospitalCtrl.createBuilding);
-app.put('/api/hospital/buildings/:id', hospitalCtrl.updateBuilding);
-app.delete('/api/hospital/buildings/:id', hospitalCtrl.deleteBuilding);
+app.get('/api/hospital/buildings', checkPermission('hospitalization'), hospitalCtrl.getBuildings);
+app.post('/api/hospital/buildings', checkPermission('hospitalization'), hospitalCtrl.createBuilding);
+app.put('/api/hospital/buildings/:id', checkPermission('hospitalization'), hospitalCtrl.updateBuilding);
+app.delete('/api/hospital/buildings/:id', checkPermission('hospitalization'), hospitalCtrl.deleteBuilding);
 
-app.get('/api/hospital/rooms', hospitalCtrl.getRooms);
-app.post('/api/hospital/rooms', hospitalCtrl.createRoom);
-app.put('/api/hospital/rooms/:id', hospitalCtrl.updateRoom);
-app.delete('/api/hospital/rooms/:id', hospitalCtrl.deleteRoom);
+app.get('/api/hospital/rooms', checkPermission('hospitalization'), hospitalCtrl.getRooms);
+app.post('/api/hospital/rooms', checkPermission('hospitalization'), hospitalCtrl.createRoom);
+app.put('/api/hospital/rooms/:id', checkPermission('hospitalization'), hospitalCtrl.updateRoom);
+app.delete('/api/hospital/rooms/:id', checkPermission('hospitalization'), hospitalCtrl.deleteRoom);
 
-app.get('/api/hospital/beds', hospitalCtrl.getBeds);
-app.post('/api/hospital/beds', hospitalCtrl.createBed);
-app.put('/api/hospital/beds/:id', hospitalCtrl.updateBed);
-app.delete('/api/hospital/beds/:id', hospitalCtrl.deleteBed);
+app.get('/api/hospital/beds', checkPermission('hospitalization'), hospitalCtrl.getBeds);
+app.post('/api/hospital/beds', checkPermission('hospitalization'), hospitalCtrl.createBed);
+app.put('/api/hospital/beds/:id', checkPermission('hospitalization'), hospitalCtrl.updateBed);
+app.delete('/api/hospital/beds/:id', checkPermission('hospitalization'), hospitalCtrl.deleteBed);
 
-app.get('/api/hospital/hospitalizations', hospitalCtrl.getHospitalizations);
-app.post('/api/hospital/hospitalizations', hospitalCtrl.admitPatient);
-app.post('/api/hospital/hospitalizations/:id/discharge', hospitalCtrl.dischargePatient);
+app.get('/api/hospital/hospitalizations', checkPermission('hospitalization'), hospitalCtrl.getHospitalizations);
+app.post('/api/hospital/hospitalizations', checkPermission('hospitalization'), hospitalCtrl.admitPatient);
+app.post('/api/hospital/hospitalizations/:id/discharge', checkPermission('hospitalization'), hospitalCtrl.dischargePatient);
 
 // 6. Aging Reports, Financial Analytics & Recovery Reminders
-app.get('/api/reports/aging-balance', reportCtrl.getAgingBalance);
-app.get('/api/reports/dashboard-analytics', reportCtrl.getDashboardAnalytics);
-app.post('/api/reports/recovery-action', reportCtrl.triggerRecoveryAction);
+app.get('/api/reports/aging-balance', checkPermission('reports'), reportCtrl.getAgingBalance);
+app.get('/api/reports/dashboard-analytics', checkPermission('reports'), reportCtrl.getDashboardAnalytics);
+app.post('/api/reports/recovery-action', checkPermission('reports'), reportCtrl.triggerRecoveryAction);
 
 // 7. Tenant profile metadata management (logo, address, email, gps)
-app.get('/api/tenant/profile', tenantCtrl.getTenantProfile);
-app.put('/api/tenant/profile', tenantCtrl.updateTenantProfile);
+app.get('/api/tenant/profile', checkPermission('settings'), tenantCtrl.getTenantProfile);
+app.put('/api/tenant/profile', checkPermission('settings'), tenantCtrl.updateTenantProfile);
 
 // 7b. Tenant Custom SMTP Email Accounts Management
-app.get('/api/settings/smtp-accounts', smtpCtrl.getSmtpAccounts);
-app.post('/api/settings/smtp-accounts', smtpCtrl.createSmtpAccount);
-app.put('/api/settings/smtp-accounts/:id', smtpCtrl.updateSmtpAccount);
-app.delete('/api/settings/smtp-accounts/:id', smtpCtrl.deleteSmtpAccount);
-app.post('/api/settings/smtp-accounts/:id/test', smtpCtrl.testSmtpAccount);
-app.post('/api/settings/smtp-accounts/test-direct', smtpCtrl.testSmtpAccount);
-app.post('/api/settings/smtp-accounts/:id/set-default', smtpCtrl.setDefaultSmtpAccount);
+app.get('/api/settings/smtp-accounts', checkPermission('messaging'), smtpCtrl.getSmtpAccounts);
+app.post('/api/settings/smtp-accounts', checkPermission('messaging'), smtpCtrl.createSmtpAccount);
+app.put('/api/settings/smtp-accounts/:id', checkPermission('messaging'), smtpCtrl.updateSmtpAccount);
+app.delete('/api/settings/smtp-accounts/:id', checkPermission('messaging'), smtpCtrl.deleteSmtpAccount);
+app.post('/api/settings/smtp-accounts/:id/test', checkPermission('messaging'), smtpCtrl.testSmtpAccount);
+app.post('/api/settings/smtp-accounts/test-direct', checkPermission('messaging'), smtpCtrl.testSmtpAccount);
+app.post('/api/settings/smtp-accounts/:id/set-default', checkPermission('messaging'), smtpCtrl.setDefaultSmtpAccount);
 
 // 8. User Management & Permissions Matrix (RBAC)
-app.get('/api/users', userCtrl.getUsers);
-app.post('/api/users', userCtrl.createUser);
-app.put('/api/users/:id', userCtrl.updateUser);
-app.delete('/api/users/:id', userCtrl.deleteUser);
+app.get('/api/users', checkPermission('users'), userCtrl.getUsers);
+app.post('/api/users', checkPermission('users'), userCtrl.createUser);
+app.put('/api/users/:id', checkPermission('users'), userCtrl.updateUser);
+app.delete('/api/users/:id', checkPermission('users'), userCtrl.deleteUser);
 
 // 9. Administrative Tenant CRUD (restricted to SUPER_ADMIN)
 app.get('/api/tenants', tenantCtrl.getAllTenants);
@@ -275,13 +275,13 @@ app.put('/api/tenants/:id', tenantCtrl.updateTenant);
 app.delete('/api/tenants/:id', tenantCtrl.deleteTenant);
 
 // 10. AI Clinical Voice Copilot & Multi-Provider LLM Engine
-app.get('/api/ai/config', aiCopilotCtrl.getAIConfig);
-app.post('/api/ai/config', aiCopilotCtrl.saveAIConfig);
-app.post('/api/ai/test', aiCopilotCtrl.testAIConnection);
-app.post('/api/ai/toggle', aiCopilotCtrl.toggleAI);
-app.post('/api/ai/copilot/query', aiCopilotCtrl.handleCopilotQuery);
-app.post('/api/ai/agent/turn', aiAgentCtrl.handleAgentTurn);
-app.post('/api/ai/copilot/dictate', aiCopilotCtrl.handleDictationConsultation);
+app.get('/api/ai/config', checkPermission('ai_assistant'), aiCopilotCtrl.getAIConfig);
+app.post('/api/ai/config', checkPermission('ai_assistant'), aiCopilotCtrl.saveAIConfig);
+app.post('/api/ai/test', checkPermission('ai_assistant'), aiCopilotCtrl.testAIConnection);
+app.post('/api/ai/toggle', checkPermission('ai_assistant'), aiCopilotCtrl.toggleAI);
+app.post('/api/ai/copilot/query', checkPermission('ai_assistant'), aiCopilotCtrl.handleCopilotQuery);
+app.post('/api/ai/agent/turn', checkPermission('ai_assistant'), aiAgentCtrl.handleAgentTurn);
+app.post('/api/ai/copilot/dictate', checkPermission('ai_assistant'), aiCopilotCtrl.handleDictationConsultation);
 
 // ============================================================================
 // STATIC ASSET HOSTING (Serves compiled React frontend)
@@ -319,6 +319,36 @@ async function runAutoMigrations() {
     console.log('Database schema verified / auto-migrated.');
   } catch (err) {
     console.error('Auto-migration notice:', err.message);
+  }
+
+  // Les droits sont désormais réellement appliqués sur les routes. Les comptes
+  // existants n'ont pas les clés des modules ajoutés depuis (assurances, IA,
+  // messagerie) : sans reprise, ils perdraient du jour au lendemain un accès dont
+  // ils disposaient. On dérive donc ces droits de ceux qu'ils ont déjà, sans jamais
+  // élargir au-delà — les assurances et la messagerie suivent la facturation,
+  // l'assistant IA suit les consultations ou l'agenda.
+  try {
+    const res = await pool.query(`
+      UPDATE users SET permissions = permissions
+        || CASE WHEN permissions ? 'insurances' THEN '{}'::jsonb ELSE
+             jsonb_build_object('insurances', COALESCE(permissions->'invoices', '{"view":false,"create":false,"update":false,"delete":false}'::jsonb)) END
+        || CASE WHEN permissions ? 'messaging' THEN '{}'::jsonb ELSE
+             jsonb_build_object('messaging', COALESCE(permissions->'invoices', '{"view":false,"create":false,"update":false,"delete":false}'::jsonb)) END
+        || CASE WHEN permissions ? 'ai_assistant' THEN '{}'::jsonb ELSE
+             jsonb_build_object('ai_assistant', jsonb_build_object(
+               'view',   COALESCE((permissions->'consultations'->>'view')::boolean, (permissions->'agenda'->>'view')::boolean, false),
+               'create', COALESCE((permissions->'consultations'->>'view')::boolean, (permissions->'agenda'->>'create')::boolean, false),
+               'update', false,
+               'delete', false)) END
+      WHERE role = 'TENANT_USER'
+        AND permissions IS NOT NULL
+        AND NOT (permissions ? 'insurances' AND permissions ? 'messaging' AND permissions ? 'ai_assistant')
+    `);
+    if (res.rowCount > 0) {
+      console.log(`Droits repris pour ${res.rowCount} utilisateur(s) : modules assurances, messagerie et assistant IA.`);
+    }
+  } catch (err) {
+    console.error('Permission backfill notice:', err.message);
   }
 }
 
