@@ -13130,7 +13130,9 @@ function parseNameAndPhoneFromInput(userInput) {
     lastName = 'Nouveau';
   }
 
-  return { firstName, lastName, phone: phone || '776473506' };
+  // Aucun numéro par défaut : un numéro inventé rattacherait la réservation au
+  // dossier du patient qui le possède déjà, quel que soit le nom annoncé.
+  return { firstName, lastName, phone: phone || null };
 }
 
 // ----------------------------------------------------------------------------
@@ -13505,6 +13507,19 @@ Ces informations sont-elles bien correctes ? Répondez « Oui » pour confirmer,
     const isConfirmation = text.includes('oui') || text.includes('correct') || text.includes('valider') || text.includes('confirmer') || text.includes('exact') || text.includes('parfait') || text.includes('d\'accord') || text.includes('c\'est bon') || text.includes('yes') || text.includes('ok');
 
     if (isConfirmation) {
+      // Un nouveau patient sans numéro capté ne peut pas être enregistré : plutôt que
+      // d'échouer après la confirmation, on redemande le numéro ici. Auparavant un
+      // numéro par défaut était envoyé, ce qui rattachait le rendez-vous au dossier
+      // du patient possédant ce numéro, quel que soit le nom annoncé.
+      if (!voicePatientData.is_existing && !voicePatientData.phone) {
+        const askPhone = `Il me manque votre numéro de téléphone pour créer votre dossier. Pouvez-vous me le dicter, chiffre par chiffre ?`;
+        voiceTranscriptLog.push({ sender: 'ai', text: askPhone });
+        renderVoiceMessages();
+        speakAI(askPhone);
+        voiceStep = 5;
+        return;
+      }
+
       voiceStep = 7;
       const confirmReply = `Parfait ! J'enregistre définitivement votre rendez-vous...`;
       voiceTranscriptLog.push({ sender: 'ai', text: confirmReply });
@@ -13524,9 +13539,9 @@ Ces informations sont-elles bien correctes ? Répondez « Oui » pour confirmer,
           patient_code: voicePatientData.code,
           first_name: voicePatientData.first_name,
           last_name: voicePatientData.last_name,
-          phone_number: voicePatientData.phone || '776473506',
+          phone_number: voicePatientData.phone || null,
           gender: voicePatientData.gender,
-          date_of_birth: '1995-01-01'
+          date_of_birth: voicePatientData.date_of_birth || null
         };
 
         const res = await api.request('/public/book', {
@@ -13981,9 +13996,9 @@ async function processWhatsAppFlow(userInput) {
         patient_code: waPatientData.code,
         first_name: waPatientData.first_name,
         last_name: waPatientData.last_name,
-        phone_number: waPatientData.phone || '776473506',
-        gender: 'M',
-        date_of_birth: '1995-01-01'
+        phone_number: waPatientData.phone || null,
+        gender: waPatientData.gender || 'M',
+        date_of_birth: waPatientData.date_of_birth || null
       };
 
       const res = await api.request('/public/book', {

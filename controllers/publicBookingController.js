@@ -304,10 +304,28 @@ const publicBookAppointment = async (req, res) => {
       );
 
       if (existingPhone.rowCount > 0) {
-        finalPatientId = existingPhone.rows[0].id;
-        finalPatientCode = existingPhone.rows[0].patient_code;
-        finalPatientFirst = existingPhone.rows[0].first_name;
-        finalPatientLast = existingPhone.rows[0].last_name;
+        const owner = existingPhone.rows[0];
+
+        // Le numéro est déjà rattaché à un dossier. On ne réutilise ce dossier que si
+        // le nom annoncé correspond : sinon le rendez-vous d'une personne serait
+        // enregistré sous l'identité d'une autre, et les consultations et ordonnances
+        // qui suivent iraient dans le mauvais dossier médical. La contrainte
+        // unique_tenant_phone interdisant deux dossiers avec le même numéro, on refuse
+        // explicitement plutôt que de substituer l'identité en silence.
+        const matchFirst = cleanStr(owner.first_name).includes(cleanStr(first_name)) || cleanStr(first_name).includes(cleanStr(owner.first_name));
+        const matchLast = cleanStr(owner.last_name).includes(cleanStr(last_name)) || cleanStr(last_name).includes(cleanStr(owner.last_name));
+
+        if (!matchFirst || !matchLast) {
+          return res.status(409).json({
+            error: `Le numéro ${phone_number.trim()} est déjà enregistré au nom d'un autre patient de cette clinique. Utilisez votre code patient si ce dossier est le vôtre, ou indiquez un autre numéro de téléphone.`,
+            phone_belongs_to_other_patient: true
+          });
+        }
+
+        finalPatientId = owner.id;
+        finalPatientCode = owner.patient_code;
+        finalPatientFirst = owner.first_name;
+        finalPatientLast = owner.last_name;
         isExistingVerified = true;
         depositRequired = 0;
       } else {
