@@ -9382,7 +9382,7 @@ const RBAC_MODULES = [
     category: 'ACCUEIL & GESTION CLINIQUE',
     items: [
       { key: 'dashboard', label: '📊 Tableau de Bord & Statistiques', desc: 'KPIs d\'activité, chiffre d\'affaires et alertes' },
-      { key: 'agenda', label: '📅 Agenda & Prise de Rendez-vous', desc: 'Calendrier, réservations en ligne, créneaux' },
+      { key: 'agenda', label: '📅 Agenda & Prise de Rendez-vous', desc: 'Créneaux et réservations. « Modifier » autorise le report, « Supprimer » l\'annulation' },
       { key: 'practitioners', label: '👨‍⚕️ Praticiens, Spécialités & Services', desc: 'Médecins, spécialités, durées et congés' }
     ]
   },
@@ -9399,7 +9399,15 @@ const RBAC_MODULES = [
     items: [
       { key: 'cash_register', label: '💵 Caisse & Encaissements', desc: 'Sessions de caisse, paiements Wave/OM/Espèces' },
       { key: 'invoices', label: '🧾 Facturation & Tiers-Payant (IPM)', desc: 'Émission factures, prises en charge, avoirs' },
+      { key: 'insurances', label: '🛡️ Organismes IPM & Assurances', desc: 'Conventions, taux de prise en charge, coordonnées' },
       { key: 'reports', label: '📈 Rapports Financiers & Recouvrement', desc: 'Balance âgée, relances, statistiques' }
+    ]
+  },
+  {
+    category: 'ASSISTANCE IA & COMMUNICATION',
+    items: [
+      { key: 'ai_assistant', label: '🤖 Copilote IA & Agent de Rendez-vous', desc: 'Assistant clinique sur dossier, agent conversationnel de prise de RDV' },
+      { key: 'messaging', label: '✉️ Messagerie & Envoi de Documents', desc: 'Comptes SMTP, envoi des factures et justificatifs par email' }
     ]
   },
   {
@@ -9516,13 +9524,19 @@ function applyUserPreset(presetName) {
     ['hospitalization', 'reports'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: false, update: false, delete: false });
     });
+    // Le copilote clinique lit le dossier du patient : réservé aux profils soignants.
+    setModuleCheckboxes('ai_assistant', { view: true, create: true, update: false, delete: false });
   } else if (presetName === 'SECRETARY') {
     ['dashboard', 'agenda', 'patients'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: true, update: true, delete: false });
     });
-    ['invoices', 'cash_register'].forEach(m => {
+    // L'accueil reporte et annule les rendez-vous au quotidien : « Supprimer » sur
+    // l'agenda correspond à l'annulation, pas à un effacement de données.
+    setModuleCheckboxes('agenda', { view: true, create: true, update: true, delete: true });
+    ['invoices', 'cash_register', 'insurances'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: false, update: false, delete: false });
     });
+    setModuleCheckboxes('ai_assistant', { view: true, create: true, update: false, delete: false });
   } else if (presetName === 'CASHIER') {
     ['dashboard', 'cash_register', 'invoices', 'reports'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: true, update: true, delete: false });
@@ -9530,6 +9544,9 @@ function applyUserPreset(presetName) {
     ['patients'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: false, update: false, delete: false });
     });
+    // La caisse applique les conventions IPM et envoie les factures par email.
+    setModuleCheckboxes('insurances', { view: true, create: true, update: true, delete: false });
+    setModuleCheckboxes('messaging', { view: true, create: true, update: false, delete: false });
   } else if (presetName === 'PHARMACIST') {
     ['dashboard', 'inventory', 'prescriptions'].forEach(m => {
       setModuleCheckboxes(m, { view: true, create: true, update: true, delete: false });
