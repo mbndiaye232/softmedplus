@@ -12624,6 +12624,10 @@ let voiceRecognition = null;
 let voiceIsListening = false;
 let voiceIsSpeaking = false;
 let voiceStep = 0; // 0: Welcome, 1: Code/New, 2: Name confirm, 3: Doctor, 4: Date/Time, 5: Booked
+// Étape hors séquence : saisie du seul numéro de téléphone, réclamée à la
+// confirmation quand il n'a pas été capté avec le nom. Valeur distincte des
+// étapes numérotées pour ne jamais entrer en collision avec elles.
+const VOICE_STEP_ASK_PHONE = 51;
 let voiceTranscriptLog = [];
 
 // Agent conversationnel LLM du portail public. `null` = on n'a pas encore essayé ;
@@ -13639,6 +13643,38 @@ Ces informations sont-elles bien correctes ? Répondez « Oui » pour confirmer,
     renderVoiceMessages();
     speakAI(reply);
 
+  } else if (voiceStep === VOICE_STEP_ASK_PHONE) {
+    // Saisie du seul numéro de téléphone, demandée au moment de la confirmation
+    // quand il n'a pas été capté avec le nom à l'étape 2.
+    const { phone } = parseNameAndPhoneFromInput(userInput);
+    if (!phone) {
+      const retry = `Je n'ai pas reconnu de numéro. Dictez-le chiffre par chiffre, par exemple : 77 123 45 67.`;
+      voiceTranscriptLog.push({ sender: 'ai', text: retry });
+      renderVoiceMessages();
+      speakAI(retry);
+      return;
+    }
+
+    voicePatientData.phone = phone;
+    voiceStep = 6;
+
+    const docP = docs.find(d => d.id === voicePatientData.doc_id) || docs[0];
+    const docNameP = docP ? `${docP.title || 'Dr'} ${docP.first_name} ${docP.last_name}` : 'votre médecin';
+    const reasonP = voicePatientData.consultation_reason || 'Consultation & Bilan';
+    const reply = `Merci, j'ai bien noté le ${phone}.
+
+Voici le récapitulatif de votre rendez-vous :
+• Patient : ${voicePatientData.first_name} ${voicePatientData.last_name}
+• Téléphone : ${phone}
+• Praticien : ${docNameP}
+• Motif : « ${reasonP} »
+• Date et Heure : Le ${voicePatientData.date} à ${voicePatientData.time}.
+
+Confirmez-vous ? Répondez « Oui » pour enregistrer.`;
+    voiceTranscriptLog.push({ sender: 'ai', text: reply });
+    renderVoiceMessages();
+    speakAI(reply);
+
   } else if (voiceStep === 6) {
     // Step 6: Interactive Confirmation & Continuous Correction Loop
     const isConfirmation = text.includes('oui') || text.includes('correct') || text.includes('valider') || text.includes('confirmer') || text.includes('exact') || text.includes('parfait') || text.includes('d\'accord') || text.includes('c\'est bon') || text.includes('yes') || text.includes('ok');
@@ -13653,7 +13689,10 @@ Ces informations sont-elles bien correctes ? Répondez « Oui » pour confirmer,
         voiceTranscriptLog.push({ sender: 'ai', text: askPhone });
         renderVoiceMessages();
         speakAI(askPhone);
-        voiceStep = 5;
+        // Étape dédiée à la saisie du numéro. Renvoyer vers l'étape 5 (date et heure)
+        // faisait interpréter le numéro dicté comme un horaire : le patient revenait
+        // au récapitulatif toujours sans téléphone, et la boucle était sans issue.
+        voiceStep = VOICE_STEP_ASK_PHONE;
         return;
       }
 
