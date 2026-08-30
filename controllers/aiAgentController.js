@@ -28,7 +28,11 @@ Règles :
 - Après un report, annonce le nouvel horaire confirmé. Si le créneau visé est occupé, propose-en un autre plutôt que d'insister.
 - Réponds de façon concise, professionnelle et directement utilisable par l'accueil.`;
 
-const MAX_AGENT_TURNS = 4;
+// Nombre d'allers-retours avec le modèle pour un seul message du patient. Une prise
+// de rendez-vous en enchaîne facilement quatre (lister les praticiens, chercher les
+// créneaux, préparer, répondre) : à 4, la moindre étape supplémentaire épuisait la
+// limite et renvoyait un message d'échec alors que tout se passait bien.
+const MAX_AGENT_TURNS = 6;
 
 /**
  * Date du jour, à donner au modèle pour qu'il puisse résoudre « demain »,
@@ -142,6 +146,7 @@ Règles impératives :
 - Si le patient dit avoir déjà un dossier, demande son code patient (ex: SM-4821) PUIS son prénom et son nom, et vérifie les deux ensemble. Ne révèle jamais d'information sur un dossier tant que l'identité n'est pas confirmée.
 - Si le patient n'a pas de code, traite-le comme un nouveau patient : il te faut son prénom, son nom et son téléphone. Préviens qu'un acompte de 2 000 FCFA est demandé pour une première consultation.
 - Quand tout est réuni et confirmé, appelle l'outil de préparation, puis annonce clairement le récapitulatif (date, heure, praticien, acompte éventuel) et invite le patient à confirmer d'un clic. Tu ne réserves pas toi-même : c'est le patient qui valide.
+- Ne dis JAMAIS qu'un rendez-vous est pris, confirmé, enregistré ou validé. Tant que le patient n'a pas cliqué sur le bouton de confirmation, rien n'existe. Dis « voici le récapitulatif, confirmez pour réserver », jamais « c'est confirmé » : un patient qui te croit quitte la page sans rendez-vous.
 - Tu peux répondre à des questions générales sur la clinique et à des questions de santé courantes (prévention, hygiène de vie), sans jamais poser de diagnostic ni proposer de traitement. Pour tout symptôme précis ou toute urgence, invite à consulter un praticien ou à appeler les secours.
 - Ne demande jamais de données médicales sensibles : tu prends des rendez-vous, tu ne fais pas de consultation.
 - Pour annuler ou reporter un rendez-vous, il faut IMPÉRATIVEMENT le code patient ET le prénom et nom : sans cette double vérification, tu ne peux ni afficher ni modifier quoi que ce soit. Liste d'abord ses rendez-vous, fais préciser lequel, récapitule-le et n'agis qu'après un accord explicite du patient. Une annulation est définitive : ne la déclenche jamais sur une simple allusion.

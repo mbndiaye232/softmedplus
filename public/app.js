@@ -13426,7 +13426,18 @@ async function handleVoiceTranscriptWithLLM(userInput) {
 
     // Le markdown du LLM est retiré aussi à l'affichage : le patient lit une bulle
     // de conversation, pas un document — « **prénom** » doit se lire « prénom ».
-    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(sanitizeForSpeechClient(res.answer || '')) });
+    let answerText = sanitizeForSpeechClient(res.answer || '');
+
+    // Un récapitulatif préparé n'est PAS une réservation : l'enregistrement n'a lieu
+    // qu'au clic du patient. Or le modèle annonce volontiers « votre rendez-vous est
+    // confirmé » dès que l'outil a réussi. Le patient croyait alors avoir réservé et
+    // quittait la page : aucun Pass, aucun rendez-vous. On ajoute donc une phrase
+    // déterministe, indépendante de la formulation du modèle.
+    if (voicePendingBooking) {
+      answerText += " Attention, votre rendez-vous n'est pas encore enregistré : cliquez sur le bouton « Confirmer mon rendez-vous » pour le valider définitivement.";
+    }
+
+    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(answerText) });
 
     // Le bouton de confirmation vit dans renderVoiceChannel, pas dans le fil de
     // discussion : il faut re-rendre la vue entière pour le faire apparaître ou disparaître.
@@ -13436,7 +13447,7 @@ async function handleVoiceTranscriptWithLLM(userInput) {
       renderVoiceMessages();
     }
 
-    speakAI(res.answer || '');
+    speakAI(answerText);
     return true;
   } catch (err) {
     voiceTranscriptLog = voiceTranscriptLog.filter(m => !m.pending);
@@ -13462,19 +13473,24 @@ async function handleVoiceTranscriptWithLLM(userInput) {
 async function confirmVoiceAgentBooking() {
   if (!voicePendingBooking) return;
   const params = voicePendingBooking;
-  voicePendingBooking = null;
-  renderVoiceMessages();
 
   try {
     const result = await api.request('/public/book', {
       method: 'POST',
       body: JSON.stringify({ ...params, tenant_slug: publicPortalData.clinic.slug })
     });
+    // La réservation a abouti : on peut abandonner le récapitulatif en attente.
+    voicePendingBooking = null;
     // Réutilise l'écran de confirmation existant (pass de rendez-vous imprimable)
     renderPublicPortalView(result);
   } catch (err) {
-    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(err.message || 'La réservation a échoué.') });
+    // Le récapitulatif est conservé : effacé avant l'appel, un échec (créneau pris,
+    // numéro déjà rattaché à un autre dossier) faisait disparaître le bouton et
+    // laissait le patient sans aucun moyen de réessayer.
+    const msg = `${err.message || 'La réservation a échoué.'} Vous pouvez corriger puis cliquer de nouveau sur « Confirmer mon rendez-vous ».`;
+    voiceTranscriptLog.push({ sender: 'ai', text: escapeHTML(msg) });
     renderVoiceMessages();
+    speakAI(msg);
   }
 }
 window.confirmVoiceAgentBooking = confirmVoiceAgentBooking;
