@@ -10406,7 +10406,11 @@ function renderAuthLayout() {
              contact, un visiteur intéressé n'avait donc pas comment nous joindre. -->
         <div class="landing-contact">
           <div class="landing-contact-brand">
-            <img src="/logo_sst_clean.png" alt="Soft Services Technologiques" />
+            <!-- Chemin relatif et non « /logo… » : un chemin absolu pointe vers la
+                 racine du disque quand la page est ouverte directement en mode
+                 fichier, et l'image ne s'affiche pas. Le relatif fonctionne aussi
+                 bien servi par Express qu'ouvert depuis public/. -->
+            <img src="logo_sst_clean.png" alt="Soft Services Technologiques" />
             <div>
               <div class="landing-contact-name">Soft Services Technologiques</div>
               <div class="landing-contact-baseline">
