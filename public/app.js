@@ -15875,6 +15875,12 @@ function updateCopilotVoiceUI() {
 
 // Nettoie le markdown avant la synthèse vocale : un tiret de liste ou isolé
 // entre espaces est lu littéralement "moins" par la voix française sans ce nettoyage.
+const MOIS_PARLES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+// Doit rester identique à sanitizeForSpeech() dans controllers/aiCopilotController.js :
+// le serveur nettoie le texte lu, ce nettoyage-ci protège les chemins où un texte
+// brut arrive directement à la synthèse vocale (bouton « Écouter », agent public).
 function sanitizeForSpeechClient(text) {
   if (!text) return '';
   return text
@@ -15884,6 +15890,28 @@ function sanitizeForSpeechClient(text) {
     .replace(/^\s*\d+[.)]\s+/gm, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/[*_`#]/g, '')
+    // Symboles d'un dossier médical : sans cela la voix prononce « tiret » sur un
+    // code patient et « barre oblique » sur une date, une tension ou une posologie.
+    .replace(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/g, (m, j, mo, a) => {
+      const i = parseInt(mo, 10) - 1;         // 28/08/2026 -> 28 août 2026
+      return MOIS_PARLES[i] ? `${parseInt(j, 10)} ${MOIS_PARLES[i]} ${a}` : m;
+    })
+    .replace(/([A-Za-zÀ-ÿ])-(?=[A-Za-z0-9À-ÿ])/g, '$1 ')   // SM-4821 -> SM 4821
+    // Intervalle : les deux bornes doivent être courtes, sinon un numéro de
+    // référence comme FAC-2026-400759 se lirait « 2026 à 400759 ».
+    .replace(/\b(\d{1,3})\s*-\s*(?=\d{1,3}\b)/g, '$1 à ')  // 10-15 jours -> 10 à 15
+    .replace(/(\d)\s*-\s*(?=\d)/g, '$1 ')                  // FAC-2026-400759 -> FAC 2026 400759
+    .replace(/(\d)\s*\/\s*(?=\d)/g, '$1 sur ')             // 14/9 -> 14 sur 9
+    .replace(/([A-Za-zÀ-ÿ])\s*\/\s*(?=[A-Za-zÀ-ÿ])/g, '$1 par ') // mg/kg -> mg par kg
+    .replace(/\//g, ' ')
+    // Monnaie : « FCFA » et le code ISO « XOF » seraient épelés lettre par lettre.
+    // L'accord suit le montant, y compris quand il est formaté avec des espaces
+    // insécables par toLocaleString('fr-FR').
+    .replace(/(\d[\d\s  ]*)\s*(?:F\.?\s?CFA|FCFA|XOF)\b/gi, (m, n) => {
+      const brut = n.replace(/[\s  ]/g, '');
+      return `${n.trim()} ${parseFloat(brut) === 1 ? 'franc CFA' : 'francs CFA'}`;
+    })
+    .replace(/\b(?:F\.?\s?CFA|FCFA|XOF)\b/gi, 'francs CFA')
     .replace(/\s[-–—]\s/g, ', ')
     .replace(/\s+/g, ' ')
     .trim();
