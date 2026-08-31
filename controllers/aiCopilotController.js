@@ -339,6 +339,9 @@ Retourne UNIQUEMENT un objet JSON avec cette structure exacte, sans markdown aut
  * ligne. Sans ce nettoyage, un tiret isolé ou un titre markdown est prononcé
  * tel quel plutôt que d'être silencieusement ignoré.
  */
+const MOIS_PARLES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
 function sanitizeForSpeech(text) {
   if (!text) return '';
   return text
@@ -348,6 +351,18 @@ function sanitizeForSpeech(text) {
     .replace(/^\s*\d+[.)]\s+/gm, '')          // listes numérotées (1. / 1))
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // liens markdown -> texte du lien
     .replace(/[*_`#]/g, '')                   // emphase / code inline restants
+    // Symboles d'un dossier médical : la synthèse vocale française les prononce
+    // littéralement (« tiret », « barre oblique »), ce qui rend illisible un code
+    // patient, une date, une tension ou une posologie.
+    .replace(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})\b/g, (m, j, mo, a) => {
+      const i = parseInt(mo, 10) - 1;         // 28/08/2026 -> 28 août 2026
+      return MOIS_PARLES[i] ? `${parseInt(j, 10)} ${MOIS_PARLES[i]} ${a}` : m;
+    })
+    .replace(/([A-Za-zÀ-ÿ])-(?=[A-Za-z0-9À-ÿ])/g, '$1 ')   // SM-4821 -> SM 4821
+    .replace(/(\d)\s*-\s*(?=\d)/g, '$1 à ')                // 10-15 jours -> 10 à 15
+    .replace(/(\d)\s*\/\s*(?=\d)/g, '$1 sur ')             // 14/9 -> 14 sur 9
+    .replace(/([A-Za-zÀ-ÿ])\s*\/\s*(?=[A-Za-zÀ-ÿ])/g, '$1 par ') // mg/kg -> mg par kg
+    .replace(/\//g, ' ')                      // barres obliques restantes
     .replace(/\s[-–—]\s/g, ', ')              // tiret isolé entre espaces -> virgule (pause naturelle)
     .replace(/\s+/g, ' ')
     .trim();
