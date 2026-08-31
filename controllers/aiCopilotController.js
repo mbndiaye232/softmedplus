@@ -359,10 +359,21 @@ function sanitizeForSpeech(text) {
       return MOIS_PARLES[i] ? `${parseInt(j, 10)} ${MOIS_PARLES[i]} ${a}` : m;
     })
     .replace(/([A-Za-zÀ-ÿ])-(?=[A-Za-z0-9À-ÿ])/g, '$1 ')   // SM-4821 -> SM 4821
-    .replace(/(\d)\s*-\s*(?=\d)/g, '$1 à ')                // 10-15 jours -> 10 à 15
+    // Intervalle : les deux bornes doivent être courtes, sinon un numéro de
+    // référence comme FAC-2026-400759 se lirait « 2026 à 400759 ».
+    .replace(/\b(\d{1,3})\s*-\s*(?=\d{1,3}\b)/g, '$1 à ')  // 10-15 jours -> 10 à 15
+    .replace(/(\d)\s*-\s*(?=\d)/g, '$1 ')                  // FAC-2026-400759 -> FAC 2026 400759
     .replace(/(\d)\s*\/\s*(?=\d)/g, '$1 sur ')             // 14/9 -> 14 sur 9
     .replace(/([A-Za-zÀ-ÿ])\s*\/\s*(?=[A-Za-zÀ-ÿ])/g, '$1 par ') // mg/kg -> mg par kg
     .replace(/\//g, ' ')                      // barres obliques restantes
+    // Monnaie : « FCFA » et le code ISO « XOF » seraient épelés lettre par lettre.
+    // L'accord suit le montant, y compris quand il est formaté avec des espaces
+    // insécables par toLocaleString('fr-FR').
+    .replace(/(\d[\d\s  ]*)\s*(?:F\.?\s?CFA|FCFA|XOF)\b/gi, (m, n) => {
+      const brut = n.replace(/[\s  ]/g, '');
+      return `${n.trim()} ${parseFloat(brut) === 1 ? 'franc CFA' : 'francs CFA'}`;
+    })
+    .replace(/\b(?:F\.?\s?CFA|FCFA|XOF)\b/gi, 'francs CFA')
     .replace(/\s[-–—]\s/g, ', ')              // tiret isolé entre espaces -> virgule (pause naturelle)
     .replace(/\s+/g, ' ')
     .trim();
