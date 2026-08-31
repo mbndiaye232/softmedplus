@@ -10402,8 +10402,51 @@ function renderAuthLayout() {
 
       <!-- Footer -->
       <footer class="landing-footer">
+        <!-- Coordonnées de l'éditeur : la plateforme n'affichait aucun moyen de
+             contact, un visiteur intéressé n'avait donc pas comment nous joindre. -->
+        <div class="landing-contact">
+          <div class="landing-contact-brand">
+            <!-- Chemin relatif et non « /logo… » : un chemin absolu pointe vers la
+                 racine du disque quand la page est ouverte directement en mode
+                 fichier, et l'image ne s'affiche pas. Le relatif fonctionne aussi
+                 bien servi par Express qu'ouvert depuis public/. -->
+            <img src="logo_sst_clean.png" alt="Soft Services Technologiques" />
+            <div>
+              <div class="landing-contact-name">Soft Services Technologiques</div>
+              <div class="landing-contact-baseline">
+                Développement de sites web et logiciels &bull; SIG &bull; GED &bull; GFA &bull;
+                Réseaux et sécurité informatique &bull; Formation &bull; Maintenance &bull;
+                Vente et location de matériels
+              </div>
+            </div>
+          </div>
+
+          <div class="landing-contact-grid">
+            <div class="landing-contact-item">
+              <i class="fas fa-phone"></i>
+              <div>
+                <a href="tel:+221338681229">+221 33 868 12 29</a><br />
+                <a href="tel:+221776473506">+221 77 647 35 06</a>
+              </div>
+            </div>
+            <div class="landing-contact-item">
+              <i class="fas fa-envelope"></i>
+              <div>
+                <a href="mailto:sst@sst.best">sst@sst.best</a><br />
+                <a href="mailto:mbndiaye@sst.best">mbndiaye@sst.best</a>
+              </div>
+            </div>
+            <div class="landing-contact-item">
+              <i class="fas fa-globe"></i>
+              <div><a href="https://sst.best" target="_blank" rel="noopener">sst.best</a></div>
+            </div>
+          </div>
+        </div>
+
         <p>${t('complianceText')}</p>
-        <p style="margin-top:10px; font-size:0.8rem; opacity:0.6;">&copy; 2026 SoftMed. Tous droits réservés.</p>
+        <p style="margin-top:10px; font-size:0.8rem; opacity:0.6;">
+          &copy; 2026 SoftMed &mdash; une solution Soft Services Technologiques. Tous droits réservés.
+        </p>
       </footer>
     </div>
 
