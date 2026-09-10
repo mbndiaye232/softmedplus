@@ -9,7 +9,7 @@ const createStockItem = async (req, res) => {
     return res.status(400).json({ error: 'Champs requis manquants : name, category, unit, unit_cost_price, selling_price' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   if (!sku || !sku.trim()) {
     const slugName = (name || 'MED').replace(/[^a-zA-Z0-9]/g, '').substring(0, 8).toUpperCase();
@@ -54,7 +54,7 @@ const addStockLot = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: stock_item_id, lot_number, expiration_date, quantity' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const userId = req.user.id;
 
   try {
@@ -124,7 +124,7 @@ const depleteStock = async (req, res) => {
     return res.status(400).json({ error: 'Required fields: stock_item_id, quantity' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const userId = req.user.id;
   const qtyToDeplete = parseInt(quantity);
 
@@ -213,7 +213,7 @@ const depleteStock = async (req, res) => {
 
 // 4. Get Stock items list (optionally filtered by practitioner specialty: returns specialty specific items + general medications)
 const getStockItems = async (req, res) => {
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { specialty, category } = req.query;
 
   try {
@@ -254,7 +254,7 @@ const updateStockItem = async (req, res) => {
     return res.status(400).json({ error: 'Champs requis manquants : sku, name, category, unit, unit_cost_price, selling_price' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const cleanSku = sku.toUpperCase().trim();
   const cleanName = name.trim();
   const cleanCategory = category.trim();
@@ -336,7 +336,7 @@ const updateStockItem = async (req, res) => {
 // 6. Delete Stock Item (with traceability protection & movement checks)
 const deleteStockItem = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   try {
     // A. Check if item exists
@@ -403,7 +403,7 @@ const deleteStockItem = async (req, res) => {
 // 7. Toggle Stock Item Active / Archived status
 const toggleStockItemStatus = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   try {
     const result = await req.dbClient.query(

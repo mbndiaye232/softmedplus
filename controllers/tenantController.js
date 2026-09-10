@@ -8,7 +8,7 @@ const isSaasAdmin = (user) => {
 
 // 1. Get current tenant profile
 const getTenantProfile = async (req, res) => {
-  let tenantId = req.headers['x-tenant-id'] || req.user.tenant_id;
+  const tenantId = req.user.tenant_id;
   try {
     let result;
     if (tenantId) {

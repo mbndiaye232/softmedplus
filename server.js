@@ -86,9 +86,6 @@ app.post(
 // C. Public Cryptographic Prescription Verification (QR scanning endpoint)
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 
-// D. Public Payment Webhook (from Wave/OM/Yas/SPI checkouts)
-app.post('/api/payments/webhook/:provider', paymentCtrl.handleWebhook);
-
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, async (multerErr) => {
@@ -127,6 +124,16 @@ app.post('/api/payment-methods', checkPermission('settings'), paymentCtrl.config
 app.delete('/api/payment-methods/:id', checkPermission('settings'), paymentCtrl.deletePaymentMethod);
 app.post('/api/payments/initialize', checkPermission('cash_register'), paymentCtrl.initializeOnlinePayment);
 app.post('/api/payments/record', checkPermission('cash_register'), paymentCtrl.recordPayment);
+// Cet endpoint "webhook" n'a en réalité aucun fournisseur de paiement réel derrière
+// lui : les checkout_url générés par initializeOnlinePayment sont tous des URLs
+// mock (mock.wave.com, etc.), et le seul appelant existant est le bouton "Simuler
+// Retour Validation Webhook" du front (public/app.js), toujours envoyé authentifié.
+// Exposée en route publique sans authentification, cette route permettait à
+// n'importe qui de marquer n'importe quelle facture comme payée en devinant/
+// connaissant son invoice_id — fraude directe. Elle est donc protégée comme les
+// autres routes de paiement, en attendant une vraie intégration fournisseur (qui
+// nécessitera sa propre vérification de signature, différente par fournisseur).
+app.post('/api/payments/webhook/:provider', checkPermission('cash_register'), paymentCtrl.handleWebhook);
 
 // 2. Patient Registry & DPI 360
 app.post('/api/patients', checkPermission('patients'), patientCtrl.registerPatient);

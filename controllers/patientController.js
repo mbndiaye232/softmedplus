@@ -107,7 +107,7 @@ const generatePatientCode = async (dbClient, tenantId) => {
 // 1b. Verify Patient Code & Cross-Check Identity (First name & Last name)
 const verifyPatientCode = async (req, res) => {
   const { patient_code, first_name, last_name } = req.method === 'POST' ? req.body : req.query;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   if (!patient_code) {
     return res.status(400).json({ error: 'Code patient requis' });
@@ -216,7 +216,7 @@ const registerPatient = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: phone_number, first_name, last_name, gender, date_of_birth' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const patientCode = await generatePatientCode(req.dbClient, tenantId);
 
   // Default attending doctor to first available practitioner if not provided
@@ -320,11 +320,7 @@ const registerPatient = async (req, res) => {
 // 2. Get Patients (isolated by RLS with joined Status, Attending Doctor and Primary Insurance Policy)
 const getPatients = async (req, res) => {
   const { status, search, status_id } = req.query;
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id;
-  if (!tenantId) {
-    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
-    if (t.rows.length > 0) tenantId = t.rows[0].id;
-  }
+  const tenantId = req.user.tenant_id;
 
   let queryStr = `
     SELECT p.*, 
@@ -369,7 +365,7 @@ const getPatients = async (req, res) => {
 // 2b. Update Patient
 const updatePatient = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { 
     phone_number, 
     first_name, 
@@ -506,7 +502,7 @@ const createConsultation = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: patient_id, reason_for_visit, diagnosis_text' });
   }
 
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  let tenantId = req.user.tenant_id;
 
   // Always use the patient's real tenant_id to guarantee consistency across multi-tenant clinics
   const patCheck = await req.dbClient.query('SELECT tenant_id, patient_code FROM patients WHERE id = $1', [patient_id]);
@@ -706,7 +702,7 @@ const updateConsultation = async (req, res) => {
   const { id } = req.params;
   const { reason_for_visit, vital_signs, clinical_examination, icd10_diagnosis_codes, diagnosis_text, confidential_notes, prescription, practitioner_id } = req.body;
 
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  let tenantId = req.user.tenant_id;
   if (!tenantId) {
     const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
     if (t.rows.length > 0) tenantId = t.rows[0].id;

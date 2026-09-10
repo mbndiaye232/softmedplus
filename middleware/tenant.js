@@ -8,8 +8,14 @@ const tenantIsolator = async (req, res, next) => {
     return next();
   }
 
-  // Extract tenant ID from x-tenant-id header (for active switch/Super Admin) or authenticated user token
-  let tenantId = req.headers['x-tenant-id'] || (req.user ? req.user.tenant_id : null);
+  // Le tenant vient du token authentifié. Le header X-Tenant-ID n'est honoré que
+  // pour le Super Administrateur SaaS qui bascule explicitement de contexte : sans
+  // cette restriction, n'importe quel utilisateur authentifié (même TENANT_USER)
+  // pouvait lire/écrire les données de n'importe quelle autre clinique en envoyant
+  // simplement ce header — faille critique de cloisonnement multi-tenant.
+  const isSaasAdmin = req.user && (req.user.role === 'SUPER_ADMIN_SAAS' || req.user.role === 'SUPER_ADMIN' || req.user.email === 'mbndiaye@gmail.com');
+  const headerTenant = req.headers['x-tenant-id'];
+  let tenantId = (isSaasAdmin && headerTenant) || (req.user ? req.user.tenant_id : null);
   
   if (!tenantId) {
     try {
