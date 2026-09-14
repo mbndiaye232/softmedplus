@@ -13054,6 +13054,9 @@ function renderPublicPortalView(bookedResult = null) {
           <button class="btn btn-secondary btn-sm" onclick="window.location.href='/'" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-arrow-left"></i> Retour
           </button>
+          <button class="btn btn-secondary btn-sm" onclick="renderPatientPortalLogin('${clinic.slug}')" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
+            <i class="fas fa-folder-open"></i> Mon Dossier
+          </button>
           <button class="btn btn-secondary btn-sm" onclick="openAuthModal('login')" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-user-lock"></i> Espace Pro
           </button>
@@ -14673,6 +14676,197 @@ async function handlePublicBookingSubmit(e) {
   }
 }
 
+// ============================================================================
+// Portail Patient - consultation du dossier (lecture seule)
+// ============================================================================
+// Jeton dédié, totalement séparé de state.token (session staff) : ne jamais
+// mélanger les deux, ni les stocker sous la même clé.
+let patientPortalToken = null;
+let patientPortalTenantSlug = null;
+
+// Les champs du dossier (noms, diagnostics, allergies...) sont saisis côté
+// personnel soignant puis affichés ici sans passer par le rendu habituel du
+// tableau de bord staff : on échappe systématiquement avant interpolation dans
+// innerHTML pour éviter qu'une valeur stockée ne s'exécute comme du HTML/JS.
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function patientPortalRequest(path, options = {}) {
+  const res = await fetch(`/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(patientPortalToken ? { Authorization: `Bearer ${patientPortalToken}` } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Une erreur est survenue');
+  return data;
+}
+
+function renderPatientPortalLogin(slug, errorMsg) {
+  patientPortalTenantSlug = slug;
+  const root = document.getElementById('app-root');
+  root.innerHTML = `
+    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:30px 15px; display:flex; justify-content:center; align-items:center;">
+      <div class="card" style="max-width:440px; width:100%; border-radius:20px; padding:30px; box-shadow:0 15px 35px rgba(15,23,42,0.08);">
+        <div style="text-align:center; margin-bottom:20px;">
+          <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+            <i class="fas fa-folder-open fa-2x" style="color:#2563eb;"></i>
+          </div>
+          <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Consulter mon dossier</h2>
+          <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Identifiez-vous avec les informations de votre carnet patient</div>
+        </div>
+        ${errorMsg ? `<div style="background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>` : ''}
+        <form id="patient-portal-login-form" onsubmit="submitPatientPortalLogin(event)">
+          <div class="form-group">
+            <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+            <input type="text" class="form-control" id="pp-login-code" required autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size:0.82rem;">Prénom</label>
+            <input type="text" class="form-control" id="pp-login-first" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size:0.82rem;">Nom</label>
+            <input type="text" class="form-control" id="pp-login-last" required />
+          </div>
+          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+            <i class="fas fa-unlock-alt"></i> Accéder à mon dossier
+          </button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+async function submitPatientPortalLogin(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-login-code').value.trim();
+  const first_name = document.getElementById('pp-login-first').value.trim();
+  const last_name = document.getElementById('pp-login-last').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/login', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name })
+    });
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    renderPatientPortalLogin(patientPortalTenantSlug, err.message);
+  }
+}
+
+function logoutPatientPortal() {
+  patientPortalToken = null;
+  renderPatientPortalLogin(patientPortalTenantSlug);
+}
+
+async function renderPatientDossierView() {
+  const root = document.getElementById('app-root');
+  root.innerHTML = `
+    <div style="min-height:100vh; display:flex; justify-content:center; align-items:center; background:var(--bg-primary);">
+      <i class="fas fa-spinner fa-spin fa-3x" style="color:var(--primary);"></i>
+    </div>
+  `;
+
+  let data;
+  try {
+    data = await patientPortalRequest('/patient-portal/dossier');
+  } catch (err) {
+    renderPatientPortalLogin(patientPortalTenantSlug, err.message);
+    return;
+  }
+
+  const { patient, appointments, consultations, prescriptions, lab_orders } = data;
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+  const fmtDateTime = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+
+  root.innerHTML = `
+    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:24px 15px;">
+      <div style="max-width:760px; margin:0 auto;">
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <h2 style="margin:0; font-size:1.2rem; color:#0f172a;">${escapeHtml(patient.first_name)} ${escapeHtml(patient.last_name)}</h2>
+            <div style="font-size:0.82rem; color:#64748b; margin-top:2px;">
+              Code Patient : <strong>${escapeHtml(patient.patient_code)}</strong> • ${patient.gender === 'F' ? 'Femme' : 'Homme'} • Né(e) le ${fmtDate(patient.date_of_birth)}
+              ${patient.doc_first ? ` • Médecin traitant : ${escapeHtml(patient.doc_title || 'Dr.')} ${escapeHtml(patient.doc_first)} ${escapeHtml(patient.doc_last)}` : ''}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="logoutPatientPortal()"><i class="fas fa-sign-out-alt"></i> Quitter</button>
+        </div>
+
+        ${(patient.allergies && patient.allergies.length) ? `
+          <div class="card" style="border-radius:16px; padding:16px 24px; margin-bottom:16px; background:#fffbeb; border:1px solid #f59e0b;">
+            <strong style="color:#b45309;"><i class="fas fa-exclamation-triangle"></i> Allergies connues :</strong>
+            <span style="color:#78350f;">${patient.allergies.map(escapeHtml).join(', ')}</span>
+          </div>
+        ` : ''}
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-calendar-alt"></i> Mes rendez-vous</div>
+          ${appointments.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucun rendez-vous enregistré.</div>' : appointments.map(a => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; flex-wrap:wrap; gap:6px;">
+              <div>
+                <strong style="color:#0f172a; font-size:0.9rem;">${fmtDateTime(a.start_time)}</strong>
+                <div style="font-size:0.8rem; color:#64748b;">${escapeHtml(a.service_name || 'Consultation')} • ${escapeHtml(a.doc_title || 'Dr.')} ${escapeHtml(a.doc_first || '')} ${escapeHtml(a.doc_last || '')}${a.consultation_mode === 'TELECONSULTATION' ? ' • 🎥 Téléconsultation' : ''}</div>
+              </div>
+              <span class="status-badge ${escapeHtml((a.status || '').toLowerCase())}" style="font-size:0.7rem;">${escapeHtml(a.status)}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-notes-medical"></i> Mes consultations</div>
+          ${consultations.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucune consultation enregistrée.</div>' : consultations.map(c => `
+            <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+              <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(c.reason_for_visit || 'Consultation')}</strong>
+                <span style="font-size:0.78rem; color:#64748b;">${fmtDateTime(c.created_at)}</span>
+              </div>
+              <div style="font-size:0.82rem; color:#475569; margin-top:2px;">${escapeHtml(c.diagnosis_text || '')}</div>
+              <div style="font-size:0.78rem; color:#94a3b8; margin-top:2px;">${escapeHtml(c.doc_title || 'Dr.')} ${escapeHtml(c.doc_first || '')} ${escapeHtml(c.doc_last || '')}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-prescription"></i> Mes ordonnances</div>
+          ${prescriptions.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucune ordonnance enregistrée.</div>' : prescriptions.map(rx => `
+            <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+              <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(rx.prescription_code)}</strong>
+                <span style="font-size:0.78rem; color:#64748b;">Délivrée le ${fmtDate(rx.issued_at)} • valable jusqu'au ${fmtDate(rx.valid_until)}</span>
+              </div>
+              <ul style="margin:6px 0 0 18px; padding:0; font-size:0.82rem; color:#475569;">
+                ${(rx.items || []).map(it => `<li>${escapeHtml(it.drug_name)} — ${escapeHtml(it.dosage || '')} ${it.frequency ? `(${escapeHtml(it.frequency)})` : ''}</li>`).join('')}
+              </ul>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-vial"></i> Mes examens de laboratoire</div>
+          ${lab_orders.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucun examen enregistré.</div>' : lab_orders.map(lo => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; flex-wrap:wrap; gap:6px;">
+              <div>
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(lo.test_name)}</strong>
+                <div style="font-size:0.8rem; color:#64748b;">${fmtDate(lo.created_at)}</div>
+              </div>
+              <span class="status-badge" style="font-size:0.7rem;">${escapeHtml(lo.status)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // Check auth status and render appropriate layouts
 function initApp() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -14689,6 +14883,12 @@ function initApp() {
   if (pathParts[0] === 'rdv' || hashParts[0] === 'rdv' || urlParams.has('rdv')) {
     const slug = pathParts[1] || hashParts[1] || urlParams.get('rdv') || 'paix';
     renderPublicBookingPortal(slug);
+    return;
+  }
+
+  if (pathParts[0] === 'dossier' || hashParts[0] === 'dossier') {
+    const slug = pathParts[1] || hashParts[1] || 'paix';
+    renderPatientPortalLogin(slug);
     return;
   }
 

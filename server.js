@@ -26,6 +26,8 @@ const userCtrl = require('./controllers/userController');
 const aiCopilotCtrl = require('./controllers/aiCopilotController');
 const aiAgentCtrl = require('./controllers/aiAgentController');
 const smtpCtrl = require('./controllers/smtpController');
+const patientPortalCtrl = require('./controllers/patientPortalController');
+const { verifyPatientToken } = require('./middleware/patientAuth');
 const { rateLimit } = require('./middleware/rateLimit');
 
 const upload = multer({
@@ -85,6 +87,16 @@ app.post(
 
 // C. Public Cryptographic Prescription Verification (QR scanning endpoint)
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
+
+// E. Patient Portal - consultation du dossier par le patient lui-meme.
+// Limite de debit stricte : code_patient + prenom/nom est un facteur d'identification
+// faible, expose a l'enumeration/force brute sans cette limite.
+app.post(
+  '/api/patient-portal/login',
+  rateLimit({ windowMs: 60000, max: 8, message: 'Trop de tentatives de connexion. Merci de patienter avant de réessayer.' }),
+  patientPortalCtrl.patientPortalLogin
+);
+app.get('/api/patient-portal/dossier', verifyPatientToken, patientPortalCtrl.getMyDossier);
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
 app.post('/api/upload', (req, res) => {
