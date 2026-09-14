@@ -52,10 +52,17 @@ const patientPortalLogin = async (req, res) => {
     }
 
     const patient = patientRes.rows[0];
-    const matchFirst = cleanStr(patient.first_name).includes(cleanStr(first_name)) || cleanStr(first_name).includes(cleanStr(patient.first_name));
-    const matchLast = cleanStr(patient.last_name).includes(cleanStr(last_name)) || cleanStr(last_name).includes(cleanStr(patient.last_name));
+    // Correspondance EXACTE (après normalisation accents/casse) : contrairement à la
+    // simple vérification d'identité de la réservation publique (où une correspondance
+    // partielle ne fait que sauter un acompte), ce contrôle ouvre l'accès à un dossier
+    // médical complet — une correspondance par sous-chaîne aurait permis de le
+    // contourner avec un seul caractère partagé (ex: first_name="a").
+    const nfn = cleanStr(first_name);
+    const nln = cleanStr(last_name);
+    const pfn = cleanStr(patient.first_name);
+    const pln = cleanStr(patient.last_name);
 
-    if (!matchFirst || !matchLast) {
+    if (!nfn || !nln || nfn !== pfn || nln !== pln) {
       return genericError();
     }
 
