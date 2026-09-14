@@ -331,9 +331,12 @@ const forgotPatientPassword = async (req, res) => {
 
     await client.query('COMMIT');
 
-    const protocol = req.protocol || 'http';
-    const host = req.get('host') || 'localhost:5000';
-    const resetUrl = `${protocol}://${host}/?patient_reset_token=${resetToken}&slug=${tenant.slug}`;
+    // Ne jamais construire ce lien à partir de req.protocol/req.get('host') : l'en-tête
+    // Host est fourni par le client et peut être falsifié, ce qui permettrait
+    // d'empoisonner le lien envoyé par email vers un domaine contrôlé par l'attaquant
+    // (le jeton, valide, part alors vers ce domaine). Base URL fixée côté serveur.
+    const baseUrl = (process.env.PUBLIC_BASE_URL || 'http://127.0.0.1:5050').replace(/\/$/, '');
+    const resetUrl = `${baseUrl}/?patient_reset_token=${resetToken}&slug=${encodeURIComponent(tenant.slug)}`;
 
     const { sendPasswordResetEmail } = require('../utils/mailer');
     const emailResult = await sendPasswordResetEmail({

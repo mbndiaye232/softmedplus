@@ -2121,7 +2121,7 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                               <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca; flex-wrap:wrap;">
                                 ${appt.consultation_mode === 'TELECONSULTATION' ? `
                                   <button class="btn btn-primary" style="font-size:0.72rem; padding:3px 9px; background:#0ea5e9; border-color:#0ea5e9;"
-                                          onclick="joinTeleconsultation('${appt.video_room_slug}')">
+                                          onclick="joinTeleconsultation(${safeJsArg(appt.video_room_slug)})">
                                     <i class="fas fa-video"></i> Rejoindre
                                   </button>
                                 ` : ''}
@@ -13054,7 +13054,7 @@ function renderPublicPortalView(bookedResult = null) {
           <button class="btn btn-secondary btn-sm" onclick="window.location.href='/'" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-arrow-left"></i> Retour
           </button>
-          <button class="btn btn-secondary btn-sm" onclick="renderPatientPortalLogin('${clinic.slug}')" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
+          <button class="btn btn-secondary btn-sm" onclick="renderPatientPortalLogin(${safeJsArg(clinic.slug)})" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-folder-open"></i> Mon Dossier
           </button>
           <button class="btn btn-secondary btn-sm" onclick="openAuthModal('login')" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
@@ -14694,6 +14694,23 @@ function escapeHtml(value) {
   }[c]));
 }
 
+// Pour interpoler une valeur dynamique à l'intérieur d'un attribut gestionnaire
+// d'événement inline (onclick="...('${x}')") : escapeHtml seul ne suffit pas là,
+// car le navigateur décode les entités HTML de l'attribut AVANT d'interpréter son
+// contenu comme du JS — un simple "&#39;" redevient un "'" qui permet toujours de
+// sortir de la chaîne. JSON.stringify produit un littéral JS valide (échappe
+// guillemets/antislashs/caractères de contrôle) ; escapeHtml encode ensuite les
+// guillemets doubles qu'il utilise pour rester valide dans l'attribut HTML englobant.
+function safeJsArg(value) {
+  return escapeHtml(JSON.stringify(value));
+}
+
+// Format attendu d'un slug de clinique (toujours généré en minuscules,
+// alphanumérique + tirets côté serveur - voir registerTenant/createTenant).
+function isSafePortalSlug(slug) {
+  return typeof slug === 'string' && /^[a-z0-9-]{1,64}$/.test(slug);
+}
+
 async function patientPortalRequest(path, options = {}) {
   const res = await fetch(`/api${path}`, {
     ...options,
@@ -14748,8 +14765,8 @@ function renderPatientPortalLogin(slug, errorMsg) {
       </button>
     </form>
     <div style="text-align:center; margin-top:16px; font-size:0.82rem; display:flex; flex-direction:column; gap:8px;">
-      <a href="javascript:void(0)" onclick="renderPatientPortalEnroll('${slug}')" style="color:#2563eb; font-weight:600;">Première connexion ? Créer mon mot de passe</a>
-      <a href="javascript:void(0)" onclick="renderPatientPortalForgot('${slug}')" style="color:#64748b;">Mot de passe oublié ?</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalEnroll(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">Première connexion ? Créer mon mot de passe</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalForgot(${safeJsArg(slug)})" style="color:#64748b;">Mot de passe oublié ?</a>
     </div>
   `);
 }
@@ -14812,7 +14829,7 @@ function renderPatientPortalEnroll(slug, errorMsg) {
       </button>
     </form>
     <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
-      <a href="javascript:void(0)" onclick="renderPatientPortalLogin('${slug}')" style="color:#2563eb; font-weight:600;">J'ai déjà un mot de passe</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">J'ai déjà un mot de passe</a>
     </div>
   `);
 }
@@ -14863,7 +14880,7 @@ function renderPatientPortalForgot(slug, infoMsg, isError, resetUrl) {
       </button>
     </form>
     <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
-      <a href="javascript:void(0)" onclick="renderPatientPortalLogin('${slug}')" style="color:#2563eb; font-weight:600;">Retour à la connexion</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">Retour à la connexion</a>
     </div>
   `);
 }
@@ -14896,7 +14913,7 @@ function renderPatientPortalResetPassword(token, slug) {
       <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Nouveau mot de passe</h2>
     </div>
     <div id="pp-reset-error"></div>
-    <form id="patient-portal-reset-form" onsubmit="submitPatientPortalReset(event, '${token}')">
+    <form id="patient-portal-reset-form" onsubmit="submitPatientPortalReset(event, ${safeJsArg(token)})">
       <div class="form-group">
         <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
         <input type="password" class="form-control" id="pp-reset-password" required minlength="6" autocomplete="new-password" />
@@ -14911,7 +14928,7 @@ function renderPatientPortalResetPassword(token, slug) {
     .catch(err => {
       document.getElementById('patient-portal-reset-form').innerHTML = '';
       document.getElementById('pp-reset-error').innerHTML = patientPortalErrorBox(err.message) +
-        `<div style="text-align:center; margin-top:10px;"><a href="javascript:void(0)" onclick="renderPatientPortalForgot('${slug}')" style="color:#2563eb; font-weight:600; font-size:0.85rem;">Redemander un lien</a></div>`;
+        `<div style="text-align:center; margin-top:10px;"><a href="javascript:void(0)" onclick="renderPatientPortalForgot(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600; font-size:0.85rem;">Redemander un lien</a></div>`;
     });
 }
 
@@ -14942,7 +14959,7 @@ function renderPatientPortalOtp(otpToken, phoneHint, simulatedCode) {
     </div>
     ${simulatedCode ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-flask"></i> Mode local (aucun SMS réel envoyé) — code : <strong>${escapeHtml(simulatedCode)}</strong></div>` : ''}
     <div id="pp-otp-error"></div>
-    <form id="patient-portal-otp-form" onsubmit="submitPatientPortalOtp(event, '${otpToken}')">
+    <form id="patient-portal-otp-form" onsubmit="submitPatientPortalOtp(event, ${safeJsArg(otpToken)})">
       <div class="form-group">
         <label class="form-label" style="font-size:0.82rem;">Code à 6 chiffres</label>
         <input type="text" class="form-control" id="pp-otp-code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="letter-spacing:4px; font-size:1.1rem; text-align:center;" />
@@ -15111,8 +15128,16 @@ function initApp() {
   }
 
   if (urlParams.has('patient_reset_token')) {
+    // Défense en profondeur : un token/slug de forme invalide est rejeté ici,
+    // avant même d'atteindre un template — la valeur d'un paramètre d'URL est le
+    // vecteur le plus directement exploitable de toute l'app (aucune authentification
+    // requise, un simple lien envoyé à la victime suffit).
     const resetToken = urlParams.get('patient_reset_token');
     const slug = urlParams.get('slug') || 'paix';
+    if (!/^[a-f0-9]{64}$/.test(resetToken) || !isSafePortalSlug(slug)) {
+      renderPatientPortalLogin('paix', 'Ce lien de réinitialisation est invalide.');
+      return;
+    }
     renderPatientPortalResetPassword(resetToken, slug);
     return;
   }
@@ -15124,8 +15149,8 @@ function initApp() {
   }
 
   if (pathParts[0] === 'dossier' || hashParts[0] === 'dossier') {
-    const slug = pathParts[1] || hashParts[1] || 'paix';
-    renderPatientPortalLogin(slug);
+    const rawSlug = pathParts[1] || hashParts[1] || 'paix';
+    renderPatientPortalLogin(isSafePortalSlug(rawSlug) ? rawSlug : 'paix');
     return;
   }
 
