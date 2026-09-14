@@ -95,6 +95,9 @@ const patientAuthRateLimit = rateLimit({ windowMs: 60000, max: 8, message: 'Trop
 app.post('/api/patient-portal/enroll', patientAuthRateLimit, patientPortalCtrl.enrollPatientPassword);
 app.post('/api/patient-portal/login', patientAuthRateLimit, patientPortalCtrl.patientPortalLogin);
 app.post('/api/patient-portal/verify-otp', patientAuthRateLimit, patientPortalCtrl.verifyLoginOtp);
+app.post('/api/patient-portal/forgot-password', patientAuthRateLimit, patientPortalCtrl.forgotPatientPassword);
+app.get('/api/patient-portal/verify-reset-token', patientPortalCtrl.verifyPatientResetToken);
+app.post('/api/patient-portal/reset-password', patientAuthRateLimit, patientPortalCtrl.resetPatientPassword);
 app.get('/api/patient-portal/dossier', verifyPatientToken, patientPortalCtrl.getMyDossier);
 app.post('/api/patient-portal/2fa', verifyPatientToken, patientPortalCtrl.toggleTwoFactor);
 

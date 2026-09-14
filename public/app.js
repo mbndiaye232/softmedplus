@@ -14747,8 +14747,9 @@ function renderPatientPortalLogin(slug, errorMsg) {
         <i class="fas fa-unlock-alt"></i> Accéder à mon dossier
       </button>
     </form>
-    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem; display:flex; flex-direction:column; gap:8px;">
       <a href="javascript:void(0)" onclick="renderPatientPortalEnroll('${slug}')" style="color:#2563eb; font-weight:600;">Première connexion ? Créer mon mot de passe</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalForgot('${slug}')" style="color:#64748b;">Mot de passe oublié ?</a>
     </div>
   `);
 }
@@ -14802,6 +14803,10 @@ function renderPatientPortalEnroll(slug, errorMsg) {
         <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
         <input type="password" class="form-control" id="pp-enroll-password" required minlength="6" autocomplete="new-password" />
       </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Email (facultatif, pour récupérer votre mot de passe)</label>
+        <input type="email" class="form-control" id="pp-enroll-email" autocomplete="email" />
+      </div>
       <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
         <i class="fas fa-check"></i> Créer mon accès
       </button>
@@ -14818,16 +14823,111 @@ async function submitPatientPortalEnroll(e) {
   const first_name = document.getElementById('pp-enroll-first').value.trim();
   const last_name = document.getElementById('pp-enroll-last').value.trim();
   const password = document.getElementById('pp-enroll-password').value;
+  const email = document.getElementById('pp-enroll-email').value.trim();
 
   try {
     const res = await patientPortalRequest('/patient-portal/enroll', {
       method: 'POST',
-      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name, password })
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name, password, email: email || undefined })
     });
     patientPortalToken = res.token;
     await renderPatientDossierView();
   } catch (err) {
     renderPatientPortalEnroll(patientPortalTenantSlug, err.message);
+  }
+}
+
+function renderPatientPortalForgot(slug, infoMsg, isError, resetUrl) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-envelope-open-text fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Mot de passe oublié</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Recevez un lien de réinitialisation par email</div>
+    </div>
+    ${isError ? patientPortalErrorBox(infoMsg) : (infoMsg ? `<div style="background:#ecfdf5; border:1px solid #10b981; color:#065f46; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-check-circle"></i> ${escapeHtml(infoMsg)}</div>` : '')}
+    ${resetUrl ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; border-radius:8px; padding:10px 14px; font-size:0.8rem; margin-bottom:16px; word-break:break-all;"><i class="fas fa-flask"></i> Mode local (aucun email réel envoyé) — lien : <a href="${resetUrl}" style="color:#1d4ed8; font-weight:600;">${escapeHtml(resetUrl)}</a></div>` : ''}
+    <form id="patient-portal-forgot-form" onsubmit="submitPatientPortalForgot(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-forgot-code" required autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Email enregistré sur votre dossier</label>
+        <input type="email" class="form-control" id="pp-forgot-email" required autocomplete="email" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-paper-plane"></i> Envoyer le lien
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin('${slug}')" style="color:#2563eb; font-weight:600;">Retour à la connexion</a>
+    </div>
+  `);
+}
+
+async function submitPatientPortalForgot(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-forgot-code').value.trim();
+  const email = document.getElementById('pp-forgot-email').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, email })
+    });
+    // En mode simulation locale (aucun SMTP configuré), le lien est renvoyé
+    // directement dans la réponse pour permettre de tester sans serveur mail réel.
+    renderPatientPortalForgot(patientPortalTenantSlug, res.message, false, res.simulated ? res.resetUrl : null);
+  } catch (err) {
+    renderPatientPortalForgot(patientPortalTenantSlug, err.message, true);
+  }
+}
+
+function renderPatientPortalResetPassword(token, slug) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-lock fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Nouveau mot de passe</h2>
+    </div>
+    <div id="pp-reset-error"></div>
+    <form id="patient-portal-reset-form" onsubmit="submitPatientPortalReset(event, '${token}')">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
+        <input type="password" class="form-control" id="pp-reset-password" required minlength="6" autocomplete="new-password" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check"></i> Réinitialiser mon mot de passe
+      </button>
+    </form>
+  `);
+
+  patientPortalRequest(`/patient-portal/verify-reset-token?token=${encodeURIComponent(token)}`)
+    .catch(err => {
+      document.getElementById('patient-portal-reset-form').innerHTML = '';
+      document.getElementById('pp-reset-error').innerHTML = patientPortalErrorBox(err.message) +
+        `<div style="text-align:center; margin-top:10px;"><a href="javascript:void(0)" onclick="renderPatientPortalForgot('${slug}')" style="color:#2563eb; font-weight:600; font-size:0.85rem;">Redemander un lien</a></div>`;
+    });
+}
+
+async function submitPatientPortalReset(e, token) {
+  e.preventDefault();
+  const new_password = document.getElementById('pp-reset-password').value;
+
+  try {
+    await patientPortalRequest('/patient-portal/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password })
+    });
+    showToast('Mot de passe réinitialisé avec succès, vous pouvez vous connecter.', 'success');
+    renderPatientPortalLogin(patientPortalTenantSlug);
+  } catch (err) {
+    document.getElementById('pp-reset-error').innerHTML = patientPortalErrorBox(err.message);
   }
 }
 
@@ -15007,6 +15107,13 @@ function initApp() {
     const resetToken = urlParams.get('reset_token');
     renderAuthLayout();
     openResetPasswordModal(resetToken);
+    return;
+  }
+
+  if (urlParams.has('patient_reset_token')) {
+    const resetToken = urlParams.get('patient_reset_token');
+    const slug = urlParams.get('slug') || 'paix';
+    renderPatientPortalResetPassword(resetToken, slug);
     return;
   }
 

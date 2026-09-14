@@ -37,7 +37,7 @@ async function findTenantAndPatient(client, tenantSlug, patientCode) {
   const tenant = tenantRes.rows[0];
 
   const patientRes = await client.query(
-    `SELECT id, patient_code, first_name, last_name, phone_number, password_hash, two_factor_enabled
+    `SELECT id, patient_code, first_name, last_name, phone_number, email, password_hash, two_factor_enabled
      FROM patients
      WHERE tenant_id = $1 AND UPPER(TRIM(patient_code)) = UPPER(TRIM($2))
      LIMIT 1`,
@@ -50,14 +50,23 @@ async function findTenantAndPatient(client, tenantSlug, patientCode) {
 // vérifiée par code patient + prénom/nom EXACTS (même contrôle durci que
 // précédemment), mais seulement une fois : si un mot de passe est déjà défini,
 // cette route refuse plutôt que de laisser un correspondance de nom l'écraser.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const enrollPatientPassword = async (req, res) => {
-  const { tenant_slug, patient_code, first_name, last_name, password } = req.body;
+  const { tenant_slug, patient_code, first_name, last_name, password, email } = req.body;
 
   if (!tenant_slug || !patient_code || !first_name || !last_name || !password) {
     return res.status(400).json({ error: 'Tous les champs sont requis' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+  }
+  // Email facultatif à l'inscription, mais requis plus tard pour "mot de passe
+  // oublié" - on le valide dès maintenant plutôt que de stocker une valeur invalide
+  // qui ne sera jamais utilisable au moment où le patient en aura besoin.
+  const cleanEmail = email ? email.trim().toLowerCase() : null;
+  if (cleanEmail && !EMAIL_RE.test(cleanEmail)) {
+    return res.status(400).json({ error: 'Adresse email invalide' });
   }
 
   const client = await pool.connect();
@@ -88,7 +97,12 @@ const enrollPatientPassword = async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    await client.query(`UPDATE patients SET password_hash = $1 WHERE id = $2`, [passwordHash, patient.id]);
+    // COALESCE : ne jamais effacer un email déjà renseigné (ex: par le personnel
+    // d'accueil) si le patient laisse le champ vide à l'inscription.
+    await client.query(
+      `UPDATE patients SET password_hash = $1, email = COALESCE($2, email) WHERE id = $3`,
+      [passwordHash, cleanEmail, patient.id]
+    );
 
     await client.query('COMMIT');
 
@@ -264,7 +278,174 @@ const verifyLoginOtp = async (req, res) => {
   }
 };
 
-// 4. Active/désactive la double authentification SMS - patient déjà authentifié
+// 4. Mot de passe oublié : envoie un lien de réinitialisation par email. Réponse
+// volontairement identique que le patient/email corresponde ou non, pour ne pas
+// laisser deviner qu'un code patient ou un email existe (même posture que
+// forgotPassword côté staff dans authController.js).
+const forgotPatientPassword = async (req, res) => {
+  const { tenant_slug, patient_code, email } = req.body;
+
+  if (!tenant_slug || !patient_code || !email) {
+    return res.status(400).json({ error: 'Structure, code patient et email sont requis' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  const genericResponse = () => res.status(200).json({
+    message: 'Si ces informations correspondent à un dossier avec un email enregistré, un lien de réinitialisation vous a été envoyé.'
+  });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
+
+    const { tenant, patient } = await findTenantAndPatient(client, tenant_slug, patient_code);
+
+    if (!tenant || !patient || !patient.email || patient.email.toLowerCase() !== cleanEmail) {
+      await client.query('COMMIT');
+      return genericResponse();
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 3600000); // 1 heure
+
+    await client.query(
+      `UPDATE patient_password_reset_tokens SET used_at = NOW() WHERE patient_id = $1 AND used_at IS NULL`,
+      [patient.id]
+    );
+    await client.query(
+      `INSERT INTO patient_password_reset_tokens (patient_id, tenant_id, token, expires_at) VALUES ($1, $2, $3, $4)`,
+      [patient.id, tenant.id, resetToken, expiresAt]
+    );
+
+    let smtpConfig = null;
+    try {
+      const smtpRes = await client.query(
+        `SELECT * FROM tenant_smtp_accounts WHERE tenant_id = $1 AND is_active = true ORDER BY is_default DESC, created_at DESC LIMIT 1`,
+        [tenant.id]
+      );
+      if (smtpRes.rowCount > 0) smtpConfig = smtpRes.rows[0];
+    } catch (e) {
+      // Table potentiellement absente sur une ancienne installation.
+    }
+
+    await client.query('COMMIT');
+
+    const protocol = req.protocol || 'http';
+    const host = req.get('host') || 'localhost:5000';
+    const resetUrl = `${protocol}://${host}/?patient_reset_token=${resetToken}&slug=${tenant.slug}`;
+
+    const { sendPasswordResetEmail } = require('../utils/mailer');
+    const emailResult = await sendPasswordResetEmail({
+      recipientEmail: patient.email,
+      userName: `${patient.first_name || ''} ${patient.last_name || ''}`.trim(),
+      resetUrl,
+      tenantName: tenant.name || 'SoftMed',
+      customConfig: smtpConfig
+    });
+
+    return res.status(200).json({
+      message: 'Si ces informations correspondent à un dossier avec un email enregistré, un lien de réinitialisation vous a été envoyé.',
+      simulated: emailResult.simulated || false,
+      // Uniquement en mode simulation locale (aucun SMTP configuré) : permet de
+      // tester le flux sans serveur mail réel, comme pour le staff.
+      resetUrl: emailResult.simulated ? resetUrl : undefined
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Forgot patient password error:', err.message);
+    return res.status(500).json({ error: 'Échec du traitement de la demande' });
+  } finally {
+    client.release();
+  }
+};
+
+// 5. Vérifie la validité d'un jeton de réinitialisation (avant d'afficher le
+// formulaire de nouveau mot de passe).
+const verifyPatientResetToken = async (req, res) => {
+  const token = req.query.token || req.body.token;
+  if (!token) {
+    return res.status(400).json({ error: 'Jeton de réinitialisation manquant' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
+
+    const tokenRes = await client.query(
+      `SELECT prt.id, p.first_name, p.last_name, t.name AS tenant_name
+       FROM patient_password_reset_tokens prt
+       JOIN patients p ON prt.patient_id = p.id
+       JOIN tenants t ON prt.tenant_id = t.id
+       WHERE prt.token = $1 AND prt.used_at IS NULL AND prt.expires_at > NOW()`,
+      [token.trim()]
+    );
+
+    await client.query('COMMIT');
+
+    if (tokenRes.rowCount === 0) {
+      return res.status(400).json({ valid: false, error: 'Ce lien de réinitialisation est invalide ou a expiré.' });
+    }
+
+    const row = tokenRes.rows[0];
+    return res.status(200).json({ valid: true, patient_name: `${row.first_name} ${row.last_name}`, tenant_name: row.tenant_name });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Verify patient reset token error:', err.message);
+    return res.status(500).json({ error: 'Erreur lors de la vérification du lien' });
+  } finally {
+    client.release();
+  }
+};
+
+// 6. Réinitialise le mot de passe à partir d'un jeton valide à usage unique.
+const resetPatientPassword = async (req, res) => {
+  const { token, new_password } = req.body;
+
+  if (!token || !new_password) {
+    return res.status(400).json({ error: 'Jeton et nouveau mot de passe requis' });
+  }
+  if (new_password.length < 6) {
+    return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
+
+    const tokenRes = await client.query(
+      `SELECT * FROM patient_password_reset_tokens
+       WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()
+       FOR UPDATE`,
+      [token.trim()]
+    );
+
+    if (tokenRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Ce lien de réinitialisation est invalide ou a expiré.' });
+    }
+
+    const record = tokenRes.rows[0];
+    const passwordHash = await bcrypt.hash(new_password, 10);
+
+    await client.query(`UPDATE patients SET password_hash = $1 WHERE id = $2`, [passwordHash, record.patient_id]);
+    await client.query(`UPDATE patient_password_reset_tokens SET used_at = NOW() WHERE id = $1`, [record.id]);
+
+    await client.query('COMMIT');
+
+    return res.status(200).json({ message: 'Votre mot de passe a été modifié avec succès. Vous pouvez maintenant vous connecter.' });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Reset patient password error:', err.message);
+    return res.status(500).json({ error: 'Échec de la réinitialisation du mot de passe' });
+  } finally {
+    client.release();
+  }
+};
+
+// 7. Active/désactive la double authentification SMS - patient déjà authentifié
 // (req.patientAuth), jamais d'id fourni en paramètre.
 const toggleTwoFactor = async (req, res) => {
   const { patientId, tenantId } = req.patientAuth;
@@ -293,7 +474,7 @@ const toggleTwoFactor = async (req, res) => {
   }
 };
 
-// 5. Dossier du patient connecté - tenant_id et patient_id viennent EXCLUSIVEMENT du
+// 8. Dossier du patient connecté - tenant_id et patient_id viennent EXCLUSIVEMENT du
 // jeton vérifié (req.patientAuth), jamais d'un paramètre fourni par l'appelant.
 // Les confidential_notes (réservées au corps médical) sont volontairement exclues.
 const getMyDossier = async (req, res) => {
@@ -306,7 +487,7 @@ const getMyDossier = async (req, res) => {
 
     const patientRes = await client.query(
       `SELECT p.id, p.patient_code, p.first_name, p.last_name, p.gender, p.date_of_birth,
-              p.blood_group, p.allergies, p.chronic_conditions, p.status, p.two_factor_enabled,
+              p.blood_group, p.allergies, p.chronic_conditions, p.status, p.two_factor_enabled, p.email,
               ps.name AS status_name,
               doc.first_name AS doc_first, doc.last_name AS doc_last, doc.title AS doc_title
        FROM patients p
@@ -387,6 +568,9 @@ module.exports = {
   enrollPatientPassword,
   patientPortalLogin,
   verifyLoginOtp,
+  forgotPatientPassword,
+  verifyPatientResetToken,
+  resetPatientPassword,
   toggleTwoFactor,
   getMyDossier
 };
