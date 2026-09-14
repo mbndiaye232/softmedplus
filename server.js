@@ -89,14 +89,14 @@ app.post(
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 
 // E. Patient Portal - consultation du dossier par le patient lui-meme.
-// Limite de debit stricte : code_patient + prenom/nom est un facteur d'identification
-// faible, expose a l'enumeration/force brute sans cette limite.
-app.post(
-  '/api/patient-portal/login',
-  rateLimit({ windowMs: 60000, max: 8, message: 'Trop de tentatives de connexion. Merci de patienter avant de réessayer.' }),
-  patientPortalCtrl.patientPortalLogin
-);
+// Limite de debit stricte sur toutes les routes d'identification (code patient,
+// mot de passe, code OTP sont chacun des facteurs devinables/forcables sans elle).
+const patientAuthRateLimit = rateLimit({ windowMs: 60000, max: 8, message: 'Trop de tentatives. Merci de patienter avant de réessayer.' });
+app.post('/api/patient-portal/enroll', patientAuthRateLimit, patientPortalCtrl.enrollPatientPassword);
+app.post('/api/patient-portal/login', patientAuthRateLimit, patientPortalCtrl.patientPortalLogin);
+app.post('/api/patient-portal/verify-otp', patientAuthRateLimit, patientPortalCtrl.verifyLoginOtp);
 app.get('/api/patient-portal/dossier', verifyPatientToken, patientPortalCtrl.getMyDossier);
+app.post('/api/patient-portal/2fa', verifyPatientToken, patientPortalCtrl.toggleTwoFactor);
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
 app.post('/api/upload', (req, res) => {

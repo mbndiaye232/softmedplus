@@ -14708,53 +14708,65 @@ async function patientPortalRequest(path, options = {}) {
   return data;
 }
 
-function renderPatientPortalLogin(slug, errorMsg) {
-  patientPortalTenantSlug = slug;
+function patientPortalCard(innerHtml) {
   const root = document.getElementById('app-root');
   root.innerHTML = `
     <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:30px 15px; display:flex; justify-content:center; align-items:center;">
       <div class="card" style="max-width:440px; width:100%; border-radius:20px; padding:30px; box-shadow:0 15px 35px rgba(15,23,42,0.08);">
-        <div style="text-align:center; margin-bottom:20px;">
-          <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
-            <i class="fas fa-folder-open fa-2x" style="color:#2563eb;"></i>
-          </div>
-          <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Consulter mon dossier</h2>
-          <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Identifiez-vous avec les informations de votre carnet patient</div>
-        </div>
-        ${errorMsg ? `<div style="background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>` : ''}
-        <form id="patient-portal-login-form" onsubmit="submitPatientPortalLogin(event)">
-          <div class="form-group">
-            <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
-            <input type="text" class="form-control" id="pp-login-code" required autocomplete="off" />
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size:0.82rem;">Prénom</label>
-            <input type="text" class="form-control" id="pp-login-first" required />
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size:0.82rem;">Nom</label>
-            <input type="text" class="form-control" id="pp-login-last" required />
-          </div>
-          <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
-            <i class="fas fa-unlock-alt"></i> Accéder à mon dossier
-          </button>
-        </form>
+        ${innerHtml}
       </div>
     </div>
   `;
 }
 
+function patientPortalErrorBox(errorMsg) {
+  return errorMsg ? `<div style="background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>` : '';
+}
+
+function renderPatientPortalLogin(slug, errorMsg) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-folder-open fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Consulter mon dossier</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Connectez-vous avec votre code patient et votre mot de passe</div>
+    </div>
+    ${patientPortalErrorBox(errorMsg)}
+    <form id="patient-portal-login-form" onsubmit="submitPatientPortalLogin(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-login-code" required autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Mot de passe</label>
+        <input type="password" class="form-control" id="pp-login-password" required autocomplete="current-password" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-unlock-alt"></i> Accéder à mon dossier
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalEnroll('${slug}')" style="color:#2563eb; font-weight:600;">Première connexion ? Créer mon mot de passe</a>
+    </div>
+  `);
+}
+
 async function submitPatientPortalLogin(e) {
   e.preventDefault();
   const patient_code = document.getElementById('pp-login-code').value.trim();
-  const first_name = document.getElementById('pp-login-first').value.trim();
-  const last_name = document.getElementById('pp-login-last').value.trim();
+  const password = document.getElementById('pp-login-password').value;
 
   try {
     const res = await patientPortalRequest('/patient-portal/login', {
       method: 'POST',
-      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name })
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, password })
     });
+    if (res.requires_otp) {
+      renderPatientPortalOtp(res.otp_token, res.phone_hint, res.simulated_code);
+      return;
+    }
     patientPortalToken = res.token;
     await renderPatientDossierView();
   } catch (err) {
@@ -14762,9 +14774,117 @@ async function submitPatientPortalLogin(e) {
   }
 }
 
+function renderPatientPortalEnroll(slug, errorMsg) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-key fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Créer mon mot de passe</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Vérification avec les informations de votre carnet patient</div>
+    </div>
+    ${patientPortalErrorBox(errorMsg)}
+    <form id="patient-portal-enroll-form" onsubmit="submitPatientPortalEnroll(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-enroll-code" required autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Prénom</label>
+        <input type="text" class="form-control" id="pp-enroll-first" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nom</label>
+        <input type="text" class="form-control" id="pp-enroll-last" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
+        <input type="password" class="form-control" id="pp-enroll-password" required minlength="6" autocomplete="new-password" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check"></i> Créer mon accès
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin('${slug}')" style="color:#2563eb; font-weight:600;">J'ai déjà un mot de passe</a>
+    </div>
+  `);
+}
+
+async function submitPatientPortalEnroll(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-enroll-code').value.trim();
+  const first_name = document.getElementById('pp-enroll-first').value.trim();
+  const last_name = document.getElementById('pp-enroll-last').value.trim();
+  const password = document.getElementById('pp-enroll-password').value;
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/enroll', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name, password })
+    });
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    renderPatientPortalEnroll(patientPortalTenantSlug, err.message);
+  }
+}
+
+function renderPatientPortalOtp(otpToken, phoneHint, simulatedCode) {
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-sms fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Code de vérification</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Un code a été envoyé par SMS au numéro ${escapeHtml(phoneHint || '')}</div>
+    </div>
+    ${simulatedCode ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-flask"></i> Mode local (aucun SMS réel envoyé) — code : <strong>${escapeHtml(simulatedCode)}</strong></div>` : ''}
+    <div id="pp-otp-error"></div>
+    <form id="patient-portal-otp-form" onsubmit="submitPatientPortalOtp(event, '${otpToken}')">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code à 6 chiffres</label>
+        <input type="text" class="form-control" id="pp-otp-code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="letter-spacing:4px; font-size:1.1rem; text-align:center;" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check-circle"></i> Valider
+      </button>
+    </form>
+  `);
+}
+
+async function submitPatientPortalOtp(e, otpToken) {
+  e.preventDefault();
+  const code = document.getElementById('pp-otp-code').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ otp_token: otpToken, code })
+    });
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    document.getElementById('pp-otp-error').innerHTML = patientPortalErrorBox(err.message);
+  }
+}
+
 function logoutPatientPortal() {
   patientPortalToken = null;
   renderPatientPortalLogin(patientPortalTenantSlug);
+}
+
+async function togglePatientTwoFactor(enable) {
+  try {
+    await patientPortalRequest('/patient-portal/2fa', {
+      method: 'POST',
+      body: JSON.stringify({ enable })
+    });
+    await renderPatientDossierView();
+  } catch (err) {
+    showToast(err.message || 'Échec de la mise à jour', 'error');
+  }
 }
 
 async function renderPatientDossierView() {
@@ -14799,6 +14919,16 @@ async function renderPatientDossierView() {
             </div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="logoutPatientPortal()"><i class="fas fa-sign-out-alt"></i> Quitter</button>
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:16px 24px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <strong style="color:#0f172a; font-size:0.9rem;"><i class="fas fa-shield-alt" style="color:#2563eb;"></i> Double authentification par SMS</strong>
+            <div style="font-size:0.8rem; color:#64748b; margin-top:2px;">${patient.two_factor_enabled ? 'Activée — un code vous sera demandé à chaque connexion.' : 'Désactivée (facultative) — activez-la pour sécuriser davantage votre dossier.'}</div>
+          </div>
+          <button class="btn ${patient.two_factor_enabled ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="togglePatientTwoFactor(${!patient.two_factor_enabled})">
+            <i class="fas ${patient.two_factor_enabled ? 'fa-toggle-off' : 'fa-toggle-on'}"></i> ${patient.two_factor_enabled ? 'Désactiver' : 'Activer'}
+          </button>
         </div>
 
         ${(patient.allergies && patient.allergies.length) ? `
