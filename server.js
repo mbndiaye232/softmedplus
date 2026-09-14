@@ -377,4 +377,15 @@ async function runAutoMigrations() {
 app.listen(PORT, async () => {
   console.log(`SoftMed API server running on port ${PORT}`);
   await runAutoMigrations();
+
+  // Rappels automatiques de RDV (SMS/WhatsApp) : tâche interne, jamais exposée en
+  // route HTTP - vérifie régulièrement les rendez-vous dont l'échéance de rappel
+  // est atteinte. Intervalle court adapté à un prototype (5 min) ; un vrai
+  // déploiement multi-instances voudrait un verrou distribué pour éviter les
+  // envois en double si plusieurs instances tournent en parallèle.
+  const { sendDueAppointmentReminders } = require('./utils/reminderJob');
+  const REMINDER_POLL_INTERVAL_MS = 5 * 60 * 1000;
+  const runReminderJob = () => sendDueAppointmentReminders().catch(err => console.error('Reminder job error:', err.message));
+  setTimeout(runReminderJob, 10000);
+  setInterval(runReminderJob, REMINDER_POLL_INTERVAL_MS);
 });

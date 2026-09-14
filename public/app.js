@@ -1567,6 +1567,92 @@ async function submitReschedule(e) {
   }
 }
 
+function openReminderSettingsModal(appointmentId, patientLabel, enabled, hoursBefore, channel) {
+  let modal = document.getElementById('reminder-settings-modal');
+  if (!modal) {
+    const div = document.createElement('div');
+    div.className = 'modal-overlay';
+    div.id = 'reminder-settings-modal';
+    div.style.cssText = 'display:none; justify-content:center; align-items:center; z-index:3200;';
+    div.innerHTML = `
+      <div class="modal-container" style="width:420px; max-width:96%; padding:22px;">
+        <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+          <h4 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">
+            <i class="fas fa-bell text-primary"></i> Rappel automatique
+          </h4>
+          <button class="modal-close" onclick="closeReminderSettingsModal()">&times;</button>
+        </div>
+        <form onsubmit="submitReminderSettings(event)">
+          <input type="hidden" id="reminder-appt-id" />
+          <div style="font-size:0.86rem; color:var(--text-primary); margin-bottom:12px;">
+            Patient : <strong id="reminder-patient"></strong>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
+              <input type="checkbox" id="reminder-enabled" style="width:auto;" />
+              Envoyer un rappel automatique
+            </label>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Heures avant le RDV</label>
+              <input type="number" class="form-control" id="reminder-hours" min="0" max="72" />
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Canal</label>
+              <select class="form-control" id="reminder-channel">
+                <option value="SMS">📱 SMS</option>
+                <option value="WHATSAPP">💬 WhatsApp</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:15px; margin-top:6px;">
+            <button type="button" class="btn btn-secondary" onclick="closeReminderSettingsModal()">Annuler</button>
+            <button type="submit" class="btn btn-primary" style="font-weight:700;">
+              <i class="fas fa-check"></i> Enregistrer
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(div);
+    modal = div;
+  }
+
+  document.getElementById('reminder-appt-id').value = appointmentId;
+  document.getElementById('reminder-patient').innerText = patientLabel;
+  document.getElementById('reminder-enabled').checked = !!enabled;
+  document.getElementById('reminder-hours').value = hoursBefore ?? 3;
+  document.getElementById('reminder-channel').value = channel || 'SMS';
+
+  modal.style.display = 'flex';
+}
+
+function closeReminderSettingsModal() {
+  const modal = document.getElementById('reminder-settings-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitReminderSettings(e) {
+  e.preventDefault();
+  const appointmentId = document.getElementById('reminder-appt-id').value;
+  const reminder_enabled = document.getElementById('reminder-enabled').checked;
+  const reminder_hours_before = document.getElementById('reminder-hours').value;
+  const reminder_channel = document.getElementById('reminder-channel').value;
+
+  try {
+    await api.request(`/appointments/${appointmentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ reminder_enabled, reminder_hours_before, reminder_channel })
+    });
+    showToast('Réglages de rappel mis à jour.', 'success');
+    closeReminderSettingsModal();
+    navigate('agenda');
+  } catch (err) {
+    showToast(`Échec de la mise à jour : ${err.message}`, 'error');
+  }
+}
+
 function quickSelectSlot(timeStr) {
   const timeInput = document.getElementById('book-start-time');
   if (timeInput) {
@@ -1942,6 +2028,25 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                 <option value="TELECONSULTATION">🎥 Téléconsultation vidéo</option>
               </select>
             </div>
+            <div class="form-group" style="border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; background:#f8fafc;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="book-reminder-enabled" checked style="width:auto;" />
+                <i class="fas fa-bell"></i> Rappel automatique
+              </label>
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Heures avant le RDV</label>
+                  <input type="number" class="form-control" id="book-reminder-hours" value="3" min="0" max="72" />
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Canal</label>
+                  <select class="form-control" id="book-reminder-channel">
+                    <option value="SMS">📱 SMS</option>
+                    <option value="WHATSAPP">💬 WhatsApp</option>
+                  </select>
+                </div>
+              </div>
+            </div>
             <button class="btn btn-primary" style="width:100%;"><i class="fas fa-calendar-check"></i> ${t('bookBtn')}</button>
           </form>
         </div>
@@ -2116,6 +2221,15 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                                   <i class="fas fa-video"></i> Téléconsultation
                                 </span>
                               ` : ''}
+                              ${appt.reminder_enabled ? `
+                                <span class="badge" style="background:${appt.reminder_sent_at ? '#16a34a' : '#f1f5f9'}; color:${appt.reminder_sent_at ? '#fff' : '#334155'}; border:1px solid #cbd5e1; font-size:0.68rem; padding:1px 6px; border-radius:6px;" title="${appt.reminder_sent_at ? 'Rappel envoyé' : 'Rappel à envoyer'}">
+                                  <i class="fas ${appt.reminder_sent_at ? 'fa-check' : 'fa-bell'}"></i> ${appt.reminder_hours_before}h avant (${appt.reminder_channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'})
+                                </span>
+                              ` : `
+                                <span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0; font-size:0.68rem; padding:1px 6px; border-radius:6px;">
+                                  <i class="fas fa-bell-slash"></i> Rappel désactivé
+                                </span>
+                              `}
                             </div>
                             ${canAct ? `
                               <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca; flex-wrap:wrap;">
@@ -2125,6 +2239,10 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                                     <i class="fas fa-video"></i> Rejoindre
                                   </button>
                                 ` : ''}
+                                <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
+                                        onclick="openReminderSettingsModal(${safeJsArg(appt.id)}, ${safeJsArg(patientLabel)}, ${!!appt.reminder_enabled}, ${appt.reminder_hours_before}, ${safeJsArg(appt.reminder_channel)})">
+                                  <i class="fas fa-bell"></i> Rappel
+                                </button>
                                 <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
                                         onclick="openRescheduleModal('${appt.id}', '${patientLabel}', '${appt.start_time}')">
                                   <i class="fas fa-clock"></i> Reporter
@@ -3187,6 +3305,10 @@ async function bookAppointment(e) {
   const booking_channel = document.getElementById('book-channel').value;
   const modeSelect = document.getElementById('book-consultation-mode');
   const consultation_mode = modeSelect ? modeSelect.value : 'PRESENTIEL';
+  const reminderEnabledEl = document.getElementById('book-reminder-enabled');
+  const reminder_enabled = reminderEnabledEl ? reminderEnabledEl.checked : true;
+  const reminder_hours_before = document.getElementById('book-reminder-hours')?.value || 3;
+  const reminder_channel = document.getElementById('book-reminder-channel')?.value || 'SMS';
 
   if (!practitioner_id) {
     showToast('Veuillez sélectionner un praticien pour ce rendez-vous', 'warning');
@@ -3198,7 +3320,10 @@ async function bookAppointment(e) {
     medical_service_id,
     start_time,
     booking_channel,
-    consultation_mode
+    consultation_mode,
+    reminder_enabled,
+    reminder_hours_before,
+    reminder_channel
   };
 
   if (currentBookingPatientType === 'existing') {
