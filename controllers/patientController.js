@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { logAudit } = require('../middleware/audit');
 const pool = require('../config/db');
+const { findPairInteraction, normalize: normalizeDrugName } = require('../utils/drugInteractions');
 
 const HMAC_SECRET = process.env.HMAC_SECRET || 'clinicos-hmac-prescription-security-key-2026';
 
@@ -875,6 +876,85 @@ const getPrescriptionDetails = async (req, res) => {
   }
 };
 
+// 8. Alertes d'interaction médicamenteuse en temps réel pendant la prescription -
+// vérifie la liste de médicaments en cours de saisie (pas encore enregistrée)
+// entre eux, contre les traitements en cours du patient, et contre ses allergies
+// déclarées. Volontairement synchrone sur un référentiel statique local plutôt
+// qu'un appel LLM : doit répondre à chaque ajout de médicament, pas seulement sur
+// demande explicite au Copilote.
+const checkDrugInteractions = async (req, res) => {
+  const { patient_id, drug_names } = req.body;
+
+  if (!patient_id || !Array.isArray(drug_names) || drug_names.length === 0) {
+    return res.status(400).json({ error: 'patient_id et drug_names (liste) sont requis' });
+  }
+
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const patientRes = await req.dbClient.query(
+      `SELECT allergies FROM patients WHERE id = $1 AND tenant_id = $2`,
+      [patient_id, tenantId]
+    );
+    if (patientRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Patient introuvable' });
+    }
+    const allergies = patientRes.rows[0].allergies || [];
+
+    const activeTreatmentsRes = await req.dbClient.query(
+      `SELECT treatment_name FROM patient_treatments WHERE patient_id = $1 AND tenant_id = $2 AND status = 'EN_COURS'`,
+      [patient_id, tenantId]
+    );
+    const activeDrugs = activeTreatmentsRes.rows.map(r => r.treatment_name);
+
+    const cleanNames = drug_names.map(d => (d || '').trim()).filter(Boolean);
+    const alerts = [];
+    const seenKeys = new Set();
+
+    const addAlert = (severity, drugsInvolved, description, source) => {
+      const key = `${source}|${drugsInvolved.slice().sort().join('+')}|${description}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      alerts.push({ severity, drugs: drugsInvolved, description, source });
+    };
+
+    // 1. Interactions entre les médicaments de l'ordonnance en cours de rédaction
+    for (let i = 0; i < cleanNames.length; i++) {
+      for (let j = i + 1; j < cleanNames.length; j++) {
+        const hit = findPairInteraction(cleanNames[i], cleanNames[j]);
+        if (hit) addAlert(hit.severity, [cleanNames[i], cleanNames[j]], hit.description, 'INTERACTION');
+      }
+    }
+
+    // 2. Interactions avec un traitement déjà en cours chez ce patient
+    for (const newDrug of cleanNames) {
+      for (const activeDrug of activeDrugs) {
+        const hit = findPairInteraction(newDrug, activeDrug);
+        if (hit) addAlert(hit.severity, [newDrug, activeDrug], `${hit.description} (traitement en cours : ${activeDrug})`, 'TRAITEMENT_EN_COURS');
+      }
+    }
+
+    // 3. Allergies déclarées au dossier
+    for (const newDrug of cleanNames) {
+      const nd = normalizeDrugName(newDrug);
+      for (const allergy of allergies) {
+        const na = normalizeDrugName(allergy);
+        if (na && nd && (nd.includes(na) || na.includes(nd))) {
+          addAlert('DANGER', [newDrug], `Allergie déclarée du patient : ${allergy}`, 'ALLERGIE');
+        }
+      }
+    }
+
+    const severityRank = { DANGER: 0, CAUTION: 1 };
+    alerts.sort((a, b) => (severityRank[a.severity] ?? 2) - (severityRank[b.severity] ?? 2));
+
+    return res.status(200).json({ alerts });
+  } catch (err) {
+    console.error('Check drug interactions error:', err.message);
+    return res.status(500).json({ error: 'Échec de la vérification des interactions' });
+  }
+};
+
 module.exports = {
   registerPatient,
   verifyPatientCode,
@@ -885,5 +965,6 @@ module.exports = {
   updateConsultation,
   deleteConsultation,
   getPrescriptionDetails,
+  checkDrugInteractions,
   verifyPrescription
 };

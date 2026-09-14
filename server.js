@@ -154,6 +154,7 @@ app.post('/api/payments/webhook/:provider', checkPermission('cash_register'), pa
 app.post('/api/patients', checkPermission('patients'), patientCtrl.registerPatient);
 app.get('/api/patients', checkPermission('patients'), patientCtrl.getPatients);
 app.put('/api/patients/:id', checkPermission('patients'), patientCtrl.updatePatient);
+app.post('/api/clinical/check-interactions', checkPermission('consultations'), patientCtrl.checkDrugInteractions);
 app.post('/api/clinical/consultations', checkPermission('consultations'), patientCtrl.createConsultation);
 app.put('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.updateConsultation);
 app.delete('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.deleteConsultation);

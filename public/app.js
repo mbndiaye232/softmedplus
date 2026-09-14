@@ -5129,7 +5129,8 @@ async function openNewConsultationFromDPI() {
   if (!activeDPIPatient) return;
   currentPrescriptionItems = [];
   renderPrescriptionItems();
-  
+  checkPrescriptionInteractions();
+
   const modal = document.getElementById('dpi-consultation-form-modal');
   if (modal) {
     const idEl = document.getElementById('dpi-consult-id');
@@ -5195,6 +5196,7 @@ async function openEditConsultationModal(consultId) {
       currentPrescriptionItems = [];
     }
     renderPrescriptionItems();
+    checkPrescriptionInteractions();
     await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
   }
@@ -5243,6 +5245,7 @@ async function duplicateConsultationPrescription(consultId) {
     }
 
     renderPrescriptionItems();
+    checkPrescriptionInteractions();
     await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
     showToast('Ordonnance dupliquée pour renouvellement. Vous pouvez ajuster les posologies et valider.', 'info');
@@ -5282,6 +5285,7 @@ function addPrescriptionItem() {
 
   currentPrescriptionItems.push({ drug_name, dosage, frequency, duration_days, instructions });
   renderPrescriptionItems();
+  checkPrescriptionInteractions();
 
   // Clear inputs
   document.getElementById('rx-drug').value = '';
@@ -5289,6 +5293,59 @@ function addPrescriptionItem() {
   document.getElementById('rx-frequency').value = '';
   document.getElementById('rx-duration').value = '5';
   document.getElementById('rx-instructions').value = '';
+}
+
+// Alertes d'interaction médicamenteuse en temps réel : revérifiées à chaque ajout
+// ou retrait d'un médicament de l'ordonnance en cours de rédaction (pas seulement
+// sur demande explicite au Copilote IA).
+async function checkPrescriptionInteractions() {
+  const container = document.getElementById('rx-interaction-alerts');
+  if (!container) return;
+
+  if (!activeDPIPatient || currentPrescriptionItems.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const severityStyle = {
+    DANGER: { bg: '#fef2f2', border: '#ef4444', color: '#991b1b', icon: 'fa-triangle-exclamation' },
+    CAUTION: { bg: '#fffbeb', border: '#f59e0b', color: '#92400e', icon: 'fa-exclamation-circle' }
+  };
+
+  try {
+    const res = await api.request('/clinical/check-interactions', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: activeDPIPatient.id,
+        drug_names: currentPrescriptionItems.map(i => i.drug_name)
+      })
+    });
+    const alerts = res.alerts || [];
+
+    if (alerts.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">
+        ${alerts.map(a => {
+          const s = severityStyle[a.severity] || severityStyle.CAUTION;
+          return `
+            <div style="background:${s.bg}; border:1px solid ${s.border}; border-radius:8px; padding:8px 12px; font-size:0.82rem; color:${s.color};">
+              <i class="fas ${s.icon}"></i>
+              <strong>${escapeHtml(a.drugs.join(' + '))}</strong> — ${escapeHtml(a.description)}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } catch (err) {
+    // Une vérification indisponible ne doit pas bloquer la rédaction de
+    // l'ordonnance - on efface juste la zone d'alerte plutôt que de la figer sur
+    // un état potentiellement obsolète.
+    container.innerHTML = '';
+  }
 }
 
 function renderPrescriptionItems() {
@@ -5328,6 +5385,7 @@ function renderPrescriptionItems() {
 function removePrescriptionItem(index) {
   currentPrescriptionItems.splice(index, 1);
   renderPrescriptionItems();
+  checkPrescriptionInteractions();
 }
 
 async function submitConsultation(e) {
@@ -11286,6 +11344,7 @@ function renderAppLayout() {
             </div>
 
             <div id="rx-items-list"></div>
+            <div id="rx-interaction-alerts"></div>
             <div class="form-group" style="margin-top:15px; margin-bottom:0;">
               <label class="form-label">${t('validity')}</label>
               <input type="date" class="form-control" id="dpi-rx-expiry" />
