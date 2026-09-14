@@ -1,4 +1,10 @@
 const { logAudit } = require('../middleware/audit');
+const crypto = require('crypto');
+
+// Salle meet.jit.si dédiée à une téléconsultation : un nom suffisamment aléatoire
+// pour ne pas être devinable, puisque n'importe qui connaissant le nom de la salle
+// peut la rejoindre sur ce service public.
+const generateVideoRoomSlug = () => `softmed-tc-${crypto.randomBytes(8).toString('hex')}`;
 
 // 1. Create Medical Service (Price catalog for Consultations, Treatments, Acts)
 const createMedicalService = async (req, res) => {
@@ -140,7 +146,7 @@ const deleteMedicalService = async (req, res) => {
 
 // 3. Create Appointment (Booking)
 const createAppointment = async (req, res) => {
-  const { practitioner_id, patient_id, medical_service_id, start_time, booking_channel } = req.body;
+  const { practitioner_id, patient_id, medical_service_id, start_time, booking_channel, consultation_mode } = req.body;
 
   if (!practitioner_id || !patient_id || !medical_service_id || !start_time) {
     return res.status(400).json({ error: 'Required fields missing: practitioner_id, patient_id, medical_service_id, start_time' });
@@ -170,11 +176,14 @@ const createAppointment = async (req, res) => {
     // B. Determine initial status based on whether a deposit is required
     const status = parseFloat(deposit_amount) > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
+    const isTeleconsultation = consultation_mode === 'TELECONSULTATION';
+    const videoRoomSlug = isTeleconsultation ? generateVideoRoomSlug() : null;
+
     // C. Insert using PostgreSQL tstzrange function
     // Exclusive upper bound (Default) avoids overlap on the exact millisecond border
     const result = await req.dbClient.query(
-      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel)
-       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8)
+      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel, consultation_mode, video_room_slug)
+       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8, $9, $10)
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
       [
         tenantId,
@@ -184,7 +193,9 @@ const createAppointment = async (req, res) => {
         startISO,
         endISO,
         status,
-        booking_channel || 'DESK'
+        booking_channel || 'DESK',
+        isTeleconsultation ? 'TELECONSULTATION' : 'PRESENTIEL',
+        videoRoomSlug
       ]
     );
 
@@ -213,7 +224,7 @@ const getAppointments = async (req, res) => {
   try {
     let queryStr = `
       SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
-             a.consultation_reason,
+             a.consultation_reason, a.consultation_mode, a.video_room_slug,
              lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
              p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
              prac.first_name AS doc_first, prac.last_name AS doc_last,
@@ -257,6 +268,7 @@ const requestAppointmentBooking = async (req, res) => {
     medical_service_id,
     start_time,
     booking_channel, // 'VOICE_AGENT', 'WHATSAPP', 'WEB_PWA', 'DESK'
+    consultation_mode,
     // Option A: Existing Patient
     patient_code,
     first_name,
@@ -414,10 +426,13 @@ const requestAppointmentBooking = async (req, res) => {
 
     const initialStatus = depositRequired > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
+    const isTeleconsultation = consultation_mode === 'TELECONSULTATION';
+    const videoRoomSlug = isTeleconsultation ? generateVideoRoomSlug() : null;
+
     // Insert Appointment
     const apptRes = await req.dbClient.query(
-      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel)
-       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8)
+      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel, consultation_mode, video_room_slug)
+       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8, $9, $10)
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
       [
         tenantId,
@@ -427,7 +442,9 @@ const requestAppointmentBooking = async (req, res) => {
         startISO,
         endISO,
         initialStatus,
-        booking_channel || 'DESK'
+        booking_channel || 'DESK',
+        isTeleconsultation ? 'TELECONSULTATION' : 'PRESENTIEL',
+        videoRoomSlug
       ]
     );
 

@@ -1454,6 +1454,18 @@ function resetAgendaToday() {
 }
 
 // ----------------------------------------------------------------------------
+// Téléconsultation vidéo (prototype : salle meet.jit.si publique)
+// ----------------------------------------------------------------------------
+
+function joinTeleconsultation(videoRoomSlug) {
+  if (!videoRoomSlug) {
+    showToast("Aucune salle de téléconsultation associée à ce rendez-vous", 'warning');
+    return;
+  }
+  window.open(`https://meet.jit.si/${videoRoomSlug}`, '_blank', 'noopener');
+}
+
+// ----------------------------------------------------------------------------
 // Annulation & report d'un rendez-vous depuis l'agenda
 // ----------------------------------------------------------------------------
 
@@ -1923,6 +1935,13 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                 <option value="DESK">🏥 Guichet / Accueil Clinique</option>
               </select>
             </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size:0.82rem;">Mode de consultation</label>
+              <select class="form-control" id="book-consultation-mode">
+                <option value="PRESENTIEL">🏥 Présentiel</option>
+                <option value="TELECONSULTATION">🎥 Téléconsultation vidéo</option>
+              </select>
+            </div>
             <button class="btn btn-primary" style="width:100%;"><i class="fas fa-calendar-check"></i> ${t('bookBtn')}</button>
           </form>
         </div>
@@ -2092,9 +2111,20 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                                 <i class="${appt.booking_channel === 'VOICE_AGENT' ? 'fas fa-microphone' : (appt.booking_channel === 'WHATSAPP' ? 'fab fa-whatsapp' : (appt.booking_channel === 'WEB_PWA' ? 'fas fa-globe' : 'fas fa-desktop'))}"></i>
                                 ${appt.booking_channel === 'VOICE_AGENT' ? 'Vocal IA' : (appt.booking_channel === 'WHATSAPP' ? 'WhatsApp' : (appt.booking_channel === 'WEB_PWA' ? 'En ligne' : 'Guichet'))}
                               </span>
+                              ${appt.consultation_mode === 'TELECONSULTATION' ? `
+                                <span class="badge" style="background:#0ea5e9; color:#fff; font-size:0.68rem; padding:1px 6px; border-radius:6px;">
+                                  <i class="fas fa-video"></i> Téléconsultation
+                                </span>
+                              ` : ''}
                             </div>
                             ${canAct ? `
-                              <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca;">
+                              <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca; flex-wrap:wrap;">
+                                ${appt.consultation_mode === 'TELECONSULTATION' ? `
+                                  <button class="btn btn-primary" style="font-size:0.72rem; padding:3px 9px; background:#0ea5e9; border-color:#0ea5e9;"
+                                          onclick="joinTeleconsultation('${appt.video_room_slug}')">
+                                    <i class="fas fa-video"></i> Rejoindre
+                                  </button>
+                                ` : ''}
                                 <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
                                         onclick="openRescheduleModal('${appt.id}', '${patientLabel}', '${appt.start_time}')">
                                   <i class="fas fa-clock"></i> Reporter
@@ -3155,7 +3185,9 @@ async function bookAppointment(e) {
   const medical_service_id = document.getElementById('book-service-id').value;
   const start_time = document.getElementById('book-start-time').value;
   const booking_channel = document.getElementById('book-channel').value;
-  
+  const modeSelect = document.getElementById('book-consultation-mode');
+  const consultation_mode = modeSelect ? modeSelect.value : 'PRESENTIEL';
+
   if (!practitioner_id) {
     showToast('Veuillez sélectionner un praticien pour ce rendez-vous', 'warning');
     return;
@@ -3165,7 +3197,8 @@ async function bookAppointment(e) {
     practitioner_id,
     medical_service_id,
     start_time,
-    booking_channel
+    booking_channel,
+    consultation_mode
   };
 
   if (currentBookingPatientType === 'existing') {
