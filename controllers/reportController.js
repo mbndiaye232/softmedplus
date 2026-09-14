@@ -1,4 +1,6 @@
 const { logAudit } = require('../middleware/audit');
+const { getActiveLLMConfig } = require('./aiCopilotController');
+const { callLLM } = require('../utils/llmClient');
 
 // 1. Get Aging Balance Receivables Report
 const getAgingBalance = async (req, res) => {
@@ -262,9 +264,187 @@ const getDashboardAnalytics = async (req, res) => {
   }
 };
 
+// 4. Copilote administratif - étend l'IA au-delà du clinique : détecte les
+// créneaux sous-utilisés (7 prochains jours) et priorise les relances de
+// recouvrement. Les deux listes sont calculées ici (déterministe, fiable) ;
+// seule la synthèse en langage naturel est confiée au LLM configuré, avec un
+// repli local si aucun LLM n'est actif - même schéma que handleCopilotQuery
+// dans aiCopilotController.js.
+const DAY_LABELS_FR = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+const WORKING_MINUTES_PER_DAY = 11 * 60; // 08h00-19h00, convention déjà utilisée par l'agenda
+const UNDERUSE_THRESHOLD_PCT = 20;
+const AGING_WEIGHT = { CURRENT: 0, '1_30_DAYS': 1, '31_60_DAYS': 2, '61_90_DAYS': 3, OVER_90_DAYS: 4 };
+
+const getAdminCopilotInsights = async (req, res) => {
+  const tenantId = req.user.tenant_id;
+
+  try {
+    // --- A. Créneaux sous-utilisés (7 prochains jours, par praticien actif) ---
+    const practitionersRes = await req.dbClient.query(
+      `SELECT id, first_name, last_name, title FROM practitioners WHERE tenant_id = $1 AND is_active = true`,
+      [tenantId]
+    );
+    const practitioners = practitionersRes.rows;
+
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const rangeStart = today.toISOString().split('T')[0];
+    const rangeEndDate = new Date(today);
+    rangeEndDate.setUTCDate(rangeEndDate.getUTCDate() + 6);
+    const rangeEnd = rangeEndDate.toISOString().split('T')[0];
+
+    const bookedRes = await req.dbClient.query(
+      `SELECT practitioner_id, (lower(time_slot))::date AS day,
+              SUM(EXTRACT(EPOCH FROM (upper(time_slot) - lower(time_slot))) / 60) AS booked_minutes
+       FROM appointments
+       WHERE tenant_id = $1 AND status != 'CANCELED'
+         AND (lower(time_slot))::date BETWEEN $2 AND $3
+       GROUP BY practitioner_id, (lower(time_slot))::date`,
+      [tenantId, rangeStart, rangeEnd]
+    );
+    const bookedByKey = new Map();
+    for (const row of bookedRes.rows) {
+      const dayStr = row.day.toISOString().split('T')[0];
+      bookedByKey.set(`${row.practitioner_id}|${dayStr}`, parseFloat(row.booked_minutes) || 0);
+    }
+
+    const underusedSlots = [];
+    for (const prac of practitioners) {
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(today);
+        d.setUTCDate(d.getUTCDate() + i);
+        const dayStr = d.toISOString().split('T')[0];
+        const bookedMinutes = bookedByKey.get(`${prac.id}|${dayStr}`) || 0;
+        const occupancyRate = Math.round((bookedMinutes / WORKING_MINUTES_PER_DAY) * 100);
+        if (occupancyRate < UNDERUSE_THRESHOLD_PCT) {
+          underusedSlots.push({
+            practitioner_id: prac.id,
+            practitioner_name: `${prac.title || 'Dr.'} ${prac.first_name} ${prac.last_name}`,
+            date: dayStr,
+            day_label: `${DAY_LABELS_FR[d.getUTCDay()]} ${d.getUTCDate()}`,
+            occupancy_rate: occupancyRate,
+            booked_minutes: Math.round(bookedMinutes),
+            available_minutes: WORKING_MINUTES_PER_DAY
+          });
+        }
+      }
+    }
+    underusedSlots.sort((a, b) => a.occupancy_rate - b.occupancy_rate);
+
+    // --- B. Priorisation des relances de recouvrement ---
+    // Une facture "CURRENT" (échéance pas encore atteinte, days_overdue négatif
+    // ou nul) n'est pas en retard : elle n'a rien à faire dans une liste de
+    // priorité de relance, qui ne concerne que les factures réellement échues.
+    const agingRes = await req.dbClient.query(
+      `SELECT invoice_id, invoice_number, patient_code, patient_name, patient_phone,
+              total_balance_due, days_overdue, aging_bracket
+       FROM view_aging_balance
+       WHERE tenant_id = $1 AND aging_bracket != 'CURRENT'
+       ORDER BY days_overdue DESC`,
+      [tenantId]
+    );
+
+    const lastContactRes = await req.dbClient.query(
+      `SELECT invoice_id, MAX(executed_at) AS last_contact
+       FROM debt_recovery_actions
+       WHERE tenant_id = $1
+       GROUP BY invoice_id`,
+      [tenantId]
+    );
+    const lastContactByInvoice = new Map(lastContactRes.rows.map(r => [r.invoice_id, r.last_contact]));
+
+    const recoveryPriorities = agingRes.rows.map(inv => {
+      const lastContact = lastContactByInvoice.get(inv.invoice_id) || null;
+      const daysSinceContact = lastContact ? Math.floor((Date.now() - new Date(lastContact).getTime()) / 86400000) : null;
+      const recentlyContacted = daysSinceContact !== null && daysSinceContact < 7;
+      const score = (AGING_WEIGHT[inv.aging_bracket] ?? 0) * 1000
+        + (inv.days_overdue || 0)
+        + parseFloat(inv.total_balance_due || 0) / 1000
+        - (recentlyContacted ? 500 : 0);
+
+      return {
+        invoice_id: inv.invoice_id,
+        invoice_number: inv.invoice_number,
+        patient_code: inv.patient_code,
+        patient_name: inv.patient_name,
+        patient_phone: inv.patient_phone,
+        balance_due: parseFloat(inv.total_balance_due || 0),
+        days_overdue: inv.days_overdue,
+        aging_bracket: inv.aging_bracket,
+        last_contacted_days_ago: daysSinceContact,
+        priority_score: Math.round(score)
+      };
+    }).sort((a, b) => b.priority_score - a.priority_score).slice(0, 10);
+
+    // --- C. Synthèse en langage naturel (LLM si configuré, repli local sinon) ---
+    let narrative;
+    let llmPowered = false;
+
+    const activeLLM = await getActiveLLMConfig(tenantId);
+    if (activeLLM && activeLLM.is_active && activeLLM.api_key) {
+      try {
+        const dataSummary = `Créneaux sous-utilisés cette semaine (taux d'occupation < ${UNDERUSE_THRESHOLD_PCT}%) :\n` +
+          (underusedSlots.length > 0
+            ? underusedSlots.slice(0, 10).map(s => `- ${s.practitioner_name}, ${s.day_label} : ${s.occupancy_rate}% occupé`).join('\n')
+            : 'Aucun créneau significativement sous-utilisé détecté.') +
+          `\n\nFactures impayées à relancer en priorité :\n` +
+          (recoveryPriorities.length > 0
+            ? recoveryPriorities.map(r => `- ${r.patient_name} (${r.invoice_number}) : ${r.balance_due.toLocaleString()} FCFA dus, ${r.days_overdue} jours de retard${r.last_contacted_days_ago !== null ? `, dernière relance il y a ${r.last_contacted_days_ago} jours` : ', jamais relancé'}`).join('\n')
+            : 'Aucune facture en retard.');
+
+        const llmResult = await callLLM({
+          provider: activeLLM.provider_name,
+          apiKey: activeLLM.api_key,
+          model: activeLLM.model_name,
+          baseUrl: activeLLM.base_url,
+          temperature: 0.4,
+          maxTokens: 600,
+          systemPrompt: "Tu es le copilote administratif de SoftMed. À partir des données fournies, rédige une synthèse courte et actionnable en français pour le gérant d'une clinique : priorités de la semaine, sans inventer de chiffres au-delà de ceux fournis.",
+          messages: [{ role: 'user', content: dataSummary }]
+        });
+        if (llmResult && llmResult.content) {
+          narrative = llmResult.content;
+          llmPowered = true;
+        }
+      } catch (llmErr) {
+        console.warn('Admin copilot LLM call failed, falling back to local synthesis:', llmErr.message);
+      }
+    }
+
+    if (!narrative) {
+      const parts = [];
+      if (underusedSlots.length > 0) {
+        const worst = underusedSlots[0];
+        parts.push(`${underusedSlots.length} créneau(x) sous-occupé(s) détecté(s) cette semaine, dont ${worst.practitioner_name} le ${worst.day_label} (${worst.occupancy_rate}% d'occupation).`);
+      } else {
+        parts.push("Aucun créneau significativement sous-occupé cette semaine.");
+      }
+      if (recoveryPriorities.length > 0) {
+        const top = recoveryPriorities[0];
+        parts.push(`${recoveryPriorities.length} facture(s) impayée(s) à relancer, en priorité ${top.patient_name} (${top.balance_due.toLocaleString()} FCFA, ${top.days_overdue} jours de retard).`);
+      } else {
+        parts.push("Aucune facture en retard à relancer.");
+      }
+      narrative = parts.join(' ');
+    }
+
+    return res.status(200).json({
+      generated_at: new Date().toISOString(),
+      underused_slots: underusedSlots.slice(0, 10),
+      recovery_priorities: recoveryPriorities,
+      narrative,
+      llm_powered: llmPowered
+    });
+  } catch (err) {
+    console.error('Admin copilot insights error:', err.message);
+    return res.status(500).json({ error: 'Échec du calcul des insights administratifs : ' + err.message });
+  }
+};
+
 module.exports = {
   getAgingBalance,
   triggerRecoveryAction,
-  getDashboardAnalytics
+  getDashboardAnalytics,
+  getAdminCopilotInsights
 };
 

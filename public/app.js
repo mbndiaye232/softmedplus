@@ -1268,7 +1268,77 @@ async function renderDashboard(container) {
         </table>
       </div>
     </div>
+
+    <!-- Section 5 : Copilote Administratif (créneaux sous-utilisés + priorité de relance) -->
+    <div class="card" style="margin-top:24px;" id="admin-copilot-card">
+      <div class="card-title"><i class="fas fa-robot text-primary"></i> Copilote Administratif</div>
+      <div style="text-align:center; padding:20px; color:var(--text-muted);">
+        <i class="fas fa-spinner fa-spin"></i> Analyse en cours...
+      </div>
+    </div>
   `;
+
+  // Chargement asynchrone séparé : ne doit pas retarder l'affichage du reste du
+  // tableau de bord (un appel LLM configuré peut prendre plusieurs secondes).
+  loadAdminCopilotInsights();
+}
+
+async function loadAdminCopilotInsights() {
+  const card = document.getElementById('admin-copilot-card');
+  if (!card) return;
+
+  try {
+    const insights = await api.request('/reports/admin-copilot');
+    const slots = insights.underused_slots || [];
+    const priorities = insights.recovery_priorities || [];
+
+    card.innerHTML = `
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-robot text-primary"></i> Copilote Administratif</span>
+        <span class="badge" style="background:${insights.llm_powered ? '#eff6ff' : '#f1f5f9'}; color:${insights.llm_powered ? '#1d4ed8' : '#64748b'}; font-weight:700;">
+          ${insights.llm_powered ? '✨ Synthèse IA' : 'Analyse locale'}
+        </span>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:16px; font-size:0.88rem; color:#334155; line-height:1.5;">
+        ${escapeHtml(insights.narrative || '')}
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div style="font-weight:700; font-size:0.85rem; color:#0f172a; margin-bottom:8px;">
+            <i class="fas fa-calendar-xmark" style="color:#f59e0b;"></i> Créneaux sous-utilisés (7 prochains jours)
+          </div>
+          ${slots.length === 0
+            ? '<div style="color:var(--text-muted); font-size:0.82rem;">Aucun créneau significativement sous-occupé.</div>'
+            : slots.map(s => `
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:0.82rem;">
+                <span>${escapeHtml(s.practitioner_name)} — ${escapeHtml(s.day_label)}</span>
+                <span class="badge" style="background:#fffbeb; color:#b45309; font-size:0.72rem;">${s.occupancy_rate}% occupé</span>
+              </div>
+            `).join('')
+          }
+        </div>
+        <div>
+          <div style="font-weight:700; font-size:0.85rem; color:#0f172a; margin-bottom:8px;">
+            <i class="fas fa-hand-holding-dollar" style="color:#dc2626;"></i> Priorité de relance
+          </div>
+          ${priorities.length === 0
+            ? '<div style="color:var(--text-muted); font-size:0.82rem;">Aucune facture en retard à relancer.</div>'
+            : priorities.slice(0, 5).map(p => `
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:0.82rem;">
+                <span>${escapeHtml(p.patient_name)} <span style="color:var(--text-muted);">(${p.days_overdue}j)</span></span>
+                <span style="font-weight:700; color:#dc2626;">${parseFloat(p.balance_due).toLocaleString('fr-FR')} XOF</span>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    card.innerHTML = `
+      <div class="card-title"><i class="fas fa-robot text-primary"></i> Copilote Administratif</div>
+      <div style="color:var(--text-muted); font-size:0.85rem;">Analyse indisponible pour le moment.</div>
+    `;
+  }
 }
 
 // Debt Recovery Simulation

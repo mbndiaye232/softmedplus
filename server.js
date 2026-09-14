@@ -271,6 +271,7 @@ app.post('/api/hospital/hospitalizations/:id/discharge', checkPermission('hospit
 app.get('/api/reports/aging-balance', checkPermission('reports'), reportCtrl.getAgingBalance);
 app.get('/api/reports/dashboard-analytics', checkPermission('reports'), reportCtrl.getDashboardAnalytics);
 app.post('/api/reports/recovery-action', checkPermission('reports'), reportCtrl.triggerRecoveryAction);
+app.get('/api/reports/admin-copilot', checkPermission('reports'), reportCtrl.getAdminCopilotInsights);
 
 // 7. Tenant profile metadata management (logo, address, email, gps)
 app.get('/api/tenant/profile', checkPermission('settings'), tenantCtrl.getTenantProfile);
