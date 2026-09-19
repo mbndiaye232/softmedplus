@@ -1268,7 +1268,77 @@ async function renderDashboard(container) {
         </table>
       </div>
     </div>
+
+    <!-- Section 5 : Copilote Administratif (créneaux sous-utilisés + priorité de relance) -->
+    <div class="card" style="margin-top:24px;" id="admin-copilot-card">
+      <div class="card-title"><i class="fas fa-robot text-primary"></i> Copilote Administratif</div>
+      <div style="text-align:center; padding:20px; color:var(--text-muted);">
+        <i class="fas fa-spinner fa-spin"></i> Analyse en cours...
+      </div>
+    </div>
   `;
+
+  // Chargement asynchrone séparé : ne doit pas retarder l'affichage du reste du
+  // tableau de bord (un appel LLM configuré peut prendre plusieurs secondes).
+  loadAdminCopilotInsights();
+}
+
+async function loadAdminCopilotInsights() {
+  const card = document.getElementById('admin-copilot-card');
+  if (!card) return;
+
+  try {
+    const insights = await api.request('/reports/admin-copilot');
+    const slots = insights.underused_slots || [];
+    const priorities = insights.recovery_priorities || [];
+
+    card.innerHTML = `
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span><i class="fas fa-robot text-primary"></i> Copilote Administratif</span>
+        <span class="badge" style="background:${insights.llm_powered ? '#eff6ff' : '#f1f5f9'}; color:${insights.llm_powered ? '#1d4ed8' : '#64748b'}; font-weight:700;">
+          ${insights.llm_powered ? '✨ Synthèse IA' : 'Analyse locale'}
+        </span>
+      </div>
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px 16px; margin-bottom:16px; font-size:0.88rem; color:#334155; line-height:1.5;">
+        ${escapeHtml(insights.narrative || '')}
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+        <div>
+          <div style="font-weight:700; font-size:0.85rem; color:#0f172a; margin-bottom:8px;">
+            <i class="fas fa-calendar-xmark" style="color:#f59e0b;"></i> Créneaux sous-utilisés (7 prochains jours)
+          </div>
+          ${slots.length === 0
+            ? '<div style="color:var(--text-muted); font-size:0.82rem;">Aucun créneau significativement sous-occupé.</div>'
+            : slots.map(s => `
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:0.82rem;">
+                <span>${escapeHtml(s.practitioner_name)} — ${escapeHtml(s.day_label)}</span>
+                <span class="badge" style="background:#fffbeb; color:#b45309; font-size:0.72rem;">${s.occupancy_rate}% occupé</span>
+              </div>
+            `).join('')
+          }
+        </div>
+        <div>
+          <div style="font-weight:700; font-size:0.85rem; color:#0f172a; margin-bottom:8px;">
+            <i class="fas fa-hand-holding-dollar" style="color:#dc2626;"></i> Priorité de relance
+          </div>
+          ${priorities.length === 0
+            ? '<div style="color:var(--text-muted); font-size:0.82rem;">Aucune facture en retard à relancer.</div>'
+            : priorities.slice(0, 5).map(p => `
+              <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:0.82rem;">
+                <span>${escapeHtml(p.patient_name)} <span style="color:var(--text-muted);">(${p.days_overdue}j)</span></span>
+                <span style="font-weight:700; color:#dc2626;">${parseFloat(p.balance_due).toLocaleString('fr-FR')} XOF</span>
+              </div>
+            `).join('')
+          }
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    card.innerHTML = `
+      <div class="card-title"><i class="fas fa-robot text-primary"></i> Copilote Administratif</div>
+      <div style="color:var(--text-muted); font-size:0.85rem;">Analyse indisponible pour le moment.</div>
+    `;
+  }
 }
 
 // Debt Recovery Simulation
@@ -1454,6 +1524,18 @@ function resetAgendaToday() {
 }
 
 // ----------------------------------------------------------------------------
+// Téléconsultation vidéo (prototype : salle meet.jit.si publique)
+// ----------------------------------------------------------------------------
+
+function joinTeleconsultation(videoRoomSlug) {
+  if (!videoRoomSlug) {
+    showToast("Aucune salle de téléconsultation associée à ce rendez-vous", 'warning');
+    return;
+  }
+  window.open(`https://meet.jit.si/${videoRoomSlug}`, '_blank', 'noopener');
+}
+
+// ----------------------------------------------------------------------------
 // Annulation & report d'un rendez-vous depuis l'agenda
 // ----------------------------------------------------------------------------
 
@@ -1552,6 +1634,92 @@ async function submitReschedule(e) {
     navigate('agenda');
   } catch (err) {
     showToast(`Échec du report : ${err.message}`, 'error');
+  }
+}
+
+function openReminderSettingsModal(appointmentId, patientLabel, enabled, hoursBefore, channel) {
+  let modal = document.getElementById('reminder-settings-modal');
+  if (!modal) {
+    const div = document.createElement('div');
+    div.className = 'modal-overlay';
+    div.id = 'reminder-settings-modal';
+    div.style.cssText = 'display:none; justify-content:center; align-items:center; z-index:3200;';
+    div.innerHTML = `
+      <div class="modal-container" style="width:420px; max-width:96%; padding:22px;">
+        <div class="modal-header" style="border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center;">
+          <h4 class="modal-title" style="margin:0; font-size:1.05rem; font-weight:800;">
+            <i class="fas fa-bell text-primary"></i> Rappel automatique
+          </h4>
+          <button class="modal-close" onclick="closeReminderSettingsModal()">&times;</button>
+        </div>
+        <form onsubmit="submitReminderSettings(event)">
+          <input type="hidden" id="reminder-appt-id" />
+          <div style="font-size:0.86rem; color:var(--text-primary); margin-bottom:12px;">
+            Patient : <strong id="reminder-patient"></strong>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; font-size:0.85rem; font-weight:600; cursor:pointer;">
+              <input type="checkbox" id="reminder-enabled" style="width:auto;" />
+              Envoyer un rappel automatique
+            </label>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Heures avant le RDV</label>
+              <input type="number" class="form-control" id="reminder-hours" min="0" max="72" />
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label">Canal</label>
+              <select class="form-control" id="reminder-channel">
+                <option value="SMS">📱 SMS</option>
+                <option value="WHATSAPP">💬 WhatsApp</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid var(--border-color); padding-top:15px; margin-top:6px;">
+            <button type="button" class="btn btn-secondary" onclick="closeReminderSettingsModal()">Annuler</button>
+            <button type="submit" class="btn btn-primary" style="font-weight:700;">
+              <i class="fas fa-check"></i> Enregistrer
+            </button>
+          </div>
+        </form>
+      </div>
+    `;
+    document.body.appendChild(div);
+    modal = div;
+  }
+
+  document.getElementById('reminder-appt-id').value = appointmentId;
+  document.getElementById('reminder-patient').innerText = patientLabel;
+  document.getElementById('reminder-enabled').checked = !!enabled;
+  document.getElementById('reminder-hours').value = hoursBefore ?? 3;
+  document.getElementById('reminder-channel').value = channel || 'SMS';
+
+  modal.style.display = 'flex';
+}
+
+function closeReminderSettingsModal() {
+  const modal = document.getElementById('reminder-settings-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitReminderSettings(e) {
+  e.preventDefault();
+  const appointmentId = document.getElementById('reminder-appt-id').value;
+  const reminder_enabled = document.getElementById('reminder-enabled').checked;
+  const reminder_hours_before = document.getElementById('reminder-hours').value;
+  const reminder_channel = document.getElementById('reminder-channel').value;
+
+  try {
+    await api.request(`/appointments/${appointmentId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ reminder_enabled, reminder_hours_before, reminder_channel })
+    });
+    showToast('Réglages de rappel mis à jour.', 'success');
+    closeReminderSettingsModal();
+    navigate('agenda');
+  } catch (err) {
+    showToast(`Échec de la mise à jour : ${err.message}`, 'error');
   }
 }
 
@@ -1923,6 +2091,32 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                 <option value="DESK">🏥 Guichet / Accueil Clinique</option>
               </select>
             </div>
+            <div class="form-group">
+              <label class="form-label" style="font-size:0.82rem;">Mode de consultation</label>
+              <select class="form-control" id="book-consultation-mode">
+                <option value="PRESENTIEL">🏥 Présentiel</option>
+                <option value="TELECONSULTATION">🎥 Téléconsultation vidéo</option>
+              </select>
+            </div>
+            <div class="form-group" style="border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; background:#f8fafc;">
+              <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="book-reminder-enabled" checked style="width:auto;" />
+                <i class="fas fa-bell"></i> Rappel automatique
+              </label>
+              <div style="display:flex; gap:8px; margin-top:8px;">
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Heures avant le RDV</label>
+                  <input type="number" class="form-control" id="book-reminder-hours" value="3" min="0" max="72" />
+                </div>
+                <div style="flex:1;">
+                  <label class="form-label" style="font-size:0.75rem;">Canal</label>
+                  <select class="form-control" id="book-reminder-channel">
+                    <option value="SMS">📱 SMS</option>
+                    <option value="WHATSAPP">💬 WhatsApp</option>
+                  </select>
+                </div>
+              </div>
+            </div>
             <button class="btn btn-primary" style="width:100%;"><i class="fas fa-calendar-check"></i> ${t('bookBtn')}</button>
           </form>
         </div>
@@ -2092,9 +2286,33 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
                                 <i class="${appt.booking_channel === 'VOICE_AGENT' ? 'fas fa-microphone' : (appt.booking_channel === 'WHATSAPP' ? 'fab fa-whatsapp' : (appt.booking_channel === 'WEB_PWA' ? 'fas fa-globe' : 'fas fa-desktop'))}"></i>
                                 ${appt.booking_channel === 'VOICE_AGENT' ? 'Vocal IA' : (appt.booking_channel === 'WHATSAPP' ? 'WhatsApp' : (appt.booking_channel === 'WEB_PWA' ? 'En ligne' : 'Guichet'))}
                               </span>
+                              ${appt.consultation_mode === 'TELECONSULTATION' ? `
+                                <span class="badge" style="background:#0ea5e9; color:#fff; font-size:0.68rem; padding:1px 6px; border-radius:6px;">
+                                  <i class="fas fa-video"></i> Téléconsultation
+                                </span>
+                              ` : ''}
+                              ${appt.reminder_enabled ? `
+                                <span class="badge" style="background:${appt.reminder_sent_at ? '#16a34a' : '#f1f5f9'}; color:${appt.reminder_sent_at ? '#fff' : '#334155'}; border:1px solid #cbd5e1; font-size:0.68rem; padding:1px 6px; border-radius:6px;" title="${appt.reminder_sent_at ? 'Rappel envoyé' : 'Rappel à envoyer'}">
+                                  <i class="fas ${appt.reminder_sent_at ? 'fa-check' : 'fa-bell'}"></i> ${appt.reminder_hours_before}h avant (${appt.reminder_channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'})
+                                </span>
+                              ` : `
+                                <span class="badge" style="background:#f1f5f9; color:#94a3b8; border:1px solid #e2e8f0; font-size:0.68rem; padding:1px 6px; border-radius:6px;">
+                                  <i class="fas fa-bell-slash"></i> Rappel désactivé
+                                </span>
+                              `}
                             </div>
                             ${canAct ? `
-                              <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca;">
+                              <div style="display:flex; gap:6px; margin-top:6px; padding-top:6px; border-top:1px dashed #fecaca; flex-wrap:wrap;">
+                                ${appt.consultation_mode === 'TELECONSULTATION' ? `
+                                  <button class="btn btn-primary" style="font-size:0.72rem; padding:3px 9px; background:#0ea5e9; border-color:#0ea5e9;"
+                                          onclick="joinTeleconsultation(${safeJsArg(appt.video_room_slug)})">
+                                    <i class="fas fa-video"></i> Rejoindre
+                                  </button>
+                                ` : ''}
+                                <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
+                                        onclick="openReminderSettingsModal(${safeJsArg(appt.id)}, ${safeJsArg(patientLabel)}, ${!!appt.reminder_enabled}, ${appt.reminder_hours_before}, ${safeJsArg(appt.reminder_channel)})">
+                                  <i class="fas fa-bell"></i> Rappel
+                                </button>
                                 <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
                                         onclick="openRescheduleModal('${appt.id}', '${patientLabel}', '${appt.start_time}')">
                                   <i class="fas fa-clock"></i> Reporter
@@ -3155,7 +3373,13 @@ async function bookAppointment(e) {
   const medical_service_id = document.getElementById('book-service-id').value;
   const start_time = document.getElementById('book-start-time').value;
   const booking_channel = document.getElementById('book-channel').value;
-  
+  const modeSelect = document.getElementById('book-consultation-mode');
+  const consultation_mode = modeSelect ? modeSelect.value : 'PRESENTIEL';
+  const reminderEnabledEl = document.getElementById('book-reminder-enabled');
+  const reminder_enabled = reminderEnabledEl ? reminderEnabledEl.checked : true;
+  const reminder_hours_before = document.getElementById('book-reminder-hours')?.value || 3;
+  const reminder_channel = document.getElementById('book-reminder-channel')?.value || 'SMS';
+
   if (!practitioner_id) {
     showToast('Veuillez sélectionner un praticien pour ce rendez-vous', 'warning');
     return;
@@ -3165,7 +3389,11 @@ async function bookAppointment(e) {
     practitioner_id,
     medical_service_id,
     start_time,
-    booking_channel
+    booking_channel,
+    consultation_mode,
+    reminder_enabled,
+    reminder_hours_before,
+    reminder_channel
   };
 
   if (currentBookingPatientType === 'existing') {
@@ -4971,7 +5199,8 @@ async function openNewConsultationFromDPI() {
   if (!activeDPIPatient) return;
   currentPrescriptionItems = [];
   renderPrescriptionItems();
-  
+  checkPrescriptionInteractions();
+
   const modal = document.getElementById('dpi-consultation-form-modal');
   if (modal) {
     const idEl = document.getElementById('dpi-consult-id');
@@ -5037,6 +5266,7 @@ async function openEditConsultationModal(consultId) {
       currentPrescriptionItems = [];
     }
     renderPrescriptionItems();
+    checkPrescriptionInteractions();
     await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
   }
@@ -5085,6 +5315,7 @@ async function duplicateConsultationPrescription(consultId) {
     }
 
     renderPrescriptionItems();
+    checkPrescriptionInteractions();
     await loadConsultationPractitionersAndMedications(consult.practitioner_id);
     modal.style.display = 'flex';
     showToast('Ordonnance dupliquée pour renouvellement. Vous pouvez ajuster les posologies et valider.', 'info');
@@ -5124,6 +5355,7 @@ function addPrescriptionItem() {
 
   currentPrescriptionItems.push({ drug_name, dosage, frequency, duration_days, instructions });
   renderPrescriptionItems();
+  checkPrescriptionInteractions();
 
   // Clear inputs
   document.getElementById('rx-drug').value = '';
@@ -5131,6 +5363,59 @@ function addPrescriptionItem() {
   document.getElementById('rx-frequency').value = '';
   document.getElementById('rx-duration').value = '5';
   document.getElementById('rx-instructions').value = '';
+}
+
+// Alertes d'interaction médicamenteuse en temps réel : revérifiées à chaque ajout
+// ou retrait d'un médicament de l'ordonnance en cours de rédaction (pas seulement
+// sur demande explicite au Copilote IA).
+async function checkPrescriptionInteractions() {
+  const container = document.getElementById('rx-interaction-alerts');
+  if (!container) return;
+
+  if (!activeDPIPatient || currentPrescriptionItems.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const severityStyle = {
+    DANGER: { bg: '#fef2f2', border: '#ef4444', color: '#991b1b', icon: 'fa-triangle-exclamation' },
+    CAUTION: { bg: '#fffbeb', border: '#f59e0b', color: '#92400e', icon: 'fa-exclamation-circle' }
+  };
+
+  try {
+    const res = await api.request('/clinical/check-interactions', {
+      method: 'POST',
+      body: JSON.stringify({
+        patient_id: activeDPIPatient.id,
+        drug_names: currentPrescriptionItems.map(i => i.drug_name)
+      })
+    });
+    const alerts = res.alerts || [];
+
+    if (alerts.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">
+        ${alerts.map(a => {
+          const s = severityStyle[a.severity] || severityStyle.CAUTION;
+          return `
+            <div style="background:${s.bg}; border:1px solid ${s.border}; border-radius:8px; padding:8px 12px; font-size:0.82rem; color:${s.color};">
+              <i class="fas ${s.icon}"></i>
+              <strong>${escapeHtml(a.drugs.join(' + '))}</strong> — ${escapeHtml(a.description)}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  } catch (err) {
+    // Une vérification indisponible ne doit pas bloquer la rédaction de
+    // l'ordonnance - on efface juste la zone d'alerte plutôt que de la figer sur
+    // un état potentiellement obsolète.
+    container.innerHTML = '';
+  }
 }
 
 function renderPrescriptionItems() {
@@ -5170,6 +5455,7 @@ function renderPrescriptionItems() {
 function removePrescriptionItem(index) {
   currentPrescriptionItems.splice(index, 1);
   renderPrescriptionItems();
+  checkPrescriptionInteractions();
 }
 
 async function submitConsultation(e) {
@@ -11128,6 +11414,7 @@ function renderAppLayout() {
             </div>
 
             <div id="rx-items-list"></div>
+            <div id="rx-interaction-alerts"></div>
             <div class="form-group" style="margin-top:15px; margin-bottom:0;">
               <label class="form-label">${t('validity')}</label>
               <input type="date" class="form-control" id="dpi-rx-expiry" />
@@ -13021,6 +13308,9 @@ function renderPublicPortalView(bookedResult = null) {
           <button class="btn btn-secondary btn-sm" onclick="window.location.href='/'" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-arrow-left"></i> Retour
           </button>
+          <button class="btn btn-secondary btn-sm" onclick="renderPatientPortalLogin(${safeJsArg(clinic.slug)})" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
+            <i class="fas fa-folder-open"></i> Mon Dossier
+          </button>
           <button class="btn btn-secondary btn-sm" onclick="openAuthModal('login')" style="font-size:0.82rem; background:#ffffff; color:#1e293b; border:1px solid #cbd5e1; box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:600;">
             <i class="fas fa-user-lock"></i> Espace Pro
           </button>
@@ -14640,6 +14930,444 @@ async function handlePublicBookingSubmit(e) {
   }
 }
 
+// ============================================================================
+// Portail Patient - consultation du dossier (lecture seule)
+// ============================================================================
+// Jeton dédié, totalement séparé de state.token (session staff) : ne jamais
+// mélanger les deux, ni les stocker sous la même clé.
+let patientPortalToken = null;
+let patientPortalTenantSlug = null;
+
+// Les champs du dossier (noms, diagnostics, allergies...) sont saisis côté
+// personnel soignant puis affichés ici sans passer par le rendu habituel du
+// tableau de bord staff : on échappe systématiquement avant interpolation dans
+// innerHTML pour éviter qu'une valeur stockée ne s'exécute comme du HTML/JS.
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// Pour interpoler une valeur dynamique à l'intérieur d'un attribut gestionnaire
+// d'événement inline (onclick="...('${x}')") : escapeHtml seul ne suffit pas là,
+// car le navigateur décode les entités HTML de l'attribut AVANT d'interpréter son
+// contenu comme du JS — un simple "&#39;" redevient un "'" qui permet toujours de
+// sortir de la chaîne. JSON.stringify produit un littéral JS valide (échappe
+// guillemets/antislashs/caractères de contrôle) ; escapeHtml encode ensuite les
+// guillemets doubles qu'il utilise pour rester valide dans l'attribut HTML englobant.
+function safeJsArg(value) {
+  return escapeHtml(JSON.stringify(value));
+}
+
+// Format attendu d'un slug de clinique (toujours généré en minuscules,
+// alphanumérique + tirets côté serveur - voir registerTenant/createTenant).
+function isSafePortalSlug(slug) {
+  return typeof slug === 'string' && /^[a-z0-9-]{1,64}$/.test(slug);
+}
+
+async function patientPortalRequest(path, options = {}) {
+  const res = await fetch(`/api${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(patientPortalToken ? { Authorization: `Bearer ${patientPortalToken}` } : {}),
+      ...(options.headers || {})
+    }
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Une erreur est survenue');
+  return data;
+}
+
+function patientPortalCard(innerHtml) {
+  const root = document.getElementById('app-root');
+  root.innerHTML = `
+    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:30px 15px; display:flex; justify-content:center; align-items:center;">
+      <div class="card" style="max-width:440px; width:100%; border-radius:20px; padding:30px; box-shadow:0 15px 35px rgba(15,23,42,0.08);">
+        ${innerHtml}
+      </div>
+    </div>
+  `;
+}
+
+function patientPortalErrorBox(errorMsg) {
+  return errorMsg ? `<div style="background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-exclamation-circle"></i> ${escapeHtml(errorMsg)}</div>` : '';
+}
+
+function renderPatientPortalLogin(slug, errorMsg) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-folder-open fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Consulter mon dossier</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Connectez-vous avec votre code patient et votre mot de passe</div>
+    </div>
+    ${patientPortalErrorBox(errorMsg)}
+    <form id="patient-portal-login-form" onsubmit="submitPatientPortalLogin(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-login-code" required autocomplete="username" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Mot de passe</label>
+        <input type="password" class="form-control" id="pp-login-password" required autocomplete="current-password" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-unlock-alt"></i> Accéder à mon dossier
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem; display:flex; flex-direction:column; gap:8px;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalEnroll(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">Première connexion ? Créer mon mot de passe</a>
+      <a href="javascript:void(0)" onclick="renderPatientPortalForgot(${safeJsArg(slug)})" style="color:#64748b;">Mot de passe oublié ?</a>
+    </div>
+  `);
+}
+
+async function submitPatientPortalLogin(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-login-code').value.trim();
+  const password = document.getElementById('pp-login-password').value;
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/login', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, password })
+    });
+    if (res.requires_otp) {
+      renderPatientPortalOtp(res.otp_token, res.phone_hint, res.simulated_code);
+      return;
+    }
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    renderPatientPortalLogin(patientPortalTenantSlug, err.message);
+  }
+}
+
+function renderPatientPortalEnroll(slug, errorMsg) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-key fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Créer mon mot de passe</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Vérification avec les informations de votre carnet patient</div>
+    </div>
+    ${patientPortalErrorBox(errorMsg)}
+    <form id="patient-portal-enroll-form" onsubmit="submitPatientPortalEnroll(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-enroll-code" required autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Prénom</label>
+        <input type="text" class="form-control" id="pp-enroll-first" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nom</label>
+        <input type="text" class="form-control" id="pp-enroll-last" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
+        <input type="password" class="form-control" id="pp-enroll-password" required minlength="6" autocomplete="new-password" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Email (facultatif, pour récupérer votre mot de passe)</label>
+        <input type="email" class="form-control" id="pp-enroll-email" autocomplete="email" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check"></i> Créer mon accès
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">J'ai déjà un mot de passe</a>
+    </div>
+  `);
+}
+
+async function submitPatientPortalEnroll(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-enroll-code').value.trim();
+  const first_name = document.getElementById('pp-enroll-first').value.trim();
+  const last_name = document.getElementById('pp-enroll-last').value.trim();
+  const password = document.getElementById('pp-enroll-password').value;
+  const email = document.getElementById('pp-enroll-email').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/enroll', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, first_name, last_name, password, email: email || undefined })
+    });
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    renderPatientPortalEnroll(patientPortalTenantSlug, err.message);
+  }
+}
+
+function renderPatientPortalForgot(slug, infoMsg, isError, resetUrl) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-envelope-open-text fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Mot de passe oublié</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Recevez un lien de réinitialisation par email</div>
+    </div>
+    ${isError ? patientPortalErrorBox(infoMsg) : (infoMsg ? `<div style="background:#ecfdf5; border:1px solid #10b981; color:#065f46; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-check-circle"></i> ${escapeHtml(infoMsg)}</div>` : '')}
+    ${resetUrl ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; border-radius:8px; padding:10px 14px; font-size:0.8rem; margin-bottom:16px; word-break:break-all;"><i class="fas fa-flask"></i> Mode local (aucun email réel envoyé) — lien : <a href="${resetUrl}" style="color:#1d4ed8; font-weight:600;">${escapeHtml(resetUrl)}</a></div>` : ''}
+    <form id="patient-portal-forgot-form" onsubmit="submitPatientPortalForgot(event)">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code Patient (ex: SM-4821)</label>
+        <input type="text" class="form-control" id="pp-forgot-code" required autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Email enregistré sur votre dossier</label>
+        <input type="email" class="form-control" id="pp-forgot-email" required autocomplete="email" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-paper-plane"></i> Envoyer le lien
+      </button>
+    </form>
+    <div style="text-align:center; margin-top:16px; font-size:0.82rem;">
+      <a href="javascript:void(0)" onclick="renderPatientPortalLogin(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600;">Retour à la connexion</a>
+    </div>
+  `);
+}
+
+async function submitPatientPortalForgot(e) {
+  e.preventDefault();
+  const patient_code = document.getElementById('pp-forgot-code').value.trim();
+  const email = document.getElementById('pp-forgot-email').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ tenant_slug: patientPortalTenantSlug, patient_code, email })
+    });
+    // En mode simulation locale (aucun SMTP configuré), le lien est renvoyé
+    // directement dans la réponse pour permettre de tester sans serveur mail réel.
+    renderPatientPortalForgot(patientPortalTenantSlug, res.message, false, res.simulated ? res.resetUrl : null);
+  } catch (err) {
+    renderPatientPortalForgot(patientPortalTenantSlug, err.message, true);
+  }
+}
+
+function renderPatientPortalResetPassword(token, slug) {
+  patientPortalTenantSlug = slug;
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-lock fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Nouveau mot de passe</h2>
+    </div>
+    <div id="pp-reset-error"></div>
+    <form id="patient-portal-reset-form" onsubmit="submitPatientPortalReset(event, ${safeJsArg(token)})">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Nouveau mot de passe (6 caractères min.)</label>
+        <input type="password" class="form-control" id="pp-reset-password" required minlength="6" autocomplete="new-password" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check"></i> Réinitialiser mon mot de passe
+      </button>
+    </form>
+  `);
+
+  patientPortalRequest(`/patient-portal/verify-reset-token?token=${encodeURIComponent(token)}`)
+    .catch(err => {
+      document.getElementById('patient-portal-reset-form').innerHTML = '';
+      document.getElementById('pp-reset-error').innerHTML = patientPortalErrorBox(err.message) +
+        `<div style="text-align:center; margin-top:10px;"><a href="javascript:void(0)" onclick="renderPatientPortalForgot(${safeJsArg(slug)})" style="color:#2563eb; font-weight:600; font-size:0.85rem;">Redemander un lien</a></div>`;
+    });
+}
+
+async function submitPatientPortalReset(e, token) {
+  e.preventDefault();
+  const new_password = document.getElementById('pp-reset-password').value;
+
+  try {
+    await patientPortalRequest('/patient-portal/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password })
+    });
+    showToast('Mot de passe réinitialisé avec succès, vous pouvez vous connecter.', 'success');
+    renderPatientPortalLogin(patientPortalTenantSlug);
+  } catch (err) {
+    document.getElementById('pp-reset-error').innerHTML = patientPortalErrorBox(err.message);
+  }
+}
+
+function renderPatientPortalOtp(otpToken, phoneHint, simulatedCode) {
+  patientPortalCard(`
+    <div style="text-align:center; margin-bottom:20px;">
+      <div style="width:64px; height:64px; background:#eff6ff; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+        <i class="fas fa-sms fa-2x" style="color:#2563eb;"></i>
+      </div>
+      <h2 style="margin:0; font-size:1.3rem; font-weight:800; color:#0f172a;">Code de vérification</h2>
+      <div style="font-size:0.85rem; color:#64748b; margin-top:4px;">Un code a été envoyé par SMS au numéro ${escapeHtml(phoneHint || '')}</div>
+    </div>
+    ${simulatedCode ? `<div style="background:#eff6ff; border:1px solid #bfdbfe; color:#1d4ed8; border-radius:8px; padding:10px 14px; font-size:0.85rem; margin-bottom:16px;"><i class="fas fa-flask"></i> Mode local (aucun SMS réel envoyé) — code : <strong>${escapeHtml(simulatedCode)}</strong></div>` : ''}
+    <div id="pp-otp-error"></div>
+    <form id="patient-portal-otp-form" onsubmit="submitPatientPortalOtp(event, ${safeJsArg(otpToken)})">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.82rem;">Code à 6 chiffres</label>
+        <input type="text" class="form-control" id="pp-otp-code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code" style="letter-spacing:4px; font-size:1.1rem; text-align:center;" />
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%; margin-top:6px;">
+        <i class="fas fa-check-circle"></i> Valider
+      </button>
+    </form>
+  `);
+}
+
+async function submitPatientPortalOtp(e, otpToken) {
+  e.preventDefault();
+  const code = document.getElementById('pp-otp-code').value.trim();
+
+  try {
+    const res = await patientPortalRequest('/patient-portal/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ otp_token: otpToken, code })
+    });
+    patientPortalToken = res.token;
+    await renderPatientDossierView();
+  } catch (err) {
+    document.getElementById('pp-otp-error').innerHTML = patientPortalErrorBox(err.message);
+  }
+}
+
+function logoutPatientPortal() {
+  patientPortalToken = null;
+  renderPatientPortalLogin(patientPortalTenantSlug);
+}
+
+async function togglePatientTwoFactor(enable) {
+  try {
+    await patientPortalRequest('/patient-portal/2fa', {
+      method: 'POST',
+      body: JSON.stringify({ enable })
+    });
+    await renderPatientDossierView();
+  } catch (err) {
+    showToast(err.message || 'Échec de la mise à jour', 'error');
+  }
+}
+
+async function renderPatientDossierView() {
+  const root = document.getElementById('app-root');
+  root.innerHTML = `
+    <div style="min-height:100vh; display:flex; justify-content:center; align-items:center; background:var(--bg-primary);">
+      <i class="fas fa-spinner fa-spin fa-3x" style="color:var(--primary);"></i>
+    </div>
+  `;
+
+  let data;
+  try {
+    data = await patientPortalRequest('/patient-portal/dossier');
+  } catch (err) {
+    renderPatientPortalLogin(patientPortalTenantSlug, err.message);
+    return;
+  }
+
+  const { patient, appointments, consultations, prescriptions, lab_orders } = data;
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) : '';
+  const fmtDateTime = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+
+  root.innerHTML = `
+    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:24px 15px;">
+      <div style="max-width:760px; margin:0 auto;">
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <h2 style="margin:0; font-size:1.2rem; color:#0f172a;">${escapeHtml(patient.first_name)} ${escapeHtml(patient.last_name)}</h2>
+            <div style="font-size:0.82rem; color:#64748b; margin-top:2px;">
+              Code Patient : <strong>${escapeHtml(patient.patient_code)}</strong> • ${patient.gender === 'F' ? 'Femme' : 'Homme'} • Né(e) le ${fmtDate(patient.date_of_birth)}
+              ${patient.doc_first ? ` • Médecin traitant : ${escapeHtml(patient.doc_title || 'Dr.')} ${escapeHtml(patient.doc_first)} ${escapeHtml(patient.doc_last)}` : ''}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="logoutPatientPortal()"><i class="fas fa-sign-out-alt"></i> Quitter</button>
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:16px 24px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <strong style="color:#0f172a; font-size:0.9rem;"><i class="fas fa-shield-alt" style="color:#2563eb;"></i> Double authentification par SMS</strong>
+            <div style="font-size:0.8rem; color:#64748b; margin-top:2px;">${patient.two_factor_enabled ? 'Activée — un code vous sera demandé à chaque connexion.' : 'Désactivée (facultative) — activez-la pour sécuriser davantage votre dossier.'}</div>
+          </div>
+          <button class="btn ${patient.two_factor_enabled ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="togglePatientTwoFactor(${!patient.two_factor_enabled})">
+            <i class="fas ${patient.two_factor_enabled ? 'fa-toggle-off' : 'fa-toggle-on'}"></i> ${patient.two_factor_enabled ? 'Désactiver' : 'Activer'}
+          </button>
+        </div>
+
+        ${(patient.allergies && patient.allergies.length) ? `
+          <div class="card" style="border-radius:16px; padding:16px 24px; margin-bottom:16px; background:#fffbeb; border:1px solid #f59e0b;">
+            <strong style="color:#b45309;"><i class="fas fa-exclamation-triangle"></i> Allergies connues :</strong>
+            <span style="color:#78350f;">${patient.allergies.map(escapeHtml).join(', ')}</span>
+          </div>
+        ` : ''}
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-calendar-alt"></i> Mes rendez-vous</div>
+          ${appointments.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucun rendez-vous enregistré.</div>' : appointments.map(a => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; flex-wrap:wrap; gap:6px;">
+              <div>
+                <strong style="color:#0f172a; font-size:0.9rem;">${fmtDateTime(a.start_time)}</strong>
+                <div style="font-size:0.8rem; color:#64748b;">${escapeHtml(a.service_name || 'Consultation')} • ${escapeHtml(a.doc_title || 'Dr.')} ${escapeHtml(a.doc_first || '')} ${escapeHtml(a.doc_last || '')}${a.consultation_mode === 'TELECONSULTATION' ? ' • 🎥 Téléconsultation' : ''}</div>
+              </div>
+              <span class="status-badge ${escapeHtml((a.status || '').toLowerCase())}" style="font-size:0.7rem;">${escapeHtml(a.status)}</span>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-notes-medical"></i> Mes consultations</div>
+          ${consultations.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucune consultation enregistrée.</div>' : consultations.map(c => `
+            <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+              <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(c.reason_for_visit || 'Consultation')}</strong>
+                <span style="font-size:0.78rem; color:#64748b;">${fmtDateTime(c.created_at)}</span>
+              </div>
+              <div style="font-size:0.82rem; color:#475569; margin-top:2px;">${escapeHtml(c.diagnosis_text || '')}</div>
+              <div style="font-size:0.78rem; color:#94a3b8; margin-top:2px;">${escapeHtml(c.doc_title || 'Dr.')} ${escapeHtml(c.doc_first || '')} ${escapeHtml(c.doc_last || '')}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-prescription"></i> Mes ordonnances</div>
+          ${prescriptions.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucune ordonnance enregistrée.</div>' : prescriptions.map(rx => `
+            <div style="padding:10px 0; border-bottom:1px solid #f1f5f9;">
+              <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(rx.prescription_code)}</strong>
+                <span style="font-size:0.78rem; color:#64748b;">Délivrée le ${fmtDate(rx.issued_at)} • valable jusqu'au ${fmtDate(rx.valid_until)}</span>
+              </div>
+              <ul style="margin:6px 0 0 18px; padding:0; font-size:0.82rem; color:#475569;">
+                ${(rx.items || []).map(it => `<li>${escapeHtml(it.drug_name)} — ${escapeHtml(it.dosage || '')} ${it.frequency ? `(${escapeHtml(it.frequency)})` : ''}</li>`).join('')}
+              </ul>
+            </div>
+          `).join('')}
+        </div>
+
+        <div class="card" style="border-radius:16px; padding:20px 24px;">
+          <div class="card-title" style="margin-bottom:12px;"><i class="fas fa-vial"></i> Mes examens de laboratoire</div>
+          ${lab_orders.length === 0 ? '<div style="color:#64748b; font-size:0.88rem;">Aucun examen enregistré.</div>' : lab_orders.map(lo => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f1f5f9; flex-wrap:wrap; gap:6px;">
+              <div>
+                <strong style="color:#0f172a; font-size:0.9rem;">${escapeHtml(lo.test_name)}</strong>
+                <div style="font-size:0.8rem; color:#64748b;">${fmtDate(lo.created_at)}</div>
+              </div>
+              <span class="status-badge" style="font-size:0.7rem;">${escapeHtml(lo.status)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // Check auth status and render appropriate layouts
 function initApp() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -14653,9 +15381,30 @@ function initApp() {
     return;
   }
 
+  if (urlParams.has('patient_reset_token')) {
+    // Défense en profondeur : un token/slug de forme invalide est rejeté ici,
+    // avant même d'atteindre un template — la valeur d'un paramètre d'URL est le
+    // vecteur le plus directement exploitable de toute l'app (aucune authentification
+    // requise, un simple lien envoyé à la victime suffit).
+    const resetToken = urlParams.get('patient_reset_token');
+    const slug = urlParams.get('slug') || 'paix';
+    if (!/^[a-f0-9]{64}$/.test(resetToken) || !isSafePortalSlug(slug)) {
+      renderPatientPortalLogin('paix', 'Ce lien de réinitialisation est invalide.');
+      return;
+    }
+    renderPatientPortalResetPassword(resetToken, slug);
+    return;
+  }
+
   if (pathParts[0] === 'rdv' || hashParts[0] === 'rdv' || urlParams.has('rdv')) {
     const slug = pathParts[1] || hashParts[1] || urlParams.get('rdv') || 'paix';
     renderPublicBookingPortal(slug);
+    return;
+  }
+
+  if (pathParts[0] === 'dossier' || hashParts[0] === 'dossier') {
+    const rawSlug = pathParts[1] || hashParts[1] || 'paix';
+    renderPatientPortalLogin(isSafePortalSlug(rawSlug) ? rawSlug : 'paix');
     return;
   }
 

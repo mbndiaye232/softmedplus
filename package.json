@@ -1,7 +1,7 @@
 {
-  "name": "softmed-enterprise",
+  "name": "softmed-teleconsultation",
   "version": "2.0.0",
-  "description": "SoftMed Medical SaaS platform with PostgreSQL, Express, React, and dynamic online payments.",
+  "description": "Fork local de SoftMed pour prototyper la teleconsultation video et d'autres fonctionnalites additionnelles.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

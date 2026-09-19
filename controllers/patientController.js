@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { logAudit } = require('../middleware/audit');
 const pool = require('../config/db');
+const { findPairInteraction, normalize: normalizeDrugName } = require('../utils/drugInteractions');
 
 const HMAC_SECRET = process.env.HMAC_SECRET || 'clinicos-hmac-prescription-security-key-2026';
 
@@ -107,7 +108,7 @@ const generatePatientCode = async (dbClient, tenantId) => {
 // 1b. Verify Patient Code & Cross-Check Identity (First name & Last name)
 const verifyPatientCode = async (req, res) => {
   const { patient_code, first_name, last_name } = req.method === 'POST' ? req.body : req.query;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   if (!patient_code) {
     return res.status(400).json({ error: 'Code patient requis' });
@@ -216,7 +217,7 @@ const registerPatient = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: phone_number, first_name, last_name, gender, date_of_birth' });
   }
 
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const patientCode = await generatePatientCode(req.dbClient, tenantId);
 
   // Default attending doctor to first available practitioner if not provided
@@ -320,11 +321,7 @@ const registerPatient = async (req, res) => {
 // 2. Get Patients (isolated by RLS with joined Status, Attending Doctor and Primary Insurance Policy)
 const getPatients = async (req, res) => {
   const { status, search, status_id } = req.query;
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id;
-  if (!tenantId) {
-    const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
-    if (t.rows.length > 0) tenantId = t.rows[0].id;
-  }
+  const tenantId = req.user.tenant_id;
 
   let queryStr = `
     SELECT p.*, 
@@ -369,7 +366,7 @@ const getPatients = async (req, res) => {
 // 2b. Update Patient
 const updatePatient = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { 
     phone_number, 
     first_name, 
@@ -506,7 +503,7 @@ const createConsultation = async (req, res) => {
     return res.status(400).json({ error: 'Required fields missing: patient_id, reason_for_visit, diagnosis_text' });
   }
 
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  let tenantId = req.user.tenant_id;
 
   // Always use the patient's real tenant_id to guarantee consistency across multi-tenant clinics
   const patCheck = await req.dbClient.query('SELECT tenant_id, patient_code FROM patients WHERE id = $1', [patient_id]);
@@ -706,7 +703,7 @@ const updateConsultation = async (req, res) => {
   const { id } = req.params;
   const { reason_for_visit, vital_signs, clinical_examination, icd10_diagnosis_codes, diagnosis_text, confidential_notes, prescription, practitioner_id } = req.body;
 
-  let tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  let tenantId = req.user.tenant_id;
   if (!tenantId) {
     const t = await req.dbClient.query('SELECT id FROM tenants WHERE is_active = true ORDER BY name ASC LIMIT 1');
     if (t.rows.length > 0) tenantId = t.rows[0].id;
@@ -879,6 +876,85 @@ const getPrescriptionDetails = async (req, res) => {
   }
 };
 
+// 8. Alertes d'interaction médicamenteuse en temps réel pendant la prescription -
+// vérifie la liste de médicaments en cours de saisie (pas encore enregistrée)
+// entre eux, contre les traitements en cours du patient, et contre ses allergies
+// déclarées. Volontairement synchrone sur un référentiel statique local plutôt
+// qu'un appel LLM : doit répondre à chaque ajout de médicament, pas seulement sur
+// demande explicite au Copilote.
+const checkDrugInteractions = async (req, res) => {
+  const { patient_id, drug_names } = req.body;
+
+  if (!patient_id || !Array.isArray(drug_names) || drug_names.length === 0) {
+    return res.status(400).json({ error: 'patient_id et drug_names (liste) sont requis' });
+  }
+
+  const tenantId = req.user.tenant_id;
+
+  try {
+    const patientRes = await req.dbClient.query(
+      `SELECT allergies FROM patients WHERE id = $1 AND tenant_id = $2`,
+      [patient_id, tenantId]
+    );
+    if (patientRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Patient introuvable' });
+    }
+    const allergies = patientRes.rows[0].allergies || [];
+
+    const activeTreatmentsRes = await req.dbClient.query(
+      `SELECT treatment_name FROM patient_treatments WHERE patient_id = $1 AND tenant_id = $2 AND status = 'EN_COURS'`,
+      [patient_id, tenantId]
+    );
+    const activeDrugs = activeTreatmentsRes.rows.map(r => r.treatment_name);
+
+    const cleanNames = drug_names.map(d => (d || '').trim()).filter(Boolean);
+    const alerts = [];
+    const seenKeys = new Set();
+
+    const addAlert = (severity, drugsInvolved, description, source) => {
+      const key = `${source}|${drugsInvolved.slice().sort().join('+')}|${description}`;
+      if (seenKeys.has(key)) return;
+      seenKeys.add(key);
+      alerts.push({ severity, drugs: drugsInvolved, description, source });
+    };
+
+    // 1. Interactions entre les médicaments de l'ordonnance en cours de rédaction
+    for (let i = 0; i < cleanNames.length; i++) {
+      for (let j = i + 1; j < cleanNames.length; j++) {
+        const hit = findPairInteraction(cleanNames[i], cleanNames[j]);
+        if (hit) addAlert(hit.severity, [cleanNames[i], cleanNames[j]], hit.description, 'INTERACTION');
+      }
+    }
+
+    // 2. Interactions avec un traitement déjà en cours chez ce patient
+    for (const newDrug of cleanNames) {
+      for (const activeDrug of activeDrugs) {
+        const hit = findPairInteraction(newDrug, activeDrug);
+        if (hit) addAlert(hit.severity, [newDrug, activeDrug], `${hit.description} (traitement en cours : ${activeDrug})`, 'TRAITEMENT_EN_COURS');
+      }
+    }
+
+    // 3. Allergies déclarées au dossier
+    for (const newDrug of cleanNames) {
+      const nd = normalizeDrugName(newDrug);
+      for (const allergy of allergies) {
+        const na = normalizeDrugName(allergy);
+        if (na && nd && (nd.includes(na) || na.includes(nd))) {
+          addAlert('DANGER', [newDrug], `Allergie déclarée du patient : ${allergy}`, 'ALLERGIE');
+        }
+      }
+    }
+
+    const severityRank = { DANGER: 0, CAUTION: 1 };
+    alerts.sort((a, b) => (severityRank[a.severity] ?? 2) - (severityRank[b.severity] ?? 2));
+
+    return res.status(200).json({ alerts });
+  } catch (err) {
+    console.error('Check drug interactions error:', err.message);
+    return res.status(500).json({ error: 'Échec de la vérification des interactions' });
+  }
+};
+
 module.exports = {
   registerPatient,
   verifyPatientCode,
@@ -889,5 +965,6 @@ module.exports = {
   updateConsultation,
   deleteConsultation,
   getPrescriptionDetails,
+  checkDrugInteractions,
   verifyPrescription
 };

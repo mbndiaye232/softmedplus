@@ -26,6 +26,8 @@ const userCtrl = require('./controllers/userController');
 const aiCopilotCtrl = require('./controllers/aiCopilotController');
 const aiAgentCtrl = require('./controllers/aiAgentController');
 const smtpCtrl = require('./controllers/smtpController');
+const patientPortalCtrl = require('./controllers/patientPortalController');
+const { verifyPatientToken } = require('./middleware/patientAuth');
 const { rateLimit } = require('./middleware/rateLimit');
 
 const upload = multer({
@@ -86,8 +88,18 @@ app.post(
 // C. Public Cryptographic Prescription Verification (QR scanning endpoint)
 app.get('/api/rx/verify/:code', patientCtrl.verifyPrescription);
 
-// D. Public Payment Webhook (from Wave/OM/Yas/SPI checkouts)
-app.post('/api/payments/webhook/:provider', paymentCtrl.handleWebhook);
+// E. Patient Portal - consultation du dossier par le patient lui-meme.
+// Limite de debit stricte sur toutes les routes d'identification (code patient,
+// mot de passe, code OTP sont chacun des facteurs devinables/forcables sans elle).
+const patientAuthRateLimit = rateLimit({ windowMs: 60000, max: 8, message: 'Trop de tentatives. Merci de patienter avant de réessayer.' });
+app.post('/api/patient-portal/enroll', patientAuthRateLimit, patientPortalCtrl.enrollPatientPassword);
+app.post('/api/patient-portal/login', patientAuthRateLimit, patientPortalCtrl.patientPortalLogin);
+app.post('/api/patient-portal/verify-otp', patientAuthRateLimit, patientPortalCtrl.verifyLoginOtp);
+app.post('/api/patient-portal/forgot-password', patientAuthRateLimit, patientPortalCtrl.forgotPatientPassword);
+app.get('/api/patient-portal/verify-reset-token', patientPortalCtrl.verifyPatientResetToken);
+app.post('/api/patient-portal/reset-password', patientAuthRateLimit, patientPortalCtrl.resetPatientPassword);
+app.get('/api/patient-portal/dossier', verifyPatientToken, patientPortalCtrl.getMyDossier);
+app.post('/api/patient-portal/2fa', verifyPatientToken, patientPortalCtrl.toggleTwoFactor);
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
 app.post('/api/upload', (req, res) => {
@@ -127,11 +139,22 @@ app.post('/api/payment-methods', checkPermission('settings'), paymentCtrl.config
 app.delete('/api/payment-methods/:id', checkPermission('settings'), paymentCtrl.deletePaymentMethod);
 app.post('/api/payments/initialize', checkPermission('cash_register'), paymentCtrl.initializeOnlinePayment);
 app.post('/api/payments/record', checkPermission('cash_register'), paymentCtrl.recordPayment);
+// Cet endpoint "webhook" n'a en réalité aucun fournisseur de paiement réel derrière
+// lui : les checkout_url générés par initializeOnlinePayment sont tous des URLs
+// mock (mock.wave.com, etc.), et le seul appelant existant est le bouton "Simuler
+// Retour Validation Webhook" du front (public/app.js), toujours envoyé authentifié.
+// Exposée en route publique sans authentification, cette route permettait à
+// n'importe qui de marquer n'importe quelle facture comme payée en devinant/
+// connaissant son invoice_id — fraude directe. Elle est donc protégée comme les
+// autres routes de paiement, en attendant une vraie intégration fournisseur (qui
+// nécessitera sa propre vérification de signature, différente par fournisseur).
+app.post('/api/payments/webhook/:provider', checkPermission('cash_register'), paymentCtrl.handleWebhook);
 
 // 2. Patient Registry & DPI 360
 app.post('/api/patients', checkPermission('patients'), patientCtrl.registerPatient);
 app.get('/api/patients', checkPermission('patients'), patientCtrl.getPatients);
 app.put('/api/patients/:id', checkPermission('patients'), patientCtrl.updatePatient);
+app.post('/api/clinical/check-interactions', checkPermission('consultations'), patientCtrl.checkDrugInteractions);
 app.post('/api/clinical/consultations', checkPermission('consultations'), patientCtrl.createConsultation);
 app.put('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.updateConsultation);
 app.delete('/api/clinical/consultations/:id', checkPermission('consultations'), patientCtrl.deleteConsultation);
@@ -248,6 +271,7 @@ app.post('/api/hospital/hospitalizations/:id/discharge', checkPermission('hospit
 app.get('/api/reports/aging-balance', checkPermission('reports'), reportCtrl.getAgingBalance);
 app.get('/api/reports/dashboard-analytics', checkPermission('reports'), reportCtrl.getDashboardAnalytics);
 app.post('/api/reports/recovery-action', checkPermission('reports'), reportCtrl.triggerRecoveryAction);
+app.get('/api/reports/admin-copilot', checkPermission('reports'), reportCtrl.getAdminCopilotInsights);
 
 // 7. Tenant profile metadata management (logo, address, email, gps)
 app.get('/api/tenant/profile', checkPermission('settings'), tenantCtrl.getTenantProfile);
@@ -355,4 +379,15 @@ async function runAutoMigrations() {
 app.listen(PORT, async () => {
   console.log(`SoftMed API server running on port ${PORT}`);
   await runAutoMigrations();
+
+  // Rappels automatiques de RDV (SMS/WhatsApp) : tâche interne, jamais exposée en
+  // route HTTP - vérifie régulièrement les rendez-vous dont l'échéance de rappel
+  // est atteinte. Intervalle court adapté à un prototype (5 min) ; un vrai
+  // déploiement multi-instances voudrait un verrou distribué pour éviter les
+  // envois en double si plusieurs instances tournent en parallèle.
+  const { sendDueAppointmentReminders } = require('./utils/reminderJob');
+  const REMINDER_POLL_INTERVAL_MS = 5 * 60 * 1000;
+  const runReminderJob = () => sendDueAppointmentReminders().catch(err => console.error('Reminder job error:', err.message));
+  setTimeout(runReminderJob, 10000);
+  setInterval(runReminderJob, REMINDER_POLL_INTERVAL_MS);
 });

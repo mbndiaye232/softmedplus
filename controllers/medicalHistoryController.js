@@ -78,7 +78,7 @@ async function verifyPatientRecordAccess(dbClient, tenantId, patient, user) {
 // ============================================================================
 const getPatientDossier = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   try {
     // 1. Patient basic information, status, attending doctor and primary IPM insurance policy
@@ -295,7 +295,7 @@ const getPatientDossier = async (req, res) => {
 // ============================================================================
 const getPatientAccessGrants = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   try {
     const result = await req.dbClient.query(
@@ -321,7 +321,7 @@ const getPatientAccessGrants = async (req, res) => {
 
 const grantPatientAccess = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { practitioner_id, granted_to_user_id, access_type, reason, expires_at } = req.body;
 
   if (!practitioner_id && !granted_to_user_id) {
@@ -367,7 +367,7 @@ const grantPatientAccess = async (req, res) => {
 
 const revokePatientAccess = async (req, res) => {
   const { patientId, grantId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
 
   try {
     const pRes = await req.dbClient.query(`SELECT id, attending_practitioner_id FROM patients WHERE id = $1`, [patientId]);
@@ -392,7 +392,7 @@ const revokePatientAccess = async (req, res) => {
 // ============================================================================
 const getTreatments = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
       `SELECT t.*, prac.first_name AS doc_first, prac.last_name AS doc_last
@@ -411,7 +411,7 @@ const getTreatments = async (req, res) => {
 
 const createTreatment = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { treatment_name, treatment_type, start_date, end_date, dosage_instructions, status, results_obtained, prescribed_by } = req.body;
 
   if (!treatment_name || !start_date) {
@@ -444,7 +444,7 @@ const createTreatment = async (req, res) => {
 
 const updateTreatment = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { treatment_name, treatment_type, start_date, end_date, dosage_instructions, status, results_obtained } = req.body;
 
   try {
@@ -475,7 +475,7 @@ const updateTreatment = async (req, res) => {
 
 const deleteTreatment = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   try {
     await req.dbClient.query(`DELETE FROM patient_treatments WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
     return res.status(200).json({ message: 'Treatment deleted successfully' });
@@ -490,7 +490,7 @@ const deleteTreatment = async (req, res) => {
 // ============================================================================
 const getLabOrders = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   try {
     const result = await req.dbClient.query(
       `SELECT lo.*, prac.first_name AS doc_first, prac.last_name AS doc_last
@@ -509,7 +509,7 @@ const getLabOrders = async (req, res) => {
 
 const createLabOrder = async (req, res) => {
   const { patientId } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { exam_type, category, exam_name, test_name, priority, clinical_notes, practitioner_id, document_url, results_text, status } = req.body;
 
   const finalName = test_name || exam_name;
@@ -542,7 +542,7 @@ const createLabOrder = async (req, res) => {
 
 const updateLabOrder = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   const { status, results_text, document_url, clinical_notes } = req.body;
 
   try {
@@ -571,7 +571,7 @@ const updateLabOrder = async (req, res) => {
 
 const deleteLabOrder = async (req, res) => {
   const { id } = req.params;
-  const tenantId = req.headers['x-tenant-id'] || req.user?.tenant_id || req.tenantId;
+  const tenantId = req.user.tenant_id;
   try {
     await req.dbClient.query(`DELETE FROM patient_lab_orders WHERE id = $1 AND tenant_id = $2`, [id, tenantId]);
     return res.status(200).json({ message: 'Lab order deleted successfully' });

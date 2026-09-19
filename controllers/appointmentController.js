@@ -1,4 +1,22 @@
 const { logAudit } = require('../middleware/audit');
+const crypto = require('crypto');
+
+// Salle meet.jit.si dédiée à une téléconsultation : un nom suffisamment aléatoire
+// pour ne pas être devinable, puisque n'importe qui connaissant le nom de la salle
+// peut la rejoindre sur ce service public.
+const generateVideoRoomSlug = () => `softmed-tc-${crypto.randomBytes(8).toString('hex')}`;
+
+// Rappel automatique de RDV : normalise les 3 champs (activé, heures avant,
+// canal) avec les mêmes valeurs par défaut partout où un rendez-vous est créé
+// ou modifié - 3h avant par SMS, modifiable au cas par cas.
+const normalizeReminderInput = (body) => {
+  const enabled = body.reminder_enabled === undefined ? true : !!body.reminder_enabled;
+  let hoursBefore = parseInt(body.reminder_hours_before, 10);
+  if (!Number.isFinite(hoursBefore) || hoursBefore < 0) hoursBefore = 3;
+  if (hoursBefore > 72) hoursBefore = 72;
+  const channel = body.reminder_channel === 'WHATSAPP' ? 'WHATSAPP' : 'SMS';
+  return { enabled, hoursBefore, channel };
+};
 
 // 1. Create Medical Service (Price catalog for Consultations, Treatments, Acts)
 const createMedicalService = async (req, res) => {
@@ -140,7 +158,8 @@ const deleteMedicalService = async (req, res) => {
 
 // 3. Create Appointment (Booking)
 const createAppointment = async (req, res) => {
-  const { practitioner_id, patient_id, medical_service_id, start_time, booking_channel } = req.body;
+  const { practitioner_id, patient_id, medical_service_id, start_time, booking_channel, consultation_mode } = req.body;
+  const reminder = normalizeReminderInput(req.body);
 
   if (!practitioner_id || !patient_id || !medical_service_id || !start_time) {
     return res.status(400).json({ error: 'Required fields missing: practitioner_id, patient_id, medical_service_id, start_time' });
@@ -170,11 +189,14 @@ const createAppointment = async (req, res) => {
     // B. Determine initial status based on whether a deposit is required
     const status = parseFloat(deposit_amount) > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
+    const isTeleconsultation = consultation_mode === 'TELECONSULTATION';
+    const videoRoomSlug = isTeleconsultation ? generateVideoRoomSlug() : null;
+
     // C. Insert using PostgreSQL tstzrange function
     // Exclusive upper bound (Default) avoids overlap on the exact millisecond border
     const result = await req.dbClient.query(
-      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel)
-       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8)
+      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel, consultation_mode, video_room_slug, reminder_enabled, reminder_hours_before, reminder_channel)
+       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8, $9, $10, $11, $12, $13)
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
       [
         tenantId,
@@ -184,7 +206,12 @@ const createAppointment = async (req, res) => {
         startISO,
         endISO,
         status,
-        booking_channel || 'DESK'
+        booking_channel || 'DESK',
+        isTeleconsultation ? 'TELECONSULTATION' : 'PRESENTIEL',
+        videoRoomSlug,
+        reminder.enabled,
+        reminder.hoursBefore,
+        reminder.channel
       ]
     );
 
@@ -213,7 +240,8 @@ const getAppointments = async (req, res) => {
   try {
     let queryStr = `
       SELECT a.id, a.practitioner_id, a.patient_id, a.medical_service_id, a.status, a.booking_channel, a.created_at,
-             a.consultation_reason,
+             a.consultation_reason, a.consultation_mode, a.video_room_slug,
+             a.reminder_enabled, a.reminder_hours_before, a.reminder_channel, a.reminder_sent_at,
              lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
              p.first_name AS patient_first, p.last_name AS patient_last, p.patient_code,
              prac.first_name AS doc_first, prac.last_name AS doc_last,
@@ -257,6 +285,7 @@ const requestAppointmentBooking = async (req, res) => {
     medical_service_id,
     start_time,
     booking_channel, // 'VOICE_AGENT', 'WHATSAPP', 'WEB_PWA', 'DESK'
+    consultation_mode,
     // Option A: Existing Patient
     patient_code,
     first_name,
@@ -414,10 +443,14 @@ const requestAppointmentBooking = async (req, res) => {
 
     const initialStatus = depositRequired > 0 ? 'PENDING_PAYMENT' : 'CONFIRMED';
 
+    const isTeleconsultation = consultation_mode === 'TELECONSULTATION';
+    const videoRoomSlug = isTeleconsultation ? generateVideoRoomSlug() : null;
+    const reminder = normalizeReminderInput(req.body);
+
     // Insert Appointment
     const apptRes = await req.dbClient.query(
-      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel)
-       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8)
+      `INSERT INTO appointments (tenant_id, practitioner_id, patient_id, medical_service_id, time_slot, status, booking_channel, consultation_mode, video_room_slug, reminder_enabled, reminder_hours_before, reminder_channel)
+       VALUES ($1, $2, $3, $4, tstzrange($5, $6, '[)'), $7, $8, $9, $10, $11, $12, $13)
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
       [
         tenantId,
@@ -427,7 +460,12 @@ const requestAppointmentBooking = async (req, res) => {
         startISO,
         endISO,
         initialStatus,
-        booking_channel || 'DESK'
+        booking_channel || 'DESK',
+        isTeleconsultation ? 'TELECONSULTATION' : 'PRESENTIEL',
+        videoRoomSlug,
+        reminder.enabled,
+        reminder.hoursBefore,
+        reminder.channel
       ]
     );
 
@@ -500,6 +538,28 @@ const updateAppointment = async (req, res) => {
   const { start_time, practitioner_id, medical_service_id, status, consultation_reason } = req.body;
   const tenantId = req.user.tenant_id;
 
+  // Chaque champ de rappel n'est modifié que s'il est explicitement fourni (sinon
+  // COALESCE garde la valeur existante) - contrairement à normalizeReminderInput
+  // (utilisée à la création) qui comblerait un champ absent par sa valeur par
+  // défaut et écraserait donc silencieusement un réglage déjà personnalisé lors
+  // d'une mise à jour partielle (ex: ne changer que le canal ne doit pas remettre
+  // les heures-avant à 3 par défaut). Un rappel déjà envoyé repart à zéro dès que
+  // l'heure du RDV ou un réglage de rappel change, sinon un RDV reporté ne
+  // recevrait jamais de nouveau rappel.
+  const reminderEnabledVal = req.body.reminder_enabled !== undefined ? !!req.body.reminder_enabled : null;
+  const reminderChannelVal = req.body.reminder_channel !== undefined
+    ? (req.body.reminder_channel === 'WHATSAPP' ? 'WHATSAPP' : 'SMS')
+    : null;
+  let reminderHoursVal = null;
+  if (req.body.reminder_hours_before !== undefined) {
+    let h = parseInt(req.body.reminder_hours_before, 10);
+    if (!Number.isFinite(h) || h < 0) h = 3;
+    if (h > 72) h = 72;
+    reminderHoursVal = h;
+  }
+  const reminderFieldsProvided = reminderEnabledVal !== null || reminderChannelVal !== null || reminderHoursVal !== null;
+  const shouldResetReminderSentAt = !!start_time || reminderFieldsProvided;
+
   try {
     const existingRes = await req.dbClient.query(
       `SELECT id, practitioner_id, medical_service_id, status,
@@ -551,10 +611,20 @@ const updateAppointment = async (req, res) => {
            medical_service_id = $2,
            time_slot = tstzrange($3, $4, '[)'),
            status = COALESCE($5::appointment_status, status),
-           consultation_reason = COALESCE($6, consultation_reason)
+           consultation_reason = COALESCE($6, consultation_reason),
+           reminder_enabled = COALESCE($9, reminder_enabled),
+           reminder_hours_before = COALESCE($10, reminder_hours_before),
+           reminder_channel = COALESCE($11::reminder_channel, reminder_channel),
+           reminder_sent_at = CASE WHEN $12 THEN NULL ELSE reminder_sent_at END
        WHERE id = $7 AND tenant_id = $8
        RETURNING *, lower(time_slot) AS start_time, upper(time_slot) AS end_time`,
-      [finalPractitionerId, finalServiceId, startISO, endISO, status || null, consultation_reason || null, id, tenantId]
+      [
+        finalPractitionerId, finalServiceId, startISO, endISO, status || null, consultation_reason || null, id, tenantId,
+        reminderEnabledVal,
+        reminderHoursVal,
+        reminderChannelVal,
+        shouldResetReminderSentAt
+      ]
     );
 
     await logAudit(req, 'UPDATE_APPOINTMENT', 'appointments', id);

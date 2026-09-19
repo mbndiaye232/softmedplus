@@ -1,6 +1,5 @@
 const { logAudit } = require('../middleware/audit');
 const crypto = require('crypto');
-const pool = require('../config/db');
 
 // Coordonnées de paiement affichées au patient : ce sont les seules données de
 // `credentials` autorisées à sortir du serveur. Tout le reste (clés et secrets API)
@@ -304,7 +303,9 @@ const initializeOnlinePayment = async (req, res) => {
   }
 };
 
-// 5. Public Webhook Handler (Bypasses token auth, but handles RLS manually by looking up the billing tenant)
+// 5. Simulated Payment Confirmation (staff-triggered "Simuler Retour Validation Webhook"
+// button — there is no real payment provider behind it yet, see server.js route comment).
+// Authenticated and tenant-scoped like the rest of this file's endpoints.
 const handleWebhook = async (req, res) => {
   const { provider } = req.params;
   const { transaction_reference, amount, invoice_id, status } = req.body;
@@ -317,54 +318,33 @@ const handleWebhook = async (req, res) => {
     return res.status(200).json({ message: 'Webhook received but payment is not successful. Skipping.' });
   }
 
-  // Check out a client from the pool to run bypassed queries
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // Enable RLS bypass to fetch the invoice and resolve its tenant ID
-    await client.query(`SELECT set_config('app.bypass_rls', 'true', true)`);
+  const tenantId = req.user.tenant_id;
 
-    const invRes = await client.query(
-      `SELECT tenant_id, id, patient_id FROM invoices WHERE id = $1`,
-      [invoice_id]
+  try {
+    const invRes = await req.dbClient.query(
+      `SELECT tenant_id, id, patient_id FROM invoices WHERE id = $1 AND tenant_id = $2`,
+      [invoice_id, tenantId]
     );
 
     if (invRes.rowCount === 0) {
-      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Invoice associated with webhook not found' });
     }
 
     const invoice = invRes.rows[0];
 
-    // Find the system superadmin user for this tenant to mark as received_by
-    const adminUserRes = await client.query(
-      `SELECT id FROM users WHERE tenant_id = $1 ORDER BY (role = 'SUPER_ADMIN') DESC LIMIT 1`,
-      [invoice.tenant_id]
-    );
-
-    if (adminUserRes.rowCount === 0) {
-      await client.query('ROLLBACK');
-      return res.status(500).json({ error: 'No admin user found for RLS billing verification' });
-    }
-
-    const adminId = adminUserRes.rows[0].id;
-
     // Find the payment method ID
-    const pmRes = await client.query(
+    const pmRes = await req.dbClient.query(
       `SELECT id FROM tenant_payment_methods WHERE tenant_id = $1 AND provider = $2`,
-      [invoice.tenant_id, provider.toUpperCase()]
+      [tenantId, provider.toUpperCase()]
     );
 
     const pmId = pmRes.rowCount > 0 ? pmRes.rows[0].id : null;
 
-    // Set RLS scope to the invoice's tenant
-    await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [invoice.tenant_id]);
-
-    const recon = await processPaymentReconciliation(client, req, {
-      tenant_id: invoice.tenant_id,
+    const recon = await processPaymentReconciliation(req.dbClient, req, {
+      tenant_id: tenantId,
       invoice_id: invoice.id,
       cash_session_id: null,
-      received_by: adminId,
+      received_by: req.user.id,
       amount,
       payment_method: provider.toUpperCase(),
       tenant_payment_method_id: pmId,
@@ -372,17 +352,12 @@ const handleWebhook = async (req, res) => {
       transaction_reference
     });
 
-    await client.query('COMMIT');
-
     console.log(`Successfully reconciled Invoice ${invoice.id} for ${amount} via webhook ${provider}`);
     return res.status(200).json({ success: true, invoice_status: recon.invoice.status });
 
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch(e) {}
     console.error('Webhook processing error:', err.message);
     return res.status(500).json({ error: `Failed to process payment webhook reconciliations: ${err.message}` });
-  } finally {
-    client.release();
   }
 };
 
