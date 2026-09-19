@@ -1,11 +1,13 @@
 {
   "name": "softmed-teleconsultation",
   "version": "2.0.0",
-  "description": "Fork local de SoftMed pour prototyper la teleconsultation video et d'autres fonctionnalites additionnelles.",
+  "description": "Application de gestion de clinique avec teleconsultation video, portail patient et assistance IA.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "db:init": "node db/db-init.js",
+    "db:migrate": "node db/migrate-all.js",
+    "setup": "npm run db:init && npm run db:migrate",
     "test": "node test-flow.js"
   },
   "dependencies": {
