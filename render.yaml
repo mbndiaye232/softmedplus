@@ -13,10 +13,15 @@ services:
         value: production
       - key: PORT
         value: 5000
+      # A renseigner avec les MEMES valeurs que le .env local, et non generees
+      # par Render : les deux environnements partagent la base Supabase.
+      # HMAC_SECRET signe les QR codes des ordonnances - deux valeurs
+      # differentes rendraient invérifiable une ordonnance emise ailleurs.
+      # JWT_SECRET signe aussi les jetons du portail patient.
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: HMAC_SECRET
-        generateValue: true
+        sync: false
       # Base Supabase : chaine de connexion a renseigner dans le tableau de bord
       # Render. Utiliser le role applicatif (ni superuser ni BYPASSRLS), pas le
       # role postgres, sinon l'isolation entre structures ne s'applique plus.
