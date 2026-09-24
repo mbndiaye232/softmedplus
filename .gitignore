@@ -29,6 +29,11 @@ npm-debug.log*
 .env.*
 !.env.example
 
+# Fichiers deposes dans l'application (logos, cachets, documents patients).
+# Sans R2 configure, utils/storage.js les ecrit ici : ce sont des donnees
+# medicales, elles n'ont rien a faire dans le depot.
+public/uploads/
+
 # Firebase
 .firebase/
 firebase-debug.log

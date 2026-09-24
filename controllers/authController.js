@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { setAuthCookie } = require('../utils/authCookie');
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'clinicos-jwt-super-secret-key-2026';
@@ -82,6 +83,8 @@ const login = async (req, res) => {
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       token,

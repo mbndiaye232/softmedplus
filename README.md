@@ -87,6 +87,8 @@ Le serveur Express sert à la fois l'API (`/api`) et le frontend (dossier `publi
 
 Backend et base doivent rester dans la **même région** : l'application ouvre une transaction et plusieurs requêtes par appel d'API, et chaque aller-retour se paie autant de fois. La proximité entre le backend et la base compte davantage que la distance à l'utilisateur, le frontend étant déjà servi par le réseau de Cloudflare.
 
+**Les variables `R2_*` sont obligatoires en production.** `utils/storage.js` bascule silencieusement sur le disque local quand R2 n'est pas configuré : sur Render, dont le disque est éphémère, les logos, cachets et documents patients disparaîtraient à chaque redéploiement, sans erreur.
+
 Le frontend appelle toujours `/api` sur sa propre origine. En production, c'est `public/_redirects` qui redirige `/api/*` vers le backend : **c'est le seul fichier où l'URL du backend est écrite**, à mettre à jour après le premier déploiement.
 
 ## Notes techniques
