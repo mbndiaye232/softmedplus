@@ -39,6 +39,21 @@ Cette commande enchaîne deux étapes :
 
 `npm run db:migrate` est **indispensable** : la téléconsultation, le portail patient et les rappels de rendez-vous reposent sur des colonnes et des tables qui n'existent pas dans `schema.sql`. Les migrations sont idempotentes, les rejouer est sans danger.
 
+### Base réelle, sans données de démonstration
+
+`db:init` installe par défaut des cliniques et des comptes de démonstration (`db/production_seed.sql`, ou à défaut un administrateur dont le mot de passe est écrit dans `db/db-init.js`). Pour une base destinée à un usage réel :
+
+```bash
+SKIP_SEED=1 npm run setup
+```
+
+La base ne contient alors que le schéma. La première structure sanitaire se crée depuis l'écran d'inscription de l'application. Les catalogues de référence se chargent ensuite pour les structures existantes :
+
+```bash
+node db/seed_senegal_medications.js        # catalogue de médicaments
+node seed-specialties-and-departments.js   # spécialités et services
+```
+
 ## Démarrage
 
 ```bash
