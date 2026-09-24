@@ -1,5 +1,8 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
+// Sans cela, DATABASE_URL n'est pas lue depuis .env et le script se rabat
+// silencieusement sur une base locale.
+require('dotenv').config();
 
 const pool = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL })
@@ -70,6 +73,11 @@ async function seedData() {
         is_active BOOLEAN NOT NULL DEFAULT true,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      -- CREATE TABLE IF NOT EXISTS n'ajoute rien a une table deja presente :
+      -- celle de schema.sql n'a ni description ni floors_count, que les
+      -- insertions plus bas utilisent.
+      ALTER TABLE hospital_buildings ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE hospital_buildings ADD COLUMN IF NOT EXISTS floors_count INTEGER DEFAULT 1;
       ALTER TABLE hospital_buildings ENABLE ROW LEVEL SECURITY;
       ALTER TABLE hospital_buildings FORCE ROW LEVEL SECURITY;
       DO $$ BEGIN
@@ -349,6 +357,9 @@ async function seedData() {
           }
         }
         deptsCount++;
+      }
+      console.log(`  [+] ${deptsCount} Services hospitaliers enregistrés`);
+
       // 5. Insertion des Prestations / Consultations Médicales (Medical Services)
       const medicalServicesList = [
         { code: 'CONS-MEDGEN', name: 'Consultation Médecine Générale', specCode: 'MED-GEN', cat: 'CONSULTATION', price: 15000, deposit: 2000, duration: 20, desc: 'Consultation médicale générale et bilan' },
