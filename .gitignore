@@ -23,8 +23,11 @@ Thumbs.db
 npm-debug.log*
 
 # Environment
+# Tout fichier .env* est ignore, sauf le modele documente .env.example : un
+# .env.notes ou .env.save contenant un mot de passe serait sinon suivi par git.
 .env
-.env.local
+.env.*
+!.env.example
 
 # Firebase
 .firebase/

@@ -42,8 +42,14 @@ async function main() {
     throw new Error(`Le role ${appRole} n'existe pas.`);
   }
 
-  // Transferer une propriete exige d'etre membre du role destinataire.
+  // Transferer une propriete exige d'etre membre du role destinataire...
   await client.query(`GRANT ${quote(appRole)} TO CURRENT_USER`);
+
+  // ... et exige aussi que le futur proprietaire ait le droit CREATE sur le
+  // schema qui contient l'objet. Sans ce GRANT prealable, chaque
+  // ALTER ... OWNER TO echoue avec "permission denied for schema public".
+  await client.query(`GRANT CREATE ON SCHEMA public TO ${quote(appRole)}`);
+  console.log('Droit de creation accorde dans le schema public.');
 
   const objets = await client.query(
     `SELECT c.relname, c.relkind, c.relrowsecurity
@@ -66,9 +72,6 @@ async function main() {
     forcees += 1;
   }
   console.log(`FORCE ROW LEVEL SECURITY active sur ${forcees} tables.`);
-
-  await client.query(`GRANT CREATE ON SCHEMA public TO ${quote(appRole)}`);
-  console.log('Droit de creation accorde dans le schema public.');
 
   const restantes = await client.query(
     `SELECT count(*)::int AS n
