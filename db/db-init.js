@@ -69,6 +69,15 @@ async function initDatabase() {
     await client.query(schemaSql);
     console.log('Schema executed successfully. Tables, enums, extensions, and RLS policies created!');
 
+    // Les deux chemins de seed ci-dessous creent des donnees de demonstration :
+    // production_seed.sql contient les cliniques de test et leurs comptes, et le
+    // seed d'exemple cree un administrateur dont le mot de passe est en clair
+    // dans ce fichier. Aucun des deux n'a sa place dans une base reelle.
+    if (process.env.SKIP_SEED === '1') {
+      console.log('SKIP_SEED=1 : schema seul, aucune donnee de demonstration inseree.');
+      return;
+    }
+
     // Step 3: Check and load clean production seed if present
     const prodSeedPath = path.join(__dirname, 'production_seed.sql');
     if (fs.existsSync(prodSeedPath)) {
