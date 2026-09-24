@@ -81,8 +81,11 @@ Le serveur Express sert à la fois l'API (`/api`) et le frontend (dossier `publi
 
 ## Déploiement
 
-- **Backend** : Render, décrit par `render.yaml` (service `softmedplus-backend`, base `softmedplus-db`).
 - **Frontend** : Cloudflare Pages, décrit par `wrangler.toml` (projet `softmedplus`), qui publie le dossier `public/`.
+- **Backend** : Render, décrit par `render.yaml` (service `softmedplus-backend`, région Francfort).
+- **Base** : Supabase, région européenne. `render.yaml` ne déclare aucune base : `DATABASE_URL` se renseigne dans le tableau de bord Render, avec le rôle applicatif — ni superuser ni `BYPASSRLS`.
+
+Backend et base doivent rester dans la **même région** : l'application ouvre une transaction et plusieurs requêtes par appel d'API, et chaque aller-retour se paie autant de fois. La proximité entre le backend et la base compte davantage que la distance à l'utilisateur, le frontend étant déjà servi par le réseau de Cloudflare.
 
 Le frontend appelle toujours `/api` sur sa propre origine. En production, c'est `public/_redirects` qui redirige `/api/*` vers le backend : **c'est le seul fichier où l'URL du backend est écrite**, à mettre à jour après le premier déploiement.
 
