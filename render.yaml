@@ -3,6 +3,9 @@ services:
     name: softmedplus-backend
     env: node
     plan: free
+    # Meme region que la base Supabase : l'application ouvre une transaction et
+    # plusieurs requetes par appel d'API, chaque aller-retour se paie autant de fois.
+    region: frankfurt
     buildCommand: npm install
     startCommand: node server.js
     envVars:
@@ -14,12 +17,16 @@ services:
         generateValue: true
       - key: HMAC_SECRET
         generateValue: true
+      # Base Supabase : chaine de connexion a renseigner dans le tableau de bord
+      # Render. Utiliser le role applicatif (ni superuser ni BYPASSRLS), pas le
+      # role postgres, sinon l'isolation entre structures ne s'applique plus.
       - key: DATABASE_URL
-        fromDatabase:
-          name: softmedplus-db
-          property: connectionString
+        sync: false
       - key: DB_SSL
         value: "true"
+      # URL publique du service, pour les liens envoyes par email.
+      - key: PUBLIC_BASE_URL
+        sync: false
       # Cloudflare R2 Storage Bucket Settings (Set these in Render Dashboard)
       - key: R2_ACCESS_KEY_ID
         sync: false
@@ -31,9 +38,3 @@ services:
         value: softmedplus-storage
       - key: R2_PUBLIC_URL
         sync: false
-
-databases:
-  - name: softmedplus-db
-    plan: free
-    databaseName: softmedplus
-    user: softmedplus
