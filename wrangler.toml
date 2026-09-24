@@ -2,6 +2,17 @@ name = "softmedplus"
 compatibility_date = "2026-09-24"
 main = "worker.js"
 
+# Au premier niveau, et non sous [assets] : en TOML, une cle placee apres un
+# en-tete de table lui appartient, et Wrangler l'ignorait avec un avertissement
+# « Unexpected fields found in assets field ».
+#
+# Sans ce reglage, chaque version obtient une adresse publique qui sert
+# l'application contre la base de production. Les constructions de
+# previsualisation doivent egalement rester desactivees dans le tableau de bord
+# du Worker (Settings > Build), faute de quoi elles echouent en reclamant un
+# bloc [previews] pointant sur des ressources distinctes, qui n'existent pas.
+preview_urls = false
+
 [assets]
 directory = "./public"
 # Toute adresse inconnue renvoie index.html : l'application gere ses propres
@@ -10,10 +21,6 @@ not_found_handling = "single-page-application"
 # Seuls les appels d'API passent par le code du Worker ; les fichiers statiques
 # sont servis directement, sans invocation facturee.
 run_worker_first = ["/api/*"]
-
-# Chaque branche et chaque demande de fusion obtiendrait sinon sa propre adresse
-# publique, servant l'application contre la base de production.
-preview_urls = false
 
 [vars]
 # Adresse du backend Render, a ajuster apres sa creation. Elle peut aussi etre
