@@ -170,12 +170,49 @@ app.get('/api/files/*', async (req, res) => {
 });
 
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
+//
+// L'endpoint ne peut pas exiger de jeton : le logo et les QR de paiement sont
+// deposes pendant l'inscription, avant qu'un compte existe. Mais sans limite, il
+// suffit d'en connaitre l'adresse pour remplir le bucket R2 aux frais de
+// l'editeur. Un depot anonyme est donc plafonne en taille, restreint aux images
+// et limite en debit par IP ; un depot authentifie garde les regles d'origine,
+// qui doivent accepter un scan ou un PDF multipage.
+const TAILLE_MAX_ANONYME = 3 * 1024 * 1024;
+
+const uploadAnonyme = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TAILLE_MAX_ANONYME },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Sans compte connecté, seules les images sont acceptées (logo, cachet, QR code).'), false);
+    }
+  },
+});
+
+const limiteUploadAnonyme = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Trop de fichiers déposés depuis cette adresse. Merci de patienter quelques minutes.',
+});
+
 app.post('/api/upload', (req, res) => {
-  upload.single('file')(req, res, async (multerErr) => {
+  const tenantId = tenantIdFromRequest(req);
+
+  if (!tenantId) {
+    return limiteUploadAnonyme(req, res, () => traiterUpload(req, res, uploadAnonyme, null));
+  }
+  return traiterUpload(req, res, upload, tenantId);
+});
+
+function traiterUpload(req, res, uploader, tenantId) {
+  const tailleMax = tenantId ? '25 Mo' : '3 Mo';
+  uploader.single('file')(req, res, async (multerErr) => {
     if (multerErr) {
       // Multer errors (file too large, wrong type, etc.) — always return JSON
       const msg = multerErr.code === 'LIMIT_FILE_SIZE'
-        ? 'Fichier trop volumineux. La taille maximale autorisée est 25 Mo.'
+        ? `Fichier trop volumineux. La taille maximale autorisée est ${tailleMax}.`
         : (multerErr.message || 'Erreur lors du téléversement du fichier.');
       return res.status(400).json({ error: msg });
     }
@@ -190,7 +227,7 @@ app.post('/api/upload', (req, res) => {
         req.file.buffer,
         req.file.originalname,
         req.file.mimetype,
-        tenantIdFromRequest(req)
+        tenantId
       );
       return res.status(200).json({ url });
     } catch (err) {
@@ -198,7 +235,7 @@ app.post('/api/upload', (req, res) => {
       return res.status(500).json({ error: 'Échec du téléversement : ' + err.message });
     }
   });
-});
+}
 
 // ============================================================================
 // PRIVATE ROUTES (Protected by JWT and scoped by Row Level Security)
