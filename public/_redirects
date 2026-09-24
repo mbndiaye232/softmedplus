@@ -1,8 +1,0 @@
-# Proxy API pour Cloudflare Pages
-# Remplacer l'URL ci-dessous par celle du backend de CETTE application
-# (service Render "softmedplus-backend"), puis redeployer les Pages.
-# Tant que ce service n'existe pas, le frontend deploye ne joint aucun backend.
-/api/*  https://softmedplus-backend.onrender.com/api/:splat  200
-
-# SPA Routing Fallback for Cloudflare Pages
-/*      /index.html                                          200

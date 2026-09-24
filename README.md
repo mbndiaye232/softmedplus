@@ -81,7 +81,7 @@ Le serveur Express sert à la fois l'API (`/api`) et le frontend (dossier `publi
 
 ## Déploiement
 
-- **Frontend** : Cloudflare Pages, décrit par `wrangler.toml` (projet `softmedplus`), qui publie le dossier `public/`.
+- **Frontend** : Cloudflare Worker, décrit par `wrangler.toml` et `worker.js` (projet `softmedplus`), qui sert le dossier `public/` et relaie `/api/*` vers le backend.
 - **Backend** : Render, décrit par `render.yaml` (service `softmedplus-backend`, région Francfort).
 - **Base** : Supabase, région européenne. `render.yaml` ne déclare aucune base : `DATABASE_URL` se renseigne dans le tableau de bord Render, avec le rôle applicatif — ni superuser ni `BYPASSRLS`.
 
@@ -89,7 +89,7 @@ Backend et base doivent rester dans la **même région** : l'application ouvre u
 
 **Les variables `R2_*` sont obligatoires en production.** `utils/storage.js` bascule silencieusement sur le disque local quand R2 n'est pas configuré : sur Render, dont le disque est éphémère, les logos, cachets et documents patients disparaîtraient à chaque redéploiement, sans erreur.
 
-Le frontend appelle toujours `/api` sur sa propre origine. En production, c'est `public/_redirects` qui redirige `/api/*` vers le backend : **c'est le seul fichier où l'URL du backend est écrite**, à mettre à jour après le premier déploiement.
+Le frontend appelle toujours `/api` sur sa propre origine — condition pour que le cookie de session accompagne les images et les téléchargements servis par `/api/files`. C'est le Worker qui relaie ces appels vers Render, d'après sa variable `BACKEND_URL` : **c'est le seul endroit où l'adresse du backend est écrite**. Un projet Cloudflare Pages ne conviendrait pas, son fichier `_redirects` ne relayant que des chemins internes au site.
 
 ## Notes techniques
 
