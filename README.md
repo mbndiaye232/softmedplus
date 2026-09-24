@@ -54,6 +54,23 @@ node db/seed_senegal_medications.js        # catalogue de médicaments
 node seed-specialties-and-departments.js   # spécialités et services
 ```
 
+### Base gérée (Supabase, Neon...)
+
+Sur une base gérée, le schéma est posé par un rôle administrateur et l'application tourne avec un rôle restreint. Au démarrage, elle échoue alors sur ses propres instructions de mise à jour du schéma :
+
+```
+Error ensuring ai_llm_configs table: permission denied for schema public
+Auto-migration notice: must be owner of table stock_items
+```
+
+`db/adopt_schema.js` donne au rôle applicatif la propriété du schéma **et** force les politiques RLS, sans quoi cette propriété ferait échapper l'application à l'isolation entre structures :
+
+```bash
+ADMIN_DATABASE_URL="postgresql://<admin>:<mdp>@<hote>:5432/postgres" APP_DB_ROLE=softmed_app node db/adopt_schema.js
+```
+
+Le rôle applicatif ne doit être ni superuser ni `BYPASSRLS` — sur Supabase, le rôle `postgres` est `BYPASSRLS` et ne convient donc pas pour l'application.
+
 ## Démarrage
 
 ```bash
