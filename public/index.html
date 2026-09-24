@@ -11,11 +11,11 @@
   
   <!-- Global Backend API Config -->
   <script>
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      window.API_BASE_URL = 'https://softmed-backend.onrender.com/api';
-    } else {
-      window.API_BASE_URL = '/api';
-    }
+    // L'API est toujours appelee sur la meme origine que la page.
+    // En local, server.js sert a la fois le frontend et /api.
+    // En production sur Cloudflare Pages, /api/* est redirige vers le backend
+    // par public/_redirects : c'est le seul endroit ou son URL est ecrite.
+    window.API_BASE_URL = '/api';
   </script>
 
   <!-- Favicon -->

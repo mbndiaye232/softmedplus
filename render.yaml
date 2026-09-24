@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: softmed-backend
+    name: softmedplus-backend
     env: node
     plan: free
     buildCommand: npm install
@@ -16,7 +16,7 @@ services:
         generateValue: true
       - key: DATABASE_URL
         fromDatabase:
-          name: softmed-db
+          name: softmedplus-db
           property: connectionString
       - key: DB_SSL
         value: "true"
@@ -28,12 +28,12 @@ services:
       - key: R2_ENDPOINT
         sync: false
       - key: R2_BUCKET_NAME
-        value: softmed-storage
+        value: softmedplus-storage
       - key: R2_PUBLIC_URL
         sync: false
 
 databases:
-  - name: softmed-db
+  - name: softmedplus-db
     plan: free
-    databaseName: clinicos
-    user: softmed
+    databaseName: softmedplus
+    user: softmedplus
