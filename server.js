@@ -101,6 +101,74 @@ app.post('/api/patient-portal/reset-password', patientAuthRateLimit, patientPort
 app.get('/api/patient-portal/dossier', verifyPatientToken, patientPortalCtrl.getMyDossier);
 app.post('/api/patient-portal/2fa', verifyPatientToken, patientPortalCtrl.toggleTwoFactor);
 
+// ============================================================================
+// FICHIERS DEPOSES : bucket R2 prive, servi par l'application
+// ----------------------------------------------------------------------------
+// Une balise <img> ou un lien de telechargement ne peut pas porter d'en-tete
+// Authorization : le jeton est donc aussi depose dans un cookie HttpOnly a la
+// connexion, et relu ici. La cle de l'objet porte l'identifiant de la clinique,
+// qui doit correspondre a celui du jeton.
+// ============================================================================
+const jwt = require('jsonwebtoken');
+const { downloadByKey } = require('./utils/storage');
+
+const readCookie = (req, name) => {
+  const brut = req.headers.cookie;
+  if (!brut) return null;
+  for (const morceau of brut.split(';')) {
+    const [cle, ...reste] = morceau.trim().split('=');
+    if (cle === name) return decodeURIComponent(reste.join('='));
+  }
+  return null;
+};
+
+// Jeton valide s'il y en a un : en-tete d'abord, cookie ensuite. Ne rejette rien,
+// se contente de renvoyer ce qu'il a pu verifier.
+const decodeOptionalToken = (req) => {
+  const enTete = req.headers['authorization'];
+  const jeton = (enTete && enTete.split(' ')[1]) || readCookie(req, 'softmed_token');
+  if (!jeton) return null;
+  try {
+    return jwt.verify(jeton, process.env.JWT_SECRET || 'clinicos-jwt-super-secret-key-2026');
+  } catch (_) {
+    return null;
+  }
+};
+
+const tenantIdFromRequest = (req) => {
+  const decode = decodeOptionalToken(req);
+  return decode && decode.tenant_id ? decode.tenant_id : null;
+};
+
+app.get('/api/files/*', async (req, res) => {
+  const key = decodeURIComponent(req.params[0] || '');
+
+  if (!key || key.includes('..')) {
+    return res.status(400).json({ error: 'Chemin de fichier invalide' });
+  }
+
+  // Les fichiers publics (logo affiche avant connexion, QR de paiement) sont
+  // servis sans jeton : ils le sont deja sur les ecrans publics.
+  if (!key.startsWith('public/')) {
+    const decode = decodeOptionalToken(req);
+    if (!decode) {
+      return res.status(401).json({ error: 'Authentification requise pour ce document' });
+    }
+    if (!decode.tenant_id || !key.startsWith(`t/${decode.tenant_id}/`)) {
+      return res.status(403).json({ error: 'Ce document appartient a une autre structure' });
+    }
+  }
+
+  const fichier = await downloadByKey(key);
+  if (!fichier) {
+    return res.status(404).json({ error: 'Fichier introuvable' });
+  }
+
+  res.setHeader('Content-Type', fichier.contentType || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  return res.send(fichier.buffer);
+});
+
 // D. Public image upload endpoint (used for logo during registration and payment QR codes)
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, async (multerErr) => {
@@ -115,7 +183,15 @@ app.post('/api/upload', (req, res) => {
       return res.status(400).json({ error: 'Aucun fichier reçu. Veuillez sélectionner un fichier.' });
     }
     try {
-      const url = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
+      // Depot anonyme (logo a l'inscription) ou depot d'une clinique connectee :
+      // le jeton n'est pas exige ici, mais s'il est present et valide le fichier
+      // est range sous la cle de cette clinique et ne sera lisible que par elle.
+      const url = await uploadFile(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        tenantIdFromRequest(req)
+      );
       return res.status(200).json({ url });
     } catch (err) {
       console.error('File upload route error:', err.message);

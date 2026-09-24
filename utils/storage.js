@@ -56,9 +56,15 @@ const getS3Client = () => {
  * @param {string} mimeType 
  * @returns {Promise<string>} The public URL of the uploaded file
  */
-const uploadFile = async (fileBuffer, originalName, mimeType) => {
+const uploadFile = async (fileBuffer, originalName, mimeType, tenantId = null) => {
   const ext = path.extname(originalName);
   const randomName = `${crypto.randomUUID()}${ext}`;
+  // Les fichiers deposes par une clinique connectee sont ranges sous sa propre
+  // cle : c'est ce prefixe que la route de lecture compare au jeton, pour qu'un
+  // utilisateur d'une clinique ne puisse pas lire le fichier d'une autre meme
+  // s'il en connait l'identifiant. Les depots anonymes (logo a l'inscription,
+  // QR code de paiement) restent sous public/ et sont lisibles sans jeton.
+  const key = tenantId ? `t/${tenantId}/${randomName}` : `public/${randomName}`;
   const client = getS3Client();
 
   if (client && PutObjectCommand) {
@@ -67,14 +73,15 @@ const uploadFile = async (fileBuffer, originalName, mimeType) => {
       await client.send(
         new PutObjectCommand({
           Bucket: R2_BUCKET_NAME,
-          Key: randomName,
+          Key: key,
           Body: fileBuffer,
           ContentType: mimeType,
         })
       );
-      
-      const baseUrl = R2_PUBLIC_URL || `${R2_ENDPOINT.replace(/\/$/, '')}/${R2_BUCKET_NAME}`;
-      return `${baseUrl.replace(/\/$/, '')}/${randomName}`;
+
+      // Le bucket reste prive : on renvoie l'adresse de la route applicative,
+      // qui verifie le jeton avant de servir l'objet, et non une URL R2 directe.
+      return `/api/files/${key}`;
     } catch (err) {
       console.error('R2 upload failed, falling back to local storage:', err.message);
     }
@@ -100,8 +107,31 @@ const uploadFile = async (fileBuffer, originalName, mimeType) => {
  * @param {string} fileUrl URL publique ou chemin `/uploads/...`
  * @returns {Promise<{buffer: Buffer, contentType: string|null}|null>} null si le fichier est introuvable
  */
+/**
+ * Lit un objet R2 par sa cle (`public/...` ou `t/<tenant>/...`).
+ * @returns {Promise<{buffer: Buffer, contentType: string|null}|null>}
+ */
+const downloadByKey = async (key) => {
+  const client = getS3Client();
+  if (!client || !GetObjectCommand || !key) return null;
+  try {
+    const obj = await client.send(new GetObjectCommand({ Bucket: R2_BUCKET_NAME, Key: key }));
+    const chunks = [];
+    for await (const chunk of obj.Body) chunks.push(chunk);
+    return { buffer: Buffer.concat(chunks), contentType: obj.ContentType || null };
+  } catch (err) {
+    console.warn(`Lecture R2 de la cle ${key} impossible : ${err.message}`);
+    return null;
+  }
+};
+
 const downloadFile = async (fileUrl) => {
   if (!fileUrl || typeof fileUrl !== 'string') return null;
+
+  // 0. Fichier servi par la route applicative : lecture directe dans R2.
+  if (fileUrl.startsWith('/api/files/')) {
+    return downloadByKey(decodeURIComponent(fileUrl.slice('/api/files/'.length)));
+  }
 
   // 1. Fichier servi depuis le disque local
   if (fileUrl.startsWith('/uploads/')) {
@@ -147,5 +177,6 @@ const downloadFile = async (fileUrl) => {
 module.exports = {
   uploadFile,
   downloadFile,
+  downloadByKey,
   isR2Configured
 };

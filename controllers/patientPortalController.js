@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const pool = require('../config/db');
 const { sendSms } = require('../utils/sms');
+const { setAuthCookie } = require('../utils/authCookie');
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'clinicos-jwt-super-secret-key-2026';
@@ -107,6 +108,7 @@ const enrollPatientPassword = async (req, res) => {
     await client.query('COMMIT');
 
     const token = signPatientToken(patient, tenant);
+    setAuthCookie(res, token);
     return res.status(201).json({
       token,
       patient: { id: patient.id, patient_code: patient.patient_code, first_name: patient.first_name, last_name: patient.last_name },
@@ -156,6 +158,7 @@ const patientPortalLogin = async (req, res) => {
 
     if (!patient.two_factor_enabled) {
       const token = signPatientToken(patient, tenant);
+      setAuthCookie(res, token);
       return res.status(200).json({
         token,
         patient: { id: patient.id, patient_code: patient.patient_code, first_name: patient.first_name, last_name: patient.last_name },
@@ -263,6 +266,7 @@ const verifyLoginOtp = async (req, res) => {
       { id: row.id, patient_code: row.patient_code },
       { id: row.tenant_id }
     );
+    setAuthCookie(res, token);
 
     return res.status(200).json({
       token,
