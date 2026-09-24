@@ -87,6 +87,16 @@ const uploadFile = async (fileBuffer, originalName, mimeType, tenantId = null) =
     }
   }
 
+  // En production, pas de repli sur le disque : il est ephemere sur Render, et
+  // /uploads n'est meme pas relaye par le Worker, qui ne relaie que /api. Un
+  // fichier ecrit ici serait donc illisible immediatement, puis perdu au
+  // redeploiement - le tout sans la moindre erreur. Mieux vaut refuser le depot.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      "Stockage de fichiers non configure : les variables R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT et R2_BUCKET_NAME sont requises en production."
+    );
+  }
+
   // Local storage fallback
   console.log(`Saving ${originalName} to local public/uploads directory...`);
   const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');

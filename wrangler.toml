@@ -11,6 +11,10 @@ not_found_handling = "single-page-application"
 # sont servis directement, sans invocation facturee.
 run_worker_first = ["/api/*"]
 
+# Chaque branche et chaque demande de fusion obtiendrait sinon sa propre adresse
+# publique, servant l'application contre la base de production.
+preview_urls = false
+
 [vars]
 # Adresse du backend Render, a ajuster apres sa creation. Elle peut aussi etre
 # modifiee dans le tableau de bord du Worker, sans redeploiement.
