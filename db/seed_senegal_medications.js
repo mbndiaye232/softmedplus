@@ -1045,8 +1045,16 @@ async function seedSenegalMedications() {
 
     for (const tenant of tenantsRes.rows) {
       console.log(`\n==> Remplissage du stock pour : "${tenant.name}" (${tenant.slug})`);
+      // Les politiques RLS s'appliquent aussi a ce script des lors que le role
+      // de connexion n'est ni superuser ni BYPASSRLS : sans contexte, chaque
+      // INSERT est rejete par "new row violates row-level security policy".
+      // On pose la clinique en cours plutot qu'un bypass global, pour que le
+      // script ne puisse ecrire que dans celle qu'il traite.
+      await client.query('SELECT set_config($1, $2, false)', ['app.current_tenant_id', tenant.id]);
       await seedTenantMedications(client, tenant.id, tenant.name);
     }
+
+    await client.query('SELECT set_config($1, $2, false)', ['app.current_tenant_id', '']);
 
     console.log('\n================================================================');
     console.log('✅ SEEDING TERMINÉ AVEC SUCCÈS POUR TOUTES LES CLINIQUES !');
