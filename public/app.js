@@ -2356,6 +2356,56 @@ function renderAgendaCalendarContent(patients, services, practitioners, appointm
             return slotsHtml.join('');
           })()}
         </div>
+
+        ${(() => {
+          // La grille ne couvre que 8h-19h. Un rendez-vous pris en dehors de ces
+          // heures - garde de nuit, teleconsultation en soiree, urgence tot le
+          // matin - existait en base sans apparaitre nulle part, alors meme que
+          // le bandeau au-dessus le comptait. On les liste donc a part plutot
+          // que de les perdre en silence.
+          const horsPlage = filteredAppts.filter(appt => {
+            const h = new Date(appt.start_time).getHours();
+            return h < 8 || h > 19;
+          });
+          if (horsPlage.length === 0) return '';
+
+          return `
+            <div style="margin-top:16px; border:1px solid #fcd34d; background:#fffbeb; border-radius:10px; padding:14px 16px;">
+              <div style="font-weight:700; color:#92400e; font-size:0.9rem; margin-bottom:10px;">
+                <i class="fas fa-clock"></i> ${horsPlage.length} rendez-vous hors de la plage affichée (avant 8h ou après 19h)
+              </div>
+              <div style="display:flex; flex-direction:column; gap:8px;">
+                ${horsPlage.map(appt => {
+                  const d = new Date(appt.start_time);
+                  const heure = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                  const patient = `${appt.patient_first || ''} ${appt.patient_last || ''}`.trim() || 'Patient';
+                  return `
+                    <div style="background:#ffffff; border:1px solid #fde68a; border-radius:8px; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+                      <div style="font-size:0.85rem; color:#1e293b;">
+                        <strong>${heure}</strong> • ${escapeHtml(patient)}
+                        ${appt.patient_code ? ` <span style="color:#64748b;">(${escapeHtml(appt.patient_code)})</span>` : ''}
+                        ${appt.consultation_mode === 'TELECONSULTATION' ? ' • 🎥 Téléconsultation' : ''}
+                        ${appt.reminder_enabled ? ` • <i class="fas ${appt.reminder_sent_at ? 'fa-check' : 'fa-bell'}"></i> rappel ${appt.reminder_hours_before}h avant` : ''}
+                      </div>
+                      <div style="display:flex; gap:6px;">
+                        ${appt.consultation_mode === 'TELECONSULTATION' && appt.video_room_slug ? `
+                          <button class="btn btn-primary" style="font-size:0.72rem; padding:3px 9px; background:#0ea5e9; border-color:#0ea5e9;"
+                                  onclick="joinTeleconsultation(${safeJsArg(appt.video_room_slug)})">
+                            <i class="fas fa-video"></i> Rejoindre
+                          </button>
+                        ` : ''}
+                        <button class="btn btn-secondary" style="font-size:0.72rem; padding:3px 9px;"
+                                onclick="openReminderSettingsModal(${safeJsArg(appt.id)}, ${safeJsArg(patient)}, ${!!appt.reminder_enabled}, ${appt.reminder_hours_before}, ${safeJsArg(appt.reminder_channel)})">
+                          <i class="fas fa-bell"></i> Rappel
+                        </button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        })()}
       </div>
     </div>
   `;
