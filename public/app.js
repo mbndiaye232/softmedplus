@@ -1865,6 +1865,11 @@ async function renderTeleconsultations(container) {
           <span class="badge" style="background:${a.status === 'CONFIRMED' ? '#dcfce7' : '#fef3c7'}; color:${a.status === 'CONFIRMED' ? '#166534' : '#92400e'}; font-size:0.72rem; padding:4px 8px;">
             ${a.status === 'CONFIRMED' ? 'Confirmé' : a.status === 'PENDING_PAYMENT' ? 'Acompte en attente' : escapeHtml(a.status || '')}
           </span>
+          ${a.status === 'PENDING_PAYMENT' ? `
+            <button class="btn btn-secondary btn-sm" style="font-size:0.78rem;" onclick="confirmerRendezVous(${safeJsArg(a.id)})" title="Marquer comme réglé et confirmé">
+              <i class="fas fa-check"></i> Confirmer
+            </button>
+          ` : ''}
           ${a.video_room_slug && !estPassee ? `
             <button class="btn btn-primary btn-sm" style="background:#0ea5e9; border-color:#0ea5e9; font-size:0.78rem;" onclick="joinTeleconsultation(${safeJsArg(a.video_room_slug)})">
               <i class="fas fa-video"></i> Rejoindre
@@ -1911,6 +1916,21 @@ async function renderTeleconsultations(container) {
   `;
 }
 
+// Confirme un rendez-vous reste en attente de reglement : facture reglee hors
+// de l'application, acompte encaisse avant le rattachement, ou geste commercial.
+// Sans cette action, un tel rendez-vous restait « Acompte en attente » a vie et
+// ne recevait jamais son rappel, qui ne concerne que les rendez-vous confirmes.
+async function confirmerRendezVous(id) {
+  if (!confirm('Confirmer ce rendez-vous ? Il sera considéré comme réglé et son rappel pourra partir.')) return;
+  try {
+    await api.request(`/appointments/${id}`, { method: 'PUT', body: JSON.stringify({ status: 'CONFIRMED' }) });
+    showToast('Rendez-vous confirmé.', 'success');
+    await navigate(state.currentTab);
+  } catch (err) {
+    showToast('Confirmation impossible : ' + err.message, 'error');
+  }
+}
+
 function copierLienTeleconsultation(slug) {
   const lien = `https://meet.jit.si/${slug}`;
   navigator.clipboard.writeText(lien)
@@ -1950,6 +1970,11 @@ async function renderRappels(container) {
           <span class="badge" style="background:${etat.fond}; color:${etat.couleur}; font-size:0.72rem; padding:4px 8px;">
             <i class="fas ${etat.icone}"></i> ${etat.texte}
           </span>
+          ${a.status === 'PENDING_PAYMENT' ? `
+            <button class="btn btn-secondary btn-sm" style="font-size:0.78rem;" onclick="confirmerRendezVous(${safeJsArg(a.id)})" title="Sans confirmation, aucun rappel ne partira">
+              <i class="fas fa-check"></i> Confirmer
+            </button>
+          ` : ''}
           <button class="btn btn-secondary btn-sm" style="font-size:0.78rem;"
                   onclick="openReminderSettingsModal(${safeJsArg(a.id)}, ${safeJsArg(patient)}, ${!!a.reminder_enabled}, ${a.reminder_hours_before || 3}, ${safeJsArg(a.reminder_channel || 'SMS')})">
             <i class="fas fa-sliders"></i> Régler
@@ -6342,6 +6367,7 @@ async function deletePatientStatus(statusId) {
 let invoiceLines = [];
 let activePaymentInvoice = null;
 let activeBillingSubTab = 'invoices'; // 'invoices' or 'services'
+let rendezVousAFacturer = [];
 let currentServiceCategoryFilter = 'ALL';
 
 async function renderBilling(container) {
@@ -6349,14 +6375,20 @@ async function renderBilling(container) {
     activeBillingSubTab = 'invoices';
   }
 
-  const [invoices, patients, registers, insurances, services, practitioners] = await Promise.all([
+  const [invoices, patients, registers, insurances, services, practitioners, rdvBruts] = await Promise.all([
     api.request('/billing/invoices').catch(() => []),
     api.request('/patients').catch(() => []),
     api.request('/billing/cash-registers').catch(() => []),
     api.request('/billing/insurances').catch(() => []),
     api.request('/medical-services').catch(() => []),
-    api.request('/practitioners').catch(() => [])
+    api.request('/practitioners').catch(() => []),
+    api.request('/appointments').catch(() => [])
   ]);
+
+  // Rendez-vous encore en attente de reglement : ce sont eux qu'une facture peut
+  // solder. Sans ce rattachement, le paiement n'a aucun moyen de savoir quel
+  // rendez-vous confirmer, et celui-ci reste « Acompte en attente » indefiniment.
+  rendezVousAFacturer = (Array.isArray(rdvBruts) ? rdvBruts : []).filter(a => a.status === 'PENDING_PAYMENT');
 
   state.patients = patients;
 
@@ -6474,6 +6506,15 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
                 <option value="">-- Sélectionner Patient --</option>
                 ${patients.map(p => `<option value="${p.id}">${p.first_name} ${p.last_name} (${p.patient_code}) ${p.insurance_name ? `— [IPM: ${p.insurance_name}]` : ''}</option>`).join('')}
               </select>
+            </div>
+            <div class="form-group" id="inv-appointment-group" style="display:none;">
+              <label class="form-label">Rendez-vous à solder</label>
+              <select class="form-control" id="inv-appointment-id">
+                <option value="">-- Aucun rendez-vous rattaché --</option>
+              </select>
+              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:5px;">
+                Le règlement de cette facture confirmera automatiquement le rendez-vous choisi.
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">${t('insurance')}</label>
@@ -6595,6 +6636,18 @@ function renderBillingInvoicesContent(invoices, patients, registers, insurances,
 }
 
 function onInvoicePatientChange(patientId) {
+  const groupe = document.getElementById('inv-appointment-group');
+  const selectRdv = document.getElementById('inv-appointment-id');
+  if (groupe && selectRdv) {
+    const sesRdv = rendezVousAFacturer
+      .filter(a => a.patient_id === patientId)
+      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+    selectRdv.innerHTML = `<option value="">-- Aucun rendez-vous rattaché --</option>` +
+      sesRdv.map(a => `<option value="${a.id}">${formaterDateHeure(a.start_time)} — ${escapeHtml(a.service_name || 'Consultation')}${a.consultation_mode === 'TELECONSULTATION' ? ' (téléconsultation)' : ''}</option>`).join('');
+    groupe.style.display = sesRdv.length > 0 ? 'block' : 'none';
+    if (sesRdv.length > 0) selectRdv.value = sesRdv[0].id;
+  }
+
   const patient = (state.patients || []).find(p => p.id === patientId);
   const insuranceSelect = document.getElementById('inv-insurance-id');
   if (insuranceSelect) {
@@ -6958,6 +7011,7 @@ async function createInvoice(e) {
       method: 'POST',
       body: JSON.stringify({
         patient_id,
+        appointment_id: (document.getElementById('inv-appointment-id') || {}).value || null,
         insurance_company_id,
         discount_amount: 0,
         lines: invoiceLines
@@ -7260,7 +7314,13 @@ async function openPaymentModal(invoiceId, invoiceNumber, amountDue) {
   `;
 
   document.getElementById('pay-modal-title').innerText = `Règlement Facture ${invoiceNumber}`;
-  document.getElementById('pay-amount').value = amountDue;
+  const champMontant = document.getElementById('pay-amount');
+  champMontant.value = amountDue;
+  champMontant.max = amountDue;
+  const aide = document.getElementById('pay-amount-hint');
+  if (aide) {
+    aide.innerHTML = `Reste à payer : <strong>${parseFloat(amountDue).toLocaleString('fr-FR')} FCFA</strong>. Un montant inférieur est accepté : la facture passe en règlement partiel.`;
+  }
   document.getElementById('payment-simulation-box').style.display = 'none';
 
   document.getElementById('payment-modal').style.display = 'flex';
@@ -7288,6 +7348,16 @@ async function processPayment(e) {
   const methodVal = document.getElementById('pay-method-select').value;
   const amount = parseFloat(document.getElementById('pay-amount').value);
   const reference = document.getElementById('pay-ref').value;
+
+  const duVal = activePaymentInvoice ? parseFloat(activePaymentInvoice.amount) : 0;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showToast('Saisissez un montant supérieur à zéro.', 'error');
+    return;
+  }
+  if (amount > duVal + 0.01) {
+    showToast(`Le montant dépasse le reste à payer (${duVal.toLocaleString('fr-FR')} FCFA).`, 'error');
+    return;
+  }
 
   if (methodVal.startsWith('ONLINE:')) {
     // 1. Initialize online checkout payment
@@ -12080,7 +12150,11 @@ function renderAppLayout() {
         <form onsubmit="processPayment(event)">
           <div class="form-group">
             <label class="form-label">Montant à régler (FCFA)</label>
-            <input type="number" class="form-control" id="pay-amount" required readonly />
+            <!-- Le champ etait en lecture seule : la caisse ne pouvait encaisser
+                 que la totalite, alors que le backend sait enregistrer un
+                 reglement partiel et passe la facture en PARTIALLY_PAID. -->
+            <input type="number" class="form-control" id="pay-amount" required min="1" step="any" />
+            <div id="pay-amount-hint" style="font-size:0.78rem; color:var(--text-muted); margin-top:5px;"></div>
           </div>
           <div class="form-group">
             <label class="form-label">${t('payMethod')}</label>
