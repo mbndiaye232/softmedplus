@@ -13,6 +13,14 @@ main = "worker.js"
 # bloc [previews] pointant sur des ressources distinctes, qui n'existent pas.
 preview_urls = false
 
+# Reveil du backend toutes les 10 minutes, de 6h a 21h UTC. Sur le plan gratuit
+# de Render le service s'endort apres 15 minutes d'inactivite, et un service
+# endormi n'envoie aucun rappel de rendez-vous. La plage est bornee a dessein :
+# un maintien 24h/24 consommerait presque toutes les 750 heures mensuelles
+# offertes, sans marge pour un second service.
+[triggers]
+crons = ["*/10 6-21 * * *"]
+
 [assets]
 directory = "./public"
 # Toute adresse inconnue renvoie index.html : l'application gere ses propres
