@@ -265,7 +265,18 @@ const getAppointments = async (req, res) => {
     if (start_date && end_date) {
       params.push(start_date);
       params.push(end_date);
-      queryStr += ` AND a.time_slot && tstzrange($${params.length - 1}, $${params.length})`;
+      // Une journee se demande avec start_date = end_date. Or
+      // tstzrange('2026-09-26', '2026-09-26') est un intervalle VIDE : aucun
+      // rendez-vous ne le chevauche, et la journee paraissait donc totalement
+      // libre. Quand la borne de fin est une date sans heure, elle couvre
+      // desormais la journee entiere ; un horodatage complet reste pris tel quel.
+      queryStr += ` AND a.time_slot && tstzrange(
+        $${params.length - 1}::timestamptz,
+        CASE WHEN $${params.length} ~ '^\\d{4}-\\d{2}-\\d{2}$'
+             THEN ($${params.length}::date + INTERVAL '1 day')::timestamptz
+             ELSE $${params.length}::timestamptz
+        END
+      )`;
     }
 
     queryStr += ` ORDER BY start_time ASC`;
