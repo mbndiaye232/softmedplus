@@ -11,6 +11,24 @@
 // L'adresse du backend se configure par la variable BACKEND_URL du Worker, et
 // non dans ce fichier.
 export default {
+  // Reveil periodique du backend. Sur le plan gratuit de Render, le service
+  // s'endort apres 15 minutes sans trafic - et un service endormi n'execute
+  // aucune tache planifiee : les rappels de rendez-vous ne partaient donc que
+  // si quelqu'un utilisait l'application au bon moment.
+  //
+  // La plage horaire de la tache cron est volontairement limitee (voir
+  // wrangler.toml) : maintenir le service eveille 24h/24 consommerait la
+  // quasi-totalite des 750 heures mensuelles offertes par Render.
+  async scheduled(event, env, ctx) {
+    const backend = (env.BACKEND_URL || '').replace(/\/$/, '');
+    if (!backend) return;
+    ctx.waitUntil(
+      fetch(`${backend}/`, { method: 'GET' })
+        .then((r) => console.log(`Reveil du backend : ${r.status}`))
+        .catch((e) => console.log(`Reveil du backend impossible : ${e}`))
+    );
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
