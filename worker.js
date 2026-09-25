@@ -33,6 +33,15 @@ export default {
     // La requete est relayee telle quelle : methode, corps, en-tetes, cookies.
     // La reponse repart telle quelle : c'est ainsi que le Set-Cookie du backend
     // se rattache au domaine public, et non a celui de Render.
-    return fetch(new Request(cible, request));
+    try {
+      return await fetch(new Request(cible, request));
+    } catch (err) {
+      // Backend injoignable : l'application attend du JSON sur /api, une page
+      // d'erreur HTML ne lui apprendrait rien.
+      return Response.json(
+        { error: "Le serveur d'application est injoignable. Réessayez dans un instant.", detail: String(err) },
+        { status: 502 }
+      );
+    }
   },
 };
