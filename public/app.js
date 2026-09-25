@@ -10627,6 +10627,9 @@ function renderAuthLayout() {
           <button class="btn btn-success" onclick="openPublicBookingPortal()" style="background:#10b981; border-color:#10b981; color:#fff; font-weight:700; padding:8px 16px; box-shadow:0 4px 12px rgba(16,185,129,0.25);">
             <i class="fas fa-calendar-check"></i> ${state.currentLang === 'fr' ? 'Prendre Rendez-vous' : 'حجز موعد'}
           </button>
+          <button class="btn btn-secondary" onclick="openPatientPortal()" style="font-weight:700;">
+            <i class="fas fa-folder-open"></i> Mon Dossier
+          </button>
           <button class="btn btn-secondary" onclick="openAuthModal('login')">${t('homeCTAConnect')}</button>
           <button class="btn btn-primary" onclick="openAuthModal('signup')">${t('homeCTASignup')}</button>
         </div>
@@ -10639,6 +10642,9 @@ function renderAuthLayout() {
         <div class="hero-actions" style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
           <button class="btn btn-success btn-lg" onclick="openPublicBookingPortal()" style="background:#10b981; border-color:#10b981; color:#fff; font-weight:700; padding:12px 24px; box-shadow:0 8px 25px rgba(16, 185, 129, 0.35);">
             <i class="fas fa-calendar-alt"></i> ${state.currentLang === 'fr' ? 'Prendre Rendez-vous en Ligne' : 'حجز موعد عبر الإنترنت'}
+          </button>
+          <button class="btn btn-primary btn-lg" onclick="openPatientPortal()" style="padding:12px 24px; font-weight:700;">
+            <i class="fas fa-folder-open"></i> Mon Dossier Patient
           </button>
           <button class="btn btn-primary btn-lg" onclick="openAuthModal('login')"><i class="fas fa-sign-in-alt"></i> ${t('homeCTAConnect')}</button>
           <button class="btn btn-secondary btn-lg" onclick="openAuthModal('signup')"><i class="fas fa-plus-circle"></i> ${t('homeCTASignup')}</button>
@@ -12898,7 +12904,31 @@ async function openPublicBookingPortal(slug) {
   }
 }
 
-function openSelectClinicModal(clinics) {
+// Ouvre le portail patient « Mon Dossier ». Il n'etait atteignable qu'en passant
+// par la prise de rendez-vous puis la fiche d'une structure : invisible depuis
+// l'accueil, donc introuvable pour un patient qui vient consulter son dossier.
+async function openPatientPortal(slug) {
+  if (slug) {
+    renderPatientPortalLogin(slug);
+    return;
+  }
+  try {
+    const clinics = await api.request('/public/clinics');
+    if (Array.isArray(clinics) && clinics.length === 1) {
+      renderPatientPortalLogin(clinics[0].slug);
+    } else if (Array.isArray(clinics) && clinics.length > 1) {
+      openSelectClinicModal(clinics, 'portal');
+    } else {
+      showToast("Aucune structure sanitaire n'est disponible pour le moment.", 'error');
+    }
+  } catch (err) {
+    showToast('Impossible de charger la liste des structures : ' + err.message, 'error');
+  }
+}
+
+// destination : 'booking' pour la prise de rendez-vous, 'portal' pour le dossier.
+function openSelectClinicModal(clinics, destination = 'booking') {
+  const versPortail = destination === 'portal';
   let modal = document.getElementById('select-clinic-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -12911,22 +12941,22 @@ function openSelectClinicModal(clinics) {
     <div class="modal-container" style="width:520px; max-width:95%; animation: modalFadeIn 0.3s ease; padding:25px;">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:16px;">
         <h4 style="margin:0; color:var(--text-primary); font-size:1.15rem; font-weight:700;">
-          <i class="fas fa-hospital" style="color:var(--primary);"></i> Choisissez votre Structure Sanitaire
+          <i class="fas fa-hospital" style="color:var(--primary);"></i> ${versPortail ? 'Où êtes-vous suivi ?' : 'Choisissez votre Structure Sanitaire'}
         </h4>
         <button onclick="document.getElementById('select-clinic-modal').style.display='none'" style="background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer;">&times;</button>
       </div>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Sélectionnez la structure sanitaire où vous souhaitez consulter :</p>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">${versPortail ? 'Sélectionnez la structure sanitaire qui suit votre dossier :' : 'Sélectionnez la structure sanitaire où vous souhaitez consulter :'}</p>
       <div style="display:flex; flex-direction:column; gap:10px; max-height:360px; overflow-y:auto;">
         ${clinics.map(c => `
-          <div onclick="document.getElementById('select-clinic-modal').style.display='none'; openPublicBookingPortal('${c.slug}')" style="border:1px solid var(--border-color); background:var(--bg-surface); padding:14px 18px; border-radius:12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
+          <div onclick="document.getElementById('select-clinic-modal').style.display='none'; ${versPortail ? 'openPatientPortal' : 'openPublicBookingPortal'}('${c.slug}')" style="border:1px solid var(--border-color); background:var(--bg-surface); padding:14px 18px; border-radius:12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; transition:all 0.2s;" onmouseover="this.style.borderColor='var(--primary)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border-color)'; this.style.transform='translateY(0)'">
             <div>
               <div style="font-weight:700; font-size:0.95rem; color:var(--text-primary);">${c.name}</div>
               <div style="font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
                 <i class="fas fa-map-marker-alt" style="color:var(--primary); font-size:0.75rem;"></i> ${c.address || 'Sénégal'} ${c.phone_number ? `• <i class="fas fa-phone-alt" style="font-size:0.75rem;"></i> ${c.phone_number}` : ''}
               </div>
             </div>
-            <span class="badge" style="background:#10b981; color:#fff; font-size:0.75rem; padding:5px 10px; border-radius:8px;">
-              Prendre RDV <i class="fas fa-chevron-right" style="font-size:0.65rem;"></i>
+            <span class="badge" style="background:${versPortail ? '#2563eb' : '#10b981'}; color:#fff; font-size:0.75rem; padding:5px 10px; border-radius:8px;">
+              ${versPortail ? 'Mon Dossier' : 'Prendre RDV'} <i class="fas fa-chevron-right" style="font-size:0.65rem;"></i>
             </span>
           </div>
         `).join('')}
