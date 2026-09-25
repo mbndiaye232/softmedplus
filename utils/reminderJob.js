@@ -38,7 +38,10 @@ async function sendDueAppointmentReminders() {
       const doctorLabel = appt.doc_first ? `${appt.doc_title || 'Dr.'} ${appt.doc_first} ${appt.doc_last}` : 'votre praticien';
       let message = `SoftMed - Rappel : vous avez rendez-vous avec ${doctorLabel} le ${when} (${appt.tenant_name}).`;
       if (appt.consultation_mode === 'TELECONSULTATION' && appt.video_room_slug) {
-        message += ` Téléconsultation, rejoignez via : https://meet.jit.si/${appt.video_room_slug}`;
+        // Langue forcee en francais : sans ce parametre Jitsi suit la langue du
+        // telephone ou la geolocalisation, et le patient tombe sur une salle
+        // dans une langue qu'il ne lit pas.
+        message += ` Téléconsultation, rejoignez via : https://meet.jit.si/${appt.video_room_slug}#config.defaultLanguage=%22fr%22`;
       }
 
       try {

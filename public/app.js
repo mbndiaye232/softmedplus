@@ -1542,12 +1542,19 @@ function resetAgendaToday() {
 // Téléconsultation vidéo (prototype : salle meet.jit.si publique)
 // ----------------------------------------------------------------------------
 
+// Sans ce parametre, Jitsi choisit la langue d'apres le navigateur ou la
+// geolocalisation : un patient s'est retrouve devant une salle en espagnol.
+// Verifie sur meet.jit.si : l'ecran d'accueil passe en francais.
+function lienTeleconsultation(videoRoomSlug) {
+  return `https://meet.jit.si/${videoRoomSlug}#config.defaultLanguage=%22fr%22`;
+}
+
 function joinTeleconsultation(videoRoomSlug) {
   if (!videoRoomSlug) {
     showToast("Aucune salle de téléconsultation associée à ce rendez-vous", 'warning');
     return;
   }
-  window.open(`https://meet.jit.si/${videoRoomSlug}`, '_blank', 'noopener');
+  window.open(lienTeleconsultation(videoRoomSlug), '_blank', 'noopener');
 }
 
 // ----------------------------------------------------------------------------
@@ -1932,7 +1939,7 @@ async function confirmerRendezVous(id) {
 }
 
 function copierLienTeleconsultation(slug) {
-  const lien = `https://meet.jit.si/${slug}`;
+  const lien = lienTeleconsultation(slug);
   navigator.clipboard.writeText(lien)
     .then(() => showToast('Lien de la salle vidéo copié : ' + lien, 'success'))
     .catch(() => showToast('Lien : ' + lien, 'info'));
