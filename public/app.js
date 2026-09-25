@@ -1542,11 +1542,17 @@ function resetAgendaToday() {
 // Téléconsultation vidéo (prototype : salle meet.jit.si publique)
 // ----------------------------------------------------------------------------
 
-// Sans ce parametre, Jitsi choisit la langue d'apres le navigateur ou la
-// geolocalisation : un patient s'est retrouve devant une salle en espagnol.
-// Verifie sur meet.jit.si : l'ecran d'accueil passe en francais.
+// Jitsi choisit sinon la langue d'apres le navigateur : un patient s'est
+// retrouve devant une salle en espagnol.
+//
+// Deux mecanismes, mesures sur meet.jit.si : le parametre ?lang= fait autorite
+// et l'emporte sur la langue deja memorisee par le navigateur (?lang=es
+// reproduit fidelement l'ecran espagnol constate), tandis que le fragment
+// #config.defaultLanguage ne s'applique qu'a defaut de preference enregistree.
+// Les deux sont poses : le parametre pour trancher, le fragment pour les
+// instances qui n'honorent que lui.
 function lienTeleconsultation(videoRoomSlug) {
-  return `https://meet.jit.si/${videoRoomSlug}#config.defaultLanguage=%22fr%22`;
+  return `https://meet.jit.si/${videoRoomSlug}?lang=fr#config.defaultLanguage=%22fr%22`;
 }
 
 function joinTeleconsultation(videoRoomSlug) {
