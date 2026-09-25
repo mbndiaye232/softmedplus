@@ -1769,9 +1769,6 @@ function mettreEnEvidence(element) {
 }
 
 async function allerVersModule(cle) {
-  const modal = document.getElementById('nouveautes-modal');
-  if (modal) modal.style.display = 'none';
-
   if (cle === 'teleconsultation' || cle === 'rappels') {
     await navigate('agenda');
     await new Promise((r) => setTimeout(r, 700));
@@ -1808,60 +1805,6 @@ async function allerVersModule(cle) {
     // Route deja prevue par le routeur de demarrage : /dossier/<slug>
     if (slug) window.open(`${window.location.origin}/dossier/${encodeURIComponent(slug)}`, '_blank', 'noopener');
   }
-}
-
-function openNouveautesModal() {
-  const slug = (state.tenant && state.tenant.slug) || '';
-  const modules = [
-    ['teleconsultation', 'fa-video', '#0ea5e9', 'Téléconsultation vidéo', "Un champ « Mode de consultation » dans le formulaire de rendez-vous de l'agenda. Choisissez « Téléconsultation » : une salle vidéo est créée, et un bouton « Rejoindre » apparaît sur le rendez-vous.", 'Ouvrir le formulaire'],
-    ['rappels', 'fa-bell', '#f59e0b', 'Rappels SMS / WhatsApp', "Sous le mode de consultation : activez le rappel, choisissez le délai et le canal. L'envoi part automatiquement à l'échéance, pour les rendez-vous confirmés.", 'Régler un rappel'],
-    ['portail', 'fa-folder-open', '#2563eb', 'Portail patient « Mon Dossier »', "Vos patients consultent leurs rendez-vous, ordonnances et analyses avec leur code patient et un mot de passe qu'ils créent eux-mêmes.", 'Ouvrir le portail'],
-    ['interactions', 'fa-triangle-exclamation', '#dc2626', 'Alertes d\'interaction médicamenteuse', "Dans l'ordonnance d'une consultation : dès qu'un deuxième médicament est ajouté, les interactions et les allergies du patient sont signalées.", 'Aller aux dossiers'],
-    ['copilote', 'fa-wand-magic-sparkles', '#7c3aed', 'Copilote administratif', 'En bas du tableau de bord : créneaux sous-utilisés de la semaine à venir et factures à relancer en priorité.', 'Voir sur le tableau de bord'],
-  ];
-
-  let modal = document.getElementById('nouveautes-modal');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'nouveautes-modal';
-    modal.className = 'modal-overlay';
-    document.body.appendChild(modal);
-  }
-  modal.style.display = 'flex';
-  modal.innerHTML = `
-    <div class="modal-container" style="width:640px; max-width:95%; padding:24px; max-height:88vh; overflow-y:auto;">
-      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:12px; margin-bottom:8px;">
-        <h4 style="margin:0; font-size:1.15rem; font-weight:800; color:var(--text-primary);">
-          <i class="fas fa-star" style="color:#f59e0b;"></i> Où trouver les nouveaux modules
-        </h4>
-        <button onclick="document.getElementById('nouveautes-modal').style.display='none'" style="background:none; border:none; color:var(--text-muted); font-size:1.5rem; cursor:pointer;">&times;</button>
-      </div>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin:10px 0 16px;">
-        Ces modules s'ajoutent aux écrans existants plutôt que de créer de nouvelles rubriques. Voici où ils se trouvent.
-      </p>
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        ${modules.map(([cle, icone, couleur, titre, texte, action]) => `
-          <div style="border:1px solid var(--border-color); border-radius:12px; padding:14px 16px; background:var(--bg-surface);">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
-              <span style="width:32px; height:32px; border-radius:9px; background:${couleur}1a; color:${couleur}; display:flex; align-items:center; justify-content:center;">
-                <i class="fas ${icone}"></i>
-              </span>
-              <strong style="font-size:0.95rem; color:var(--text-primary);">${titre}</strong>
-            </div>
-            <div style="font-size:0.84rem; color:var(--text-muted); line-height:1.5; margin-bottom:10px;">${texte}</div>
-            <button class="btn btn-secondary btn-sm" style="font-size:0.78rem; font-weight:700;" onclick="allerVersModule('${cle}')">
-              ${action} <i class="fas fa-arrow-right" style="font-size:0.7rem;"></i>
-            </button>
-          </div>
-        `).join('')}
-      </div>
-      ${slug ? `
-        <div style="margin-top:14px; font-size:0.78rem; color:var(--text-muted);">
-          Lien du portail patient à transmettre : <strong>${escapeHtml(window.location.origin)}/dossier/${escapeHtml(slug)}</strong>
-        </div>
-      ` : ''}
-    </div>
-  `;
 }
 
 // ----------------------------------------------------------------------------
@@ -11670,11 +11613,6 @@ function renderAppLayout() {
         <header class="header">
           <div class="header-title" id="header-page-title">${t('dashboard')}</div>
           <div class="header-actions" style="display:flex; align-items:center; gap:10px;">
-            <!-- Guide des modules recents : chacun vit a l'interieur d'un ecran
-                 existant, donc invisible pour qui ne sait pas ou regarder. -->
-            <button class="btn btn-secondary btn-sm" onclick="openNouveautesModal()" style="display:flex; align-items:center; gap:7px; font-weight:700; padding:7px 12px; border-radius:8px; cursor:pointer;" title="Où trouver la téléconsultation, le portail patient, les rappels et les alertes IA">
-              <i class="fas fa-star" style="color:#f59e0b;"></i> <span>Nouveautés</span>
-            </button>
             <!-- AI Clinical Voice Copilot Global Launcher -->
             <button class="btn btn-primary btn-sm" onclick="openAICopilotModal()" style="display:flex; align-items:center; gap:8px; background:linear-gradient(135deg, #1e40af, #3b82f6); border:none; font-weight:700; padding:7px 14px; border-radius:8px; box-shadow:0 2px 6px rgba(37,99,235,0.25); cursor:pointer;" title="Ouvrir l'Assistant Vocal & Copilote Médical IA">
               <i class="fas fa-robot"></i> <i class="fas fa-microphone"></i> <span>Copilote IA Vocal</span>
