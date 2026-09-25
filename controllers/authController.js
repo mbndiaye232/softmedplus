@@ -204,19 +204,20 @@ const registerTenant = async (req, res) => {
       ]
     );
 
-    // E. Create default practitioner for the clinic
-    const practitionerId = crypto.randomUUID();
-    await client.query(
-      `INSERT INTO practitioners (id, tenant_id, user_id, first_name, last_name, specialty_name, license_number, color_code, status, is_active)
-       VALUES ($1, $2, $3, $4, $5, 'Médecine Générale', 'LIC-001', '#4A90E2', 'Interne', true)`,
-      [practitionerId, tenantId, userId, first_name, last_name]
-    );
+    // E. Aucun praticien n'est cree automatiquement. L'inscription en creait un
+    // a partir de l'administrateur, avec la specialite « Médecine Générale » et
+    // la licence « LIC-001 » : un responsable administratif se retrouvait donc
+    // inscrit comme medecin, visible dans l'agenda et selectionnable pour une
+    // consultation. La structure declare ses praticiens depuis l'ecran
+    // « Structure & Équipe Médicale ».
 
     // F. Create default Consultation medical service
+    // Sans praticien rattache (la colonne l'autorise) : il sera choisi lors de
+    // la prise de rendez-vous, ou affecte a la prestation plus tard.
     await client.query(
-      `INSERT INTO medical_services (id, tenant_id, code, name, duration_minutes, price, deposit_amount, practitioner_id, is_active)
-       VALUES ($1, $2, 'CS-GEN', 'Consultation Générale', 30, 15000.00, 3000.00, $3, true)`,
-      [crypto.randomUUID(), tenantId, practitionerId]
+      `INSERT INTO medical_services (id, tenant_id, code, name, duration_minutes, price, deposit_amount, is_active)
+       VALUES ($1, $2, 'CS-GEN', 'Consultation Générale', 30, 15000.00, 3000.00, true)`,
+      [crypto.randomUUID(), tenantId]
     );
 
     // G. Seed Default Patient Statuses
