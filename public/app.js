@@ -6,6 +6,9 @@ const i18n = {
     appName: "SoftMed",
     dashboard: "Tableau de Bord",
     agenda: "Agenda & RDV",
+    teleconsultations: "Téléconsultations",
+    rappels: "Rappels de RDV",
+    copilote: "Copilote Administratif",
     patients: "Patients & DPI",
     billing: "Caisse & Facturation",
     insurances: "Organismes IPM & Assurances",
@@ -189,6 +192,9 @@ const i18n = {
     appName: "SoftMed",
     dashboard: "لوحة التحكم",
     agenda: "الأجندة والمواعيد",
+    teleconsultations: "الاستشارات عن بعد",
+    rappels: "تذكيرات المواعيد",
+    copilote: "المساعد الإداري",
     patients: "المرضى والملف الطبي",
     billing: "الخزينة والفواتير",
     insurances: "هيئات التأمين و IPM",
@@ -880,6 +886,15 @@ async function navigate(tab) {
         break;
       case 'agenda':
         await renderAgenda(body);
+        break;
+      case 'teleconsultations':
+        await renderTeleconsultations(body);
+        break;
+      case 'rappels':
+        await renderRappels(body);
+        break;
+      case 'copilote':
+        await renderCopiloteAdmin(body);
         break;
       case 'patients':
         await renderPatients(body);
@@ -1847,6 +1862,210 @@ function openNouveautesModal() {
       ` : ''}
     </div>
   `;
+}
+
+// ----------------------------------------------------------------------------
+// Ecrans dedies des modules recents
+// ----------------------------------------------------------------------------
+// Ces modules vivaient a l'interieur d'ecrans existants - un champ du formulaire
+// de rendez-vous, une carte en bas du tableau de bord - et passaient donc pour
+// absents. Ils ont desormais leur entree dans le menu.
+
+function ouvrirPortailPatientOnglet() {
+  const slug = state.tenant && state.tenant.slug;
+  if (!slug) {
+    showToast("Aucune structure active : impossible d'ouvrir le portail.", 'error');
+    return;
+  }
+  window.open(`${window.location.origin}/dossier/${encodeURIComponent(slug)}`, '_blank', 'noopener');
+}
+
+function formaterDateHeure(iso) {
+  return new Date(iso).toLocaleString('fr-FR', {
+    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function carteVide(icone, titre, texte, actionHtml = '') {
+  return `
+    <div class="card" style="text-align:center; padding:40px 20px;">
+      <i class="fas ${icone}" style="font-size:2.2rem; color:var(--text-muted); opacity:0.5;"></i>
+      <div style="font-weight:700; margin-top:12px; color:var(--text-primary);">${titre}</div>
+      <div style="font-size:0.86rem; color:var(--text-muted); margin-top:6px; max-width:520px; margin-left:auto; margin-right:auto; line-height:1.5;">${texte}</div>
+      ${actionHtml ? `<div style="margin-top:16px;">${actionHtml}</div>` : ''}
+    </div>
+  `;
+}
+
+async function renderTeleconsultations(container) {
+  const appts = await api.request('/appointments').catch(() => []);
+  const video = (Array.isArray(appts) ? appts : []).filter((a) => a.consultation_mode === 'TELECONSULTATION');
+  const maintenant = Date.now();
+  const aVenir = video.filter((a) => new Date(a.start_time).getTime() >= maintenant).sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+  const passees = video.filter((a) => new Date(a.start_time).getTime() < maintenant).sort((a, b) => new Date(b.start_time) - new Date(a.start_time)).slice(0, 10);
+
+  const ligne = (a, estPassee) => {
+    const patient = `${a.patient_first || ''} ${a.patient_last || ''}`.trim() || 'Patient';
+    const praticien = `${a.doc_title || 'Dr.'} ${a.doc_first || ''} ${a.doc_last || ''}`.trim();
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; border:1px solid var(--border-color); border-radius:10px; background:var(--bg-surface); ${estPassee ? 'opacity:0.7;' : ''}">
+        <div>
+          <div style="font-weight:700; color:var(--text-primary); font-size:0.92rem;">
+            ${escapeHtml(patient)} ${a.patient_code ? `<span style="color:var(--text-muted); font-weight:500;">(${escapeHtml(a.patient_code)})</span>` : ''}
+          </div>
+          <div style="font-size:0.82rem; color:var(--text-muted); margin-top:3px;">
+            <i class="fas fa-clock"></i> ${formaterDateHeure(a.start_time)} • ${escapeHtml(praticien)}
+            ${a.reminder_enabled ? ` • <i class="fas ${a.reminder_sent_at ? 'fa-check' : 'fa-bell'}"></i> rappel ${a.reminder_hours_before}h avant` : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="badge" style="background:${a.status === 'CONFIRMED' ? '#dcfce7' : '#fef3c7'}; color:${a.status === 'CONFIRMED' ? '#166534' : '#92400e'}; font-size:0.72rem; padding:4px 8px;">
+            ${a.status === 'CONFIRMED' ? 'Confirmé' : a.status === 'PENDING_PAYMENT' ? 'Acompte en attente' : escapeHtml(a.status || '')}
+          </span>
+          ${a.video_room_slug && !estPassee ? `
+            <button class="btn btn-primary btn-sm" style="background:#0ea5e9; border-color:#0ea5e9; font-size:0.78rem;" onclick="joinTeleconsultation(${safeJsArg(a.video_room_slug)})">
+              <i class="fas fa-video"></i> Rejoindre
+            </button>
+            <button class="btn btn-secondary btn-sm" style="font-size:0.78rem;" onclick="copierLienTeleconsultation(${safeJsArg(a.video_room_slug)})" title="Copier le lien à envoyer au patient">
+              <i class="fas fa-link"></i>
+            </button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  };
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <span><i class="fas fa-video" style="color:#0ea5e9;"></i> Téléconsultations vidéo</span>
+        <button class="btn btn-primary btn-sm" onclick="allerVersModule('teleconsultation')">
+          <i class="fas fa-plus"></i> Planifier une téléconsultation
+        </button>
+      </div>
+      <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
+        La salle vidéo est créée à la prise du rendez-vous. Le lien s'ouvre sur <strong>meet.jit.si</strong> — aucun logiciel à installer, ni pour vous ni pour le patient.
+      </div>
+    </div>
+
+    ${aVenir.length === 0
+      ? carteVide('fa-video-slash', 'Aucune téléconsultation à venir',
+          "Pour en créer une, choisissez « Téléconsultation » dans le champ « Mode de consultation » du formulaire de rendez-vous.",
+          `<button class="btn btn-primary" onclick="allerVersModule('teleconsultation')"><i class="fas fa-plus"></i> Planifier une téléconsultation</button>`)
+      : `
+        <div class="card" style="margin-bottom:18px;">
+          <div class="card-title"><i class="fas fa-calendar-check" style="color:#10b981;"></i> À venir (${aVenir.length})</div>
+          <div style="display:flex; flex-direction:column; gap:10px;">${aVenir.map((a) => ligne(a, false)).join('')}</div>
+        </div>
+      `}
+
+    ${passees.length > 0 ? `
+      <div class="card">
+        <div class="card-title"><i class="fas fa-clock-rotate-left" style="color:#64748b;"></i> Passées (${passees.length})</div>
+        <div style="display:flex; flex-direction:column; gap:10px;">${passees.map((a) => ligne(a, true)).join('')}</div>
+      </div>
+    ` : ''}
+  `;
+}
+
+function copierLienTeleconsultation(slug) {
+  const lien = `https://meet.jit.si/${slug}`;
+  navigator.clipboard.writeText(lien)
+    .then(() => showToast('Lien de la salle vidéo copié : ' + lien, 'success'))
+    .catch(() => showToast('Lien : ' + lien, 'info'));
+}
+
+async function renderRappels(container) {
+  const appts = await api.request('/appointments').catch(() => []);
+  const maintenant = Date.now();
+  const aVenir = (Array.isArray(appts) ? appts : [])
+    .filter((a) => new Date(a.start_time).getTime() >= maintenant)
+    .sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+
+  const envoyes = aVenir.filter((a) => a.reminder_sent_at).length;
+  const programmes = aVenir.filter((a) => a.reminder_enabled && !a.reminder_sent_at).length;
+  const sansRappel = aVenir.filter((a) => !a.reminder_enabled).length;
+
+  const ligne = (a) => {
+    const patient = `${a.patient_first || ''} ${a.patient_last || ''}`.trim() || 'Patient';
+    const etat = a.reminder_sent_at
+      ? { texte: 'Envoyé', fond: '#dcfce7', couleur: '#166534', icone: 'fa-check' }
+      : a.reminder_enabled
+        ? { texte: `Programmé ${a.reminder_hours_before}h avant`, fond: '#eff6ff', couleur: '#1d4ed8', icone: 'fa-clock' }
+        : { texte: 'Désactivé', fond: '#f1f5f9', couleur: '#64748b', icone: 'fa-bell-slash' };
+    return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; border:1px solid var(--border-color); border-radius:10px; background:var(--bg-surface);">
+        <div>
+          <div style="font-weight:700; color:var(--text-primary); font-size:0.92rem;">${escapeHtml(patient)}</div>
+          <div style="font-size:0.82rem; color:var(--text-muted); margin-top:3px;">
+            <i class="fas fa-clock"></i> ${formaterDateHeure(a.start_time)}
+            ${a.reminder_enabled ? ` • ${a.reminder_channel === 'WHATSAPP' ? 'WhatsApp' : 'SMS'}` : ''}
+            ${a.status !== 'CONFIRMED' ? ' • <span style="color:#b45309;">rendez-vous non confirmé</span>' : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="badge" style="background:${etat.fond}; color:${etat.couleur}; font-size:0.72rem; padding:4px 8px;">
+            <i class="fas ${etat.icone}"></i> ${etat.texte}
+          </span>
+          <button class="btn btn-secondary btn-sm" style="font-size:0.78rem;"
+                  onclick="openReminderSettingsModal(${safeJsArg(a.id)}, ${safeJsArg(patient)}, ${!!a.reminder_enabled}, ${a.reminder_hours_before || 3}, ${safeJsArg(a.reminder_channel || 'SMS')})">
+            <i class="fas fa-sliders"></i> Régler
+          </button>
+        </div>
+      </div>
+    `;
+  };
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-title"><i class="fas fa-bell" style="color:#f59e0b;"></i> Rappels automatiques de rendez-vous</div>
+      <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.5; margin-bottom:14px;">
+        Le rappel part automatiquement à l'échéance choisie, par SMS ou WhatsApp.
+        <strong>Seuls les rendez-vous confirmés sont rappelés</strong> : un rendez-vous en attente d'acompte n'en reçoit pas.
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:12px;">
+        <div style="border:1px solid #bbf7d0; background:#f0fdf4; border-radius:10px; padding:12px;">
+          <div style="font-size:1.5rem; font-weight:800; color:#166534;">${envoyes}</div>
+          <div style="font-size:0.78rem; color:#166534;">déjà envoyés</div>
+        </div>
+        <div style="border:1px solid #bfdbfe; background:#eff6ff; border-radius:10px; padding:12px;">
+          <div style="font-size:1.5rem; font-weight:800; color:#1d4ed8;">${programmes}</div>
+          <div style="font-size:0.78rem; color:#1d4ed8;">programmés</div>
+        </div>
+        <div style="border:1px solid var(--border-color); background:var(--bg-surface); border-radius:10px; padding:12px;">
+          <div style="font-size:1.5rem; font-weight:800; color:var(--text-muted);">${sansRappel}</div>
+          <div style="font-size:0.78rem; color:var(--text-muted);">sans rappel</div>
+        </div>
+      </div>
+    </div>
+
+    ${aVenir.length === 0
+      ? carteVide('fa-bell-slash', 'Aucun rendez-vous à venir',
+          "Les rappels se règlent à la prise du rendez-vous, sous le mode de consultation, ou depuis cet écran une fois le rendez-vous créé.",
+          `<button class="btn btn-primary" onclick="navigate('agenda')"><i class="fas fa-calendar-plus"></i> Aller à l'agenda</button>`)
+      : `
+        <div class="card">
+          <div class="card-title"><i class="fas fa-list-check"></i> Rendez-vous à venir (${aVenir.length})</div>
+          <div style="display:flex; flex-direction:column; gap:10px;">${aVenir.map(ligne).join('')}</div>
+        </div>
+      `}
+  `;
+}
+
+async function renderCopiloteAdmin(container) {
+  // Reutilise la carte du tableau de bord : meme identifiant, meme chargement.
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:18px;">
+      <div class="card-title"><i class="fas fa-wand-magic-sparkles" style="color:#7c3aed;"></i> Copilote administratif</div>
+      <div style="font-size:0.85rem; color:var(--text-muted); line-height:1.5;">
+        Analyse de la semaine à venir : créneaux que vous pourriez remplir, et factures à relancer en priorité.
+      </div>
+    </div>
+    <div class="card" id="admin-copilot-card">
+      <div style="text-align:center; padding:30px;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--text-muted);"></i></div>
+    </div>
+  `;
+  await loadAdminCopilotInsights();
 }
 
 // ----------------------------------------------------------------------------
@@ -11365,7 +11584,24 @@ function renderAppLayout() {
             <a class="menu-link"><i class="fas fa-calendar-alt"></i> <span>${t('agenda')}</span></a>
           </li>
 
-          <!-- 2. PÔLE MÉDICAL & SOINS -->
+          <!-- 2. TÉLÉCONSULTATION & PATIENTS À DISTANCE -->
+          <div class="sidebar-section-header">
+            <i class="fas fa-video"></i> <span>Téléconsultation & Patients</span>
+          </div>
+          <li class="menu-item" data-tab="teleconsultations" onclick="navigate('teleconsultations')">
+            <a class="menu-link"><i class="fas fa-video"></i> <span>${t('teleconsultations')}</span></a>
+          </li>
+          <li class="menu-item" data-tab="rappels" onclick="navigate('rappels')">
+            <a class="menu-link"><i class="fas fa-bell"></i> <span>${t('rappels')}</span></a>
+          </li>
+          <li class="menu-item" onclick="ouvrirPortailPatientOnglet()">
+            <a class="menu-link"><i class="fas fa-folder-open"></i> <span>Portail Patient</span> <i class="fas fa-arrow-up-right-from-square" style="font-size:0.68rem; opacity:0.6;"></i></a>
+          </li>
+          <li class="menu-item" data-tab="copilote" onclick="navigate('copilote')">
+            <a class="menu-link"><i class="fas fa-wand-magic-sparkles"></i> <span>${t('copilote')}</span></a>
+          </li>
+
+          <!-- 3. PÔLE MÉDICAL & SOINS -->
           <div class="sidebar-section-header">
             <i class="fas fa-stethoscope"></i> <span>Médical & Soins</span>
           </div>
