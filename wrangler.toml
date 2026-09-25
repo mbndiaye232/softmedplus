@@ -26,3 +26,12 @@ run_worker_first = ["/api/*"]
 # Adresse du backend Render, a ajuster apres sa creation. Elle peut aussi etre
 # modifiee dans le tableau de bord du Worker, sans redeploiement.
 BACKEND_URL = "https://softmedplus-backend.onrender.com"
+
+# Previsualisations de branche : Wrangler exige ce bloc et avertit de ne pas y
+# laisser les ressources de production. Il n'existe ni backend ni base de
+# prevalidation, et une previsualisation publique branchee sur la base reelle
+# exposerait les dossiers patients. On la laisse donc sans backend joignable :
+# l'interface se charge, aucun appel d'API n'aboutit, aucune donnee reelle
+# n'est atteignable. .invalid est reserve a cet usage par la RFC 2606.
+[previews.vars]
+BACKEND_URL = "https://aucun-backend.invalid"
