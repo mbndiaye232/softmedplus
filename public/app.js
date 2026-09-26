@@ -15441,10 +15441,26 @@ async function patientPortalRequest(path, options = {}) {
   return data;
 }
 
+// En-tete du portail patient : le patient arrivait sur une page sans aucune
+// identification, ni de l'application ni de sa clinique. Reprend la marque de
+// la barre laterale de l'application.
+function enTetePortail() {
+  return `
+    <div style="background:#0f2a44; padding:14px 20px; display:flex; align-items:center; justify-content:center; gap:10px;">
+      <img src="/logo_softmed.png" alt="SoftMed" style="height:38px; width:38px; border-radius:50%; object-fit:cover; background:#ffffff; padding:2px; box-shadow:0 2px 6px rgba(0,0,0,0.25);" />
+      <div style="display:flex; flex-direction:column; line-height:1.15;">
+        <span style="font-weight:800; font-size:1.25rem; color:#ffffff; letter-spacing:0.5px;">Soft<span style="color:#38bdf8;">Med</span></span>
+        <span style="font-size:0.62rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.8px; font-weight:600;">Gestion Médicale</span>
+      </div>
+    </div>
+  `;
+}
+
 function patientPortalCard(innerHtml) {
   const root = document.getElementById('app-root');
   root.innerHTML = `
-    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:30px 15px; display:flex; justify-content:center; align-items:center;">
+    ${enTetePortail()}
+    <div style="min-height:calc(100vh - 67px); background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:30px 15px; display:flex; justify-content:center; align-items:center;">
       <div class="card" style="max-width:440px; width:100%; border-radius:20px; padding:30px; box-shadow:0 15px 35px rgba(15,23,42,0.08);">
         ${innerHtml}
       </div>
@@ -15741,7 +15757,8 @@ async function renderPatientDossierView() {
   const fmtDateTime = (d) => d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
   root.innerHTML = `
-    <div style="min-height:100vh; background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:24px 15px;">
+    ${enTetePortail()}
+    <div style="min-height:calc(100vh - 67px); background:linear-gradient(180deg, #edf5fd 0%, #e2e8f0 100%); padding:24px 15px;">
       <div style="max-width:760px; margin:0 auto;">
         <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
           <div>
