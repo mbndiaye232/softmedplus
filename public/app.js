@@ -15736,6 +15736,18 @@ async function togglePatientTwoFactor(enable) {
   }
 }
 
+// Le patient peut entrer en salle une heure avant l'horaire et jusqu'a deux
+// heures apres : avant, le bouton n'aurait pas de sens ; apres, la salle d'une
+// consultation passee ne doit plus etre proposee. Un rendez-vous annule ou
+// deja termine n'ouvre aucune salle.
+function salleRejoignable(a) {
+  if (a.consultation_mode !== 'TELECONSULTATION' || !a.video_room_slug) return false;
+  if (a.status === 'CANCELED' || a.status === 'COMPLETED') return false;
+  const debut = new Date(a.start_time).getTime();
+  const maintenant = Date.now();
+  return maintenant >= debut - 60 * 60 * 1000 && maintenant <= debut + 2 * 60 * 60 * 1000;
+}
+
 async function renderPatientDossierView() {
   const root = document.getElementById('app-root');
   root.innerHTML = `
@@ -15796,9 +15808,22 @@ async function renderPatientDossierView() {
                 <strong style="color:#0f172a; font-size:0.9rem;">${fmtDateTime(a.start_time)}</strong>
                 <div style="font-size:0.8rem; color:#64748b;">${escapeHtml(a.service_name || 'Consultation')} • ${escapeHtml(a.doc_title || 'Dr.')} ${escapeHtml(a.doc_first || '')} ${escapeHtml(a.doc_last || '')}${a.consultation_mode === 'TELECONSULTATION' ? ' • 🎥 Téléconsultation' : ''}</div>
               </div>
-              <span class="status-badge ${escapeHtml((a.status || '').toLowerCase())}" style="font-size:0.7rem;">${escapeHtml(a.status)}</span>
+              <div style="display:flex; align-items:center; gap:10px;">
+                ${salleRejoignable(a) ? `
+                  <button class="btn btn-primary btn-sm" style="font-size:0.78rem; background:#0ea5e9; border-color:#0ea5e9;"
+                          onclick="joinTeleconsultation(${safeJsArg(a.video_room_slug)})">
+                    <i class="fas fa-video"></i> Rejoindre
+                  </button>
+                ` : ''}
+                <span class="status-badge ${escapeHtml((a.status || '').toLowerCase())}" style="font-size:0.7rem;">${escapeHtml(a.status)}</span>
+              </div>
             </div>
           `).join('')}
+          ${appointments.some(salleRejoignable) ? `
+            <div style="font-size:0.78rem; color:#64748b; margin-top:12px;">
+              <i class="fas fa-circle-info"></i> Le bouton « Rejoindre » apparaît une heure avant la consultation. Aucun logiciel à installer.
+            </div>
+          ` : ''}
         </div>
 
         <div class="card" style="border-radius:16px; padding:20px 24px; margin-bottom:16px;">

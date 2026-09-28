@@ -510,7 +510,10 @@ const getMyDossier = async (req, res) => {
     }
 
     const appointmentsRes = await client.query(
-      `SELECT a.id, a.status, a.consultation_mode,
+      // video_room_slug est renvoye au patient : c'est SA consultation, et sans
+      // cet identifiant il n'a aucun moyen d'entrer en salle par lui-meme. La
+      // requete reste filtree sur son patient_id, issu du jeton signe.
+      `SELECT a.id, a.status, a.consultation_mode, a.video_room_slug,
               lower(a.time_slot) AS start_time, upper(a.time_slot) AS end_time,
               ms.name AS service_name,
               pr.first_name AS doc_first, pr.last_name AS doc_last, pr.title AS doc_title
